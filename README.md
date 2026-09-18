@@ -54,11 +54,12 @@ python scripts/simulate_device.py
 
 ```bash
 pip install -r requirements-dev.txt
-python -m pytest
+python -m pytest --cov=broker --cov-report=term-missing
 ```
 
 External calls (Spotify, TfL) are mocked in tests — nothing hits the network.
-`.github/workflows/tests.yml` runs this on every push/PR to `main`.
+`.github/workflows/tests.yml` runs this (plus an XML coverage report, uploaded
+to GitHub's native code coverage feature) on every push/PR to `main`.
 
 ## Deploying
 
