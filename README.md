@@ -76,22 +76,28 @@ Tagging a release (`git tag v0.1.0 && git push --tags`) triggers
 `.github/workflows/release.yml`, which builds this into a Docker image and
 pushes it to `ghcr.io/nvorkinn/auth-broker:<tag>` (and `:latest`).
 
-On the Oracle Cloud instance:
+On the Oracle Cloud instance, copy `docker-compose.yml` into
+`/opt/auth-broker/` next to the `.env` file and `data/` directory, then:
 
 ```bash
-docker run -d --name auth-broker --restart unless-stopped \
-  -p 127.0.0.1:5000:5000 \
-  -v /opt/auth-broker/data:/app/data \
-  --env-file /opt/auth-broker/.env \
-  ghcr.io/nvorkinn/auth-broker:latest
+cd /opt/auth-broker
+docker compose up -d                              # deploy/upgrade to :latest
+AUTH_BROKER_VERSION=v1.2.0 docker compose up -d   # ...or pin a specific tag
 ```
 
-The `-v` mount is what makes device/token data (SQLite at `data/broker.db`,
+`up -d` always pulls the image first and recreates the container only if the
+image or config changed, so the same command handles first deploy, upgrades,
+and picking up `.env` changes. To pin a version permanently, add
+`AUTH_BROKER_VERSION=v1.2.0` to that `.env` (compose reads it from there too).
+If a container was previously started by hand with `docker run`, remove it
+once (`docker rm -f auth-broker`) before the first `docker compose up`.
+
+The `./data` volume mount is what makes device/token data (SQLite at `data/broker.db`,
 override with `BROKER_DB_PATH`) survive a container restart or image update —
 back that directory up. [Caddy](https://caddyserver.com/) still runs directly
 on the host for TLS — see the included `Caddyfile` — reverse-proxying
-`auth.nikolaivorkinn.com` to `127.0.0.1:5000`, which Docker's `-p` mapping
-above publishes to, so no Caddy config changes needed when moving to a new
+`auth.nikolaivorkinn.com` to `127.0.0.1:5000`, which the compose
+file's `ports` mapping publishes to, so no Caddy config changes needed when moving to a new
 image tag.
 
 ## Not built yet
