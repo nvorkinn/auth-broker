@@ -1,0 +1,247 @@
+{% extends "base.html" %}
+
+{% block title %}Display Settings{% endblock %}
+{% block heading %}Display Settings{% endblock %}
+
+{% block content %}
+<!-- Spotify -->
+<div class="card">
+    <div class="card-header">
+        <h2 class="card-title">Spotify</h2>
+        <p class="card-subtitle">Show what's currently playing on the display.</p>
+    </div>
+    <div class="status-row">
+        {% if spotify_linked %}
+            <span class="status-pill status-linked">Connected</span>
+            <form method="POST" action="{{ url_for('web.spotify_disconnect') }}" style="margin:0;">
+                <button type="submit" class="btn-action btn-delete">Disconnect</button>
+            </form>
+        {% else %}
+            <span class="status-pill status-unlinked">Not connected</span>
+            <a href="{{ url_for('spotify.login') }}" class="btn-action" style="text-decoration:none;">Connect Spotify</a>
+        {% endif %}
+    </div>
+</div>
+
+<!-- Search & Add Stops -->
+<div class="card">
+    <div class="card-header">
+        <h2 class="card-title">Search & Add TfL Stops</h2>
+        <p class="card-subtitle">Search for Tube stations, interchange hubs, or Bus stops (e.g. "Kennington", "Kings Cross", "Elephant")</p>
+    </div>
+    <div class="search-container">
+        <input type="text" id="searchInput" class="search-input" placeholder="Type a station, street, or stop name..." autocomplete="off">
+        <span id="searchSpinner" class="search-spinner">Searching TfL...</span>
+        <div id="searchResults" class="search-results"></div>
+    </div>
+</div>
+
+<form method="POST">
+    <!-- Ordered Stops List -->
+    <div class="card">
+        <div class="card-header">
+            <h2 class="card-title">Configured Arrival Stops</h2>
+            <p class="card-subtitle">The display shows 2 stops at a time and cycles through this list on each refresh cycle.</p>
+        </div>
+
+        <input type="hidden" name="stops_order" id="stopsOrderInput" value="{{ stops | map(attribute='id') | join(',') }}">
+
+        <div id="stopsList" class="stops-list">
+            {% if stops %}
+                {% for stop in stops %}
+                    <div class="stop-card" data-id="{{ stop.id }}">
+                        <div class="stop-order">
+                            <span class="order-badge">{{ loop.index }}</span>
+                            <div class="mode-icon {% if stop.mode == 'tube' %}mode-tube{% else %}mode-bus{% endif %}">
+                                {% if stop.mode == 'tube' %}🚇{% else %}{{ stop.letter or '🚌' }}{% endif %}
+                            </div>
+                            <div class="item-text">
+                                <h4>{{ stop.name }}</h4>
+                                <p>
+                                    NaPTAN: <code>{{ stop.id }}</code>
+                                    {% if stop.lines %} • {{ stop.lines | join(', ') }}{% endif %}
+                                    <span class="page-badge">Page {{ ((loop.index0 // 2) + 1) }}</span>
+                                </p>
+                            </div>
+                        </div>
+                        <div class="stop-actions">
+                            <button type="button" class="btn-action btn-move-up" title="Move Up">▲</button>
+                            <button type="button" class="btn-action btn-move-down" title="Move Down">▼</button>
+                            <button type="button" class="btn-action btn-delete" title="Remove">✕</button>
+                        </div>
+                    </div>
+                {% endfor %}
+            {% else %}
+                <div class="empty-stops">No stops configured. Search and add stops above to begin.</div>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- General Display Settings -->
+    <div class="card">
+        <div class="card-header">
+            <h2 class="card-title">General Display Settings</h2>
+            <p class="card-subtitle">Adjust refresh rates and peripheral panels.</p>
+        </div>
+        <div class="form-grid">
+            <div class="form-group">
+                <label for="interval">Refresh Interval (Seconds)</label>
+                <input type="number" id="interval" name="interval" value="{{ config.interval }}" min="5" max="300" required>
+            </div>
+
+            <div class="form-group">
+                <label for="weather_location">Weather Location</label>
+                <input type="text" id="weather_location" name="weather_location" value="{{ config.weather_location }}">
+            </div>
+
+            <div class="form-group checkbox-group">
+                <input type="checkbox" id="spotify_enabled" name="spotify_enabled" {% if config.spotify_enabled %}checked{% endif %}>
+                <label for="spotify_enabled" style="margin: 0; cursor: pointer;">Enable Spotify Now Playing Panel</label>
+            </div>
+        </div>
+
+        <button type="submit" class="btn-save">Save & Apply Settings</button>
+    </div>
+</form>
+
+<script>
+    const searchInput = document.getElementById('searchInput');
+    const searchSpinner = document.getElementById('searchSpinner');
+    const searchResults = document.getElementById('searchResults');
+    const stopsList = document.getElementById('stopsList');
+    const stopsOrderInput = document.getElementById('stopsOrderInput');
+
+    let debounceTimeout = null;
+
+    searchInput.addEventListener('input', () => {
+        clearTimeout(debounceTimeout);
+        const query = searchInput.value.trim();
+        if (query.length < 2) {
+            searchResults.style.display = 'none';
+            searchResults.innerHTML = '';
+            return;
+        }
+
+        searchSpinner.style.display = 'block';
+        debounceTimeout = setTimeout(() => {
+            fetch(`/api/tfl/search?q=${encodeURIComponent(query)}`)
+                .then(r => r.json())
+                .then(data => {
+                    searchSpinner.style.display = 'none';
+                    renderSearchResults(data);
+                })
+                .catch(err => {
+                    searchSpinner.style.display = 'none';
+                    console.error('Search error:', err);
+                });
+        }, 300);
+    });
+
+    function renderSearchResults(items) {
+        if (!items || items.length === 0) {
+            searchResults.innerHTML = '<div style="padding: 12px 16px; color: #64748b; font-size: 13px;">No matching stops found.</div>';
+            searchResults.style.display = 'block';
+            return;
+        }
+
+        searchResults.innerHTML = items.map(item => `
+            <div class="search-item">
+                <div class="item-info">
+                    <div class="mode-icon ${item.mode === 'tube' ? 'mode-tube' : 'mode-bus'}">
+                        ${item.mode === 'tube' ? '🚇' : (item.letter || '🚌')}
+                    </div>
+                    <div class="item-text">
+                        <h4>${item.name}</h4>
+                        <p>${item.subtitle} • <code>${item.id}</code></p>
+                    </div>
+                </div>
+                <button type="button" class="btn-add" onclick='addStop(${JSON.stringify(item)})'>+ Add</button>
+            </div>
+        `).join('');
+        searchResults.style.display = 'block';
+    }
+
+    function updateOrderBadges() {
+        const cards = stopsList.querySelectorAll('.stop-card');
+        const ids = [];
+        cards.forEach((card, idx) => {
+            card.querySelector('.order-badge').textContent = idx + 1;
+            const pageNum = Math.floor(idx / 2) + 1;
+            const badge = card.querySelector('.page-badge');
+            if (badge) badge.textContent = `Page ${pageNum}`;
+            ids.push(card.dataset.id);
+        });
+        stopsOrderInput.value = ids.join(',');
+
+        const emptyNotice = stopsList.querySelector('.empty-stops');
+        if (cards.length === 0 && !emptyNotice) {
+            stopsList.innerHTML = '<div class="empty-stops">No stops configured. Search and add stops above to begin.</div>';
+        } else if (cards.length > 0 && emptyNotice) {
+            emptyNotice.remove();
+        }
+    }
+
+    window.addStop = function(stop) {
+        const currentIds = stopsOrderInput.value ? stopsOrderInput.value.split(',') : [];
+        if (currentIds.includes(stop.id)) {
+            alert('This stop is already in your display list.');
+            return;
+        }
+
+        const emptyNotice = stopsList.querySelector('.empty-stops');
+        if (emptyNotice) emptyNotice.remove();
+
+        const card = document.createElement('div');
+        card.className = 'stop-card';
+        card.dataset.id = stop.id;
+        card.innerHTML = `
+            <div class="stop-order">
+                <span class="order-badge">1</span>
+                <div class="mode-icon ${stop.mode === 'tube' ? 'mode-tube' : 'mode-bus'}">
+                    ${stop.mode === 'tube' ? '🚇' : (stop.letter || '🚌')}
+                </div>
+                <div class="item-text">
+                    <h4>${stop.name}</h4>
+                    <p>NaPTAN: <code>${stop.id}</code> • ${stop.lines.join(', ')} <span class="page-badge"></span></p>
+                </div>
+            </div>
+            <div class="stop-actions">
+                <button type="button" class="btn-action btn-move-up" title="Move Up">▲</button>
+                <button type="button" class="btn-action btn-move-down" title="Move Down">▼</button>
+                <button type="button" class="btn-action btn-delete" title="Remove">✕</button>
+            </div>
+        `;
+        stopsList.appendChild(card);
+        attachCardEvents(card);
+        updateOrderBadges();
+
+        searchInput.value = '';
+        searchResults.style.display = 'none';
+    };
+
+    function attachCardEvents(card) {
+        card.querySelector('.btn-move-up').addEventListener('click', () => {
+            const prev = card.previousElementSibling;
+            if (prev && prev.classList.contains('stop-card')) {
+                stopsList.insertBefore(card, prev);
+                updateOrderBadges();
+            }
+        });
+
+        card.querySelector('.btn-move-down').addEventListener('click', () => {
+            const next = card.nextElementSibling;
+            if (next && next.classList.contains('stop-card')) {
+                stopsList.insertBefore(next, card);
+                updateOrderBadges();
+            }
+        });
+
+        card.querySelector('.btn-delete').addEventListener('click', () => {
+            card.remove();
+            updateOrderBadges();
+        });
+    }
+
+    stopsList.querySelectorAll('.stop-card').forEach(attachCardEvents);
+</script>
+{% endblock %}

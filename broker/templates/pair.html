@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+
+{% block title %}Connect your device{% endblock %}
+{% block heading %}Connect your device{% endblock %}
+
+{% block content %}
+<div class="card">
+    <div class="card-header">
+        <h2 class="card-title">Enter your pairing code</h2>
+        <p class="card-subtitle">Your device is showing a 6-character code on its screen. Enter it below to link this browser to it.</p>
+    </div>
+
+    {% if error %}
+        <div class="error-banner">{{ error }}</div>
+    {% endif %}
+
+    <form method="POST">
+        <input type="text" name="code" class="pairing-input" maxlength="6" autocomplete="off"
+               autocapitalize="characters" placeholder="ABC123" required autofocus>
+        <button type="submit" class="btn-save">Connect</button>
+    </form>
+</div>
+{% endblock %}
