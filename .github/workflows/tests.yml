@@ -21,3 +21,10 @@ jobs:
 
       - name: Run tests
         run: python -m pytest -v --cov=broker --cov-report=term-missing --cov-report=markdown
+
+      - name: Add Coverage PR Comment
+        uses: marocchino/sticky-pull-request-comment@v2
+        if: github.event_name == 'pull_request'
+        with:
+          recreate: true
+          path: coverage.md
