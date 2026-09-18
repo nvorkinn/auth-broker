@@ -78,7 +78,16 @@ def test_get_config_returns_defaults_and_shared_keys(client, register_device):
         "weather": {"api_key": "test-weather-key", "location": ""},
         "tfl": {"app_key": "test-tfl-key", "stop_ids": []},
         "spotify": {"enabled": False},
+        "glowmarkt": {"username": None, "password": None},
     }
+
+
+def test_get_config_returns_decrypted_glowmarkt_credentials(paired_client):
+    client, device_id, secret = paired_client
+    client.post("/device", data={"glowmarkt_username": "someone@example.com", "glowmarkt_password": "hunter2"})
+
+    response = client.get(f"/api/devices/{device_id}/config", headers={"Authorization": f"Bearer {secret}"})
+    assert response.get_json()["glowmarkt"] == {"username": "someone@example.com", "password": "hunter2"}
 
 
 def test_now_playing_returns_null_when_spotify_disabled(client, register_device):

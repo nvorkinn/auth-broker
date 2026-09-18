@@ -31,6 +31,12 @@ CREATE TABLE IF NOT EXISTS spotify_tokens (
     access_token TEXT,
     expires_at TEXT
 );
+
+CREATE TABLE IF NOT EXISTS glowmarkt_credentials (
+    device_id TEXT PRIMARY KEY REFERENCES devices(device_id),
+    username TEXT NOT NULL DEFAULT '',
+    password_encrypted TEXT
+);
 """
 
 

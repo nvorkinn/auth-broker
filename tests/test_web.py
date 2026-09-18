@@ -148,6 +148,45 @@ def test_disconnect_requires_pairing(client):
     assert response.headers["Location"] == "/pair"
 
 
+def test_device_config_post_stores_encrypted_glowmarkt_password(app, paired_client):
+    client, device_id, _ = paired_client
+    response = client.post(
+        "/device",
+        data={"interval": "15", "glowmarkt_username": "someone@example.com", "glowmarkt_password": "hunter2"},
+    )
+    assert response.status_code == 302
+
+    with app.app_context():
+        row = get_db().execute(
+            "SELECT username, password_encrypted FROM glowmarkt_credentials WHERE device_id = ?", (device_id,)
+        ).fetchone()
+        assert row["username"] == "someone@example.com"
+        assert row["password_encrypted"] not in (None, "hunter2")
+
+
+def test_device_config_get_never_shows_saved_password(paired_client):
+    client, device_id, _ = paired_client
+    client.post("/device", data={"interval": "15", "glowmarkt_username": "someone@example.com", "glowmarkt_password": "hunter2"})
+
+    response = client.get("/device")
+    assert b"hunter2" not in response.data
+    assert b"someone@example.com" in response.data
+    assert b"Saved" in response.data
+
+
+def test_device_config_post_blank_password_keeps_existing_one(app, paired_client):
+    client, device_id, _ = paired_client
+    client.post("/device", data={"interval": "15", "glowmarkt_username": "someone@example.com", "glowmarkt_password": "hunter2"})
+    client.post("/device", data={"interval": "15", "glowmarkt_username": "someone-else@example.com"})
+
+    with app.app_context():
+        row = get_db().execute(
+            "SELECT username, password_encrypted FROM glowmarkt_credentials WHERE device_id = ?", (device_id,)
+        ).fetchone()
+        assert row["username"] == "someone-else@example.com"
+        assert row["password_encrypted"] is not None
+
+
 def test_search_stops_empty_query_returns_empty_list(client):
     response = client.get("/api/tfl/search?q=a")
     assert response.status_code == 200

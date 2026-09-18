@@ -8,6 +8,7 @@ from werkzeug.security import generate_password_hash
 
 from . import spotify as spotify_module
 from .auth import require_device_auth
+from .crypto import decrypt
 from .db import get_db
 
 bp = Blueprint("devices_api", __name__, url_prefix="/api/devices")
@@ -61,15 +62,27 @@ def get_config(device_id):
     """Polled by the Pi. Bundles the device's own settings together with the
     shared app-level API keys, so a key rotation doesn't require re-flashing
     every gifted device."""
-    row = get_db().execute("SELECT * FROM device_config WHERE device_id = ?", (device_id,)).fetchone()
+    db = get_db()
+    row = db.execute("SELECT * FROM device_config WHERE device_id = ?", (device_id,)).fetchone()
     if row is None:
         return jsonify(error="not found"), 404
+
+    glowmarkt_row = db.execute(
+        "SELECT username, password_encrypted FROM glowmarkt_credentials WHERE device_id = ?", (device_id,)
+    ).fetchone()
+    glowmarkt = {
+        "username": glowmarkt_row["username"] if glowmarkt_row and glowmarkt_row["username"] else None,
+        "password": decrypt(glowmarkt_row["password_encrypted"])
+        if glowmarkt_row and glowmarkt_row["password_encrypted"]
+        else None,
+    }
 
     return jsonify(
         interval=row["interval"],
         weather={"api_key": current_app.config["WEATHER_API_KEY"], "location": row["weather_location"]},
         tfl={"app_key": current_app.config["TFL_APP_KEY"], "stop_ids": json.loads(row["tfl_stop_ids"])},
         spotify={"enabled": bool(row["spotify_enabled"])},
+        glowmarkt=glowmarkt,
     )
 
 

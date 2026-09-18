@@ -6,6 +6,7 @@ import requests
 from flask import Blueprint, current_app, jsonify, redirect, render_template, request, session, url_for
 
 from .auth import require_paired_session
+from .crypto import encrypt
 from .db import get_db
 
 bp = Blueprint("web", __name__)
@@ -65,6 +66,20 @@ def device_config():
             """,
             (interval, weather_location, int(spotify_enabled), json.dumps(stop_ids), device_id),
         )
+
+        glowmarkt_username = request.form.get("glowmarkt_username", "").strip()
+        glowmarkt_password = request.form.get("glowmarkt_password", "")
+        db.execute(
+            """
+            INSERT INTO glowmarkt_credentials (device_id, username, password_encrypted)
+            VALUES (?, ?, ?)
+            ON CONFLICT(device_id) DO UPDATE SET
+                username = excluded.username,
+                password_encrypted = COALESCE(excluded.password_encrypted, glowmarkt_credentials.password_encrypted)
+            """,
+            (device_id, glowmarkt_username, encrypt(glowmarkt_password) if glowmarkt_password else None),
+        )
+
         db.commit()
         return redirect(url_for("web.device_config"))
 
@@ -82,8 +97,21 @@ def device_config():
         db.execute("SELECT 1 FROM spotify_tokens WHERE device_id = ?", (device_id,)).fetchone() is not None
     )
 
+    glowmarkt_row = db.execute(
+        "SELECT username, password_encrypted FROM glowmarkt_credentials WHERE device_id = ?", (device_id,)
+    ).fetchone()
+    glowmarkt = {
+        "username": glowmarkt_row["username"] if glowmarkt_row else "",
+        "has_password": bool(glowmarkt_row and glowmarkt_row["password_encrypted"]),
+    }
+
     return render_template(
-        "device.html", device_id=device_id, config=config, stops=resolved_stops, spotify_linked=spotify_linked
+        "device.html",
+        device_id=device_id,
+        config=config,
+        stops=resolved_stops,
+        spotify_linked=spotify_linked,
+        glowmarkt=glowmarkt,
     )
 
 
