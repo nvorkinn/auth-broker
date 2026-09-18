@@ -16,6 +16,7 @@ def create_app() -> Flask:
     app.config["SPOTIFY_REDIRECT_URI"] = os.environ["SPOTIFY_REDIRECT_URI"]
     app.config["TFL_APP_KEY"] = os.environ.get("TFL_APP_KEY", "")
     app.config["WEATHER_API_KEY"] = os.environ.get("WEATHER_API_KEY", "")
+    app.config["CREDENTIAL_ENCRYPTION_KEY"] = os.environ["CREDENTIAL_ENCRYPTION_KEY"]
 
     db_module.init_app(app)
 

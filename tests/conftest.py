@@ -13,6 +13,10 @@ def app(tmp_path, monkeypatch):
     monkeypatch.setenv("WEATHER_API_KEY", "test-weather-key")
     monkeypatch.setenv("BROKER_DB_PATH", str(tmp_path / "broker.db"))
 
+    from cryptography.fernet import Fernet
+
+    monkeypatch.setenv("CREDENTIAL_ENCRYPTION_KEY", Fernet.generate_key().decode())
+
     from broker import create_app
 
     application = create_app()

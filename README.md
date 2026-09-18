@@ -93,6 +93,6 @@ image tag.
   `spotipy` calls, and the local Flask config page, for calls to this
   service's device-facing API. Left for a follow-up so this could be stood
   up and tested on its own first.
-- Any provider tokens beyond Spotify (e.g. a future per-user token would
-  follow the same shape: its own blueprint, its own table, proxied the same
-  way through the device-facing API).
+- Any provider tokens beyond Spotify and Glowmarkt (a future per-user token
+  would follow the same shape: its own table, proxied the same way through
+  the device-facing API).
