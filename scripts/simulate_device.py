@@ -4,6 +4,7 @@ without real hardware.
 
 Usage: python scripts/simulate_device.py [base_url]
 """
+
 import secrets
 import sys
 

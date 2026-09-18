@@ -57,6 +57,13 @@ pip install -r requirements-dev.txt
 python -m pytest --cov=broker --cov-report=term-missing
 ```
 
+Lint and format checks (config in `ruff.toml`, also run in CI):
+
+```bash
+ruff check .          # add --fix to auto-fix
+ruff format .         # use --check to verify without changing files
+```
+
 External calls (Spotify, TfL) are mocked in tests — nothing hits the network.
 `.github/workflows/tests.yml` runs this on every push/PR to `main`. (GitHub's
 native code-coverage-on-PRs feature would be nicer than a log to scroll

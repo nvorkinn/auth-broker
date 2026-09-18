@@ -1,6 +1,6 @@
 import secrets
 import urllib.parse
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import requests
 from flask import Blueprint, current_app, redirect, request, session, url_for
@@ -59,7 +59,7 @@ def callback():
 
 
 def _store_tokens(device_id: str, payload: dict) -> None:
-    expires_at = datetime.now(timezone.utc).timestamp() + payload["expires_in"]
+    expires_at = datetime.now(UTC).timestamp() + payload["expires_in"]
     refresh_token = payload.get("refresh_token") or _existing_refresh_token(device_id)
 
     db = get_db()
@@ -78,9 +78,7 @@ def _store_tokens(device_id: str, payload: dict) -> None:
 
 
 def _existing_refresh_token(device_id: str) -> str | None:
-    row = get_db().execute(
-        "SELECT refresh_token FROM spotify_tokens WHERE device_id = ?", (device_id,)
-    ).fetchone()
+    row = get_db().execute("SELECT refresh_token FROM spotify_tokens WHERE device_id = ?", (device_id,)).fetchone()
     return row["refresh_token"] if row else None
 
 
@@ -106,7 +104,7 @@ def get_current_track(device_id: str) -> dict[str, object] | None:
         return None
 
     access_token = row["access_token"]
-    if row["expires_at"] is None or float(row["expires_at"]) - 30 < datetime.now(timezone.utc).timestamp():
+    if row["expires_at"] is None or float(row["expires_at"]) - 30 < datetime.now(UTC).timestamp():
         access_token = _refresh_access_token(device_id, row["refresh_token"])
 
     response = requests.get(

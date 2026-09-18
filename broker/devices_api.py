@@ -1,7 +1,7 @@
 import json
 import secrets
 import string
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from flask import Blueprint, current_app, jsonify, request
 from werkzeug.security import generate_password_hash
@@ -32,7 +32,7 @@ def register():
     db = get_db()
     db.execute(
         "INSERT INTO devices (device_id, device_secret_hash, created_at) VALUES (?, ?, ?)",
-        (device_id, generate_password_hash(device_secret), datetime.now(timezone.utc).isoformat()),
+        (device_id, generate_password_hash(device_secret), datetime.now(UTC).isoformat()),
     )
     db.execute("INSERT INTO device_config (device_id) VALUES (?)", (device_id,))
     db.commit()
@@ -44,7 +44,7 @@ def register():
 def create_pairing_code(device_id):
     """Called by the Pi whenever it wants to show a fresh pairing code on screen."""
     code = "".join(secrets.choice(PAIRING_CODE_ALPHABET) for _ in range(PAIRING_CODE_LENGTH))
-    expires_at = datetime.now(timezone.utc) + PAIRING_CODE_TTL
+    expires_at = datetime.now(UTC) + PAIRING_CODE_TTL
 
     db = get_db()
     db.execute("DELETE FROM pairing_codes WHERE device_id = ?", (device_id,))
@@ -91,9 +91,7 @@ def get_config(device_id):
 def now_playing(device_id):
     """Polled by the Pi in place of talking to Spotify directly - this device
     never sees a Spotify token, only its own device secret."""
-    row = get_db().execute(
-        "SELECT spotify_enabled FROM device_config WHERE device_id = ?", (device_id,)
-    ).fetchone()
+    row = get_db().execute("SELECT spotify_enabled FROM device_config WHERE device_id = ?", (device_id,)).fetchone()
     if row is None:
         return jsonify(error="not found"), 404
     if not row["spotify_enabled"]:

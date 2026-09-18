@@ -21,6 +21,7 @@ def create_app() -> Flask:
     db_module.init_app(app)
 
     from . import devices_api, spotify, web
+
     app.register_blueprint(devices_api.bp)
     app.register_blueprint(spotify.bp)
     app.register_blueprint(web.bp)

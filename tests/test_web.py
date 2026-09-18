@@ -85,9 +85,7 @@ def test_device_config_post_persists_settings(app, paired_client):
     assert response.status_code == 302
 
     with app.app_context():
-        row = get_db().execute(
-            "SELECT * FROM device_config WHERE device_id = ?", (device_id,)
-        ).fetchone()
+        row = get_db().execute("SELECT * FROM device_config WHERE device_id = ?", (device_id,)).fetchone()
         assert row["interval"] == 20
         assert row["weather_location"] == "London"
         assert row["spotify_enabled"] == 1
@@ -99,9 +97,7 @@ def test_device_config_post_falls_back_to_default_interval_for_garbage_input(app
     client.post("/device", data={"interval": "not-a-number"})
 
     with app.app_context():
-        row = get_db().execute(
-            "SELECT interval FROM device_config WHERE device_id = ?", (device_id,)
-        ).fetchone()
+        row = get_db().execute("SELECT interval FROM device_config WHERE device_id = ?", (device_id,)).fetchone()
         assert row["interval"] == 15
 
 
@@ -127,18 +123,14 @@ def test_disconnect_removes_stored_token(app, paired_client):
     client, device_id, _ = paired_client
     with app.app_context():
         db = get_db()
-        db.execute(
-            "INSERT INTO spotify_tokens (device_id, refresh_token) VALUES (?, ?)", (device_id, "refresh")
-        )
+        db.execute("INSERT INTO spotify_tokens (device_id, refresh_token) VALUES (?, ?)", (device_id, "refresh"))
         db.commit()
 
     response = client.post("/device/spotify/disconnect")
     assert response.status_code == 302
 
     with app.app_context():
-        row = get_db().execute(
-            "SELECT 1 FROM spotify_tokens WHERE device_id = ?", (device_id,)
-        ).fetchone()
+        row = get_db().execute("SELECT 1 FROM spotify_tokens WHERE device_id = ?", (device_id,)).fetchone()
         assert row is None
 
 
@@ -157,16 +149,20 @@ def test_device_config_post_stores_encrypted_glowmarkt_password(app, paired_clie
     assert response.status_code == 302
 
     with app.app_context():
-        row = get_db().execute(
-            "SELECT username, password_encrypted FROM glowmarkt_credentials WHERE device_id = ?", (device_id,)
-        ).fetchone()
+        row = (
+            get_db()
+            .execute("SELECT username, password_encrypted FROM glowmarkt_credentials WHERE device_id = ?", (device_id,))
+            .fetchone()
+        )
         assert row["username"] == "someone@example.com"
         assert row["password_encrypted"] not in (None, "hunter2")
 
 
 def test_device_config_get_never_shows_saved_password(paired_client):
     client, device_id, _ = paired_client
-    client.post("/device", data={"interval": "15", "glowmarkt_username": "someone@example.com", "glowmarkt_password": "hunter2"})
+    client.post(
+        "/device", data={"interval": "15", "glowmarkt_username": "someone@example.com", "glowmarkt_password": "hunter2"}
+    )
 
     response = client.get("/device")
     assert b"hunter2" not in response.data
@@ -176,13 +172,17 @@ def test_device_config_get_never_shows_saved_password(paired_client):
 
 def test_device_config_post_blank_password_keeps_existing_one(app, paired_client):
     client, device_id, _ = paired_client
-    client.post("/device", data={"interval": "15", "glowmarkt_username": "someone@example.com", "glowmarkt_password": "hunter2"})
+    client.post(
+        "/device", data={"interval": "15", "glowmarkt_username": "someone@example.com", "glowmarkt_password": "hunter2"}
+    )
     client.post("/device", data={"interval": "15", "glowmarkt_username": "someone-else@example.com"})
 
     with app.app_context():
-        row = get_db().execute(
-            "SELECT username, password_encrypted FROM glowmarkt_credentials WHERE device_id = ?", (device_id,)
-        ).fetchone()
+        row = (
+            get_db()
+            .execute("SELECT username, password_encrypted FROM glowmarkt_credentials WHERE device_id = ?", (device_id,))
+            .fetchone()
+        )
         assert row["username"] == "someone-else@example.com"
         assert row["password_encrypted"] is not None
 

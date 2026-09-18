@@ -17,9 +17,7 @@ def require_device_auth(view):
             return jsonify(error="unauthorized"), 401
 
         secret = auth_header.removeprefix("Bearer ")
-        row = get_db().execute(
-            "SELECT device_secret_hash FROM devices WHERE device_id = ?", (device_id,)
-        ).fetchone()
+        row = get_db().execute("SELECT device_secret_hash FROM devices WHERE device_id = ?", (device_id,)).fetchone()
         if row is None or not check_password_hash(row["device_secret_hash"], secret):
             return jsonify(error="unauthorized"), 401
 
