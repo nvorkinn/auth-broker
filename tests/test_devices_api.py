@@ -1,4 +1,7 @@
+from datetime import UTC, datetime, timedelta
 from unittest.mock import patch
+
+from broker.db import get_db
 
 
 def test_register_creates_device(client):
@@ -73,7 +76,75 @@ def test_get_config_returns_defaults_and_shared_keys(client, register_device):
         "tfl": {"app_key": "test-tfl-key", "stop_ids": []},
         "spotify": {"enabled": False},
         "glowmarkt": {"username": None, "password": None},
+        "pairing_code": None,
     }
+
+
+def _get_pairing_code(client, device_id, secret):
+    response = client.get(f"/api/devices/{device_id}/config", headers={"Authorization": f"Bearer {secret}"})
+    return response.get_json()["pairing_code"]
+
+
+def test_get_config_returns_active_pairing_code(client, register_device):
+    device_id, secret = register_device()
+    code = client.post(
+        f"/api/devices/{device_id}/pairing-code", headers={"Authorization": f"Bearer {secret}"}
+    ).get_json()["code"]
+
+    assert _get_pairing_code(client, device_id, secret) == code
+
+
+def test_get_config_pairing_code_persists_until_paired(client, register_device):
+    device_id, secret = register_device()
+    code = client.post(
+        f"/api/devices/{device_id}/pairing-code", headers={"Authorization": f"Bearer {secret}"}
+    ).get_json()["code"]
+
+    assert _get_pairing_code(client, device_id, secret) == code
+    assert _get_pairing_code(client, device_id, secret) == code
+
+
+def test_get_config_pairing_code_cleared_once_paired(client, register_device):
+    device_id, secret = register_device()
+    code = client.post(
+        f"/api/devices/{device_id}/pairing-code", headers={"Authorization": f"Bearer {secret}"}
+    ).get_json()["code"]
+
+    assert client.post("/pair", data={"code": code}).status_code == 302
+
+    assert _get_pairing_code(client, device_id, secret) is None
+
+
+def test_get_config_pairing_code_omitted_once_expired(app, client, register_device):
+    device_id, secret = register_device()
+    client.post(f"/api/devices/{device_id}/pairing-code", headers={"Authorization": f"Bearer {secret}"})
+
+    with app.app_context():
+        db = get_db()
+        db.execute(
+            "UPDATE pairing_codes SET expires_at = ? WHERE device_id = ?",
+            ((datetime.now(UTC) - timedelta(seconds=1)).isoformat(), device_id),
+        )
+        db.commit()
+
+    assert _get_pairing_code(client, device_id, secret) is None
+
+
+def test_get_config_pairing_code_is_the_latest_one(client, register_device):
+    device_id, secret = register_device()
+    headers = {"Authorization": f"Bearer {secret}"}
+    client.post(f"/api/devices/{device_id}/pairing-code", headers=headers)
+    second = client.post(f"/api/devices/{device_id}/pairing-code", headers=headers).get_json()["code"]
+
+    assert _get_pairing_code(client, device_id, secret) == second
+
+
+def test_get_config_pairing_code_not_leaked_to_other_devices(client, register_device):
+    device_id, secret = register_device()
+    other_id, other_secret = register_device("another-very-long-device-secret")
+    client.post(f"/api/devices/{device_id}/pairing-code", headers={"Authorization": f"Bearer {secret}"})
+
+    assert _get_pairing_code(client, other_id, other_secret) is None
 
 
 def test_get_config_returns_decrypted_glowmarkt_credentials(paired_client):
