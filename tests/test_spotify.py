@@ -60,9 +60,7 @@ def test_callback_exchanges_code_and_stores_tokens(app, paired_client):
     assert response.headers["Location"] == "/device"
 
     with app.app_context():
-        row = get_db().execute(
-            "SELECT * FROM spotify_tokens WHERE device_id = ?", (device_id,)
-        ).fetchone()
+        row = get_db().execute("SELECT * FROM spotify_tokens WHERE device_id = ?", (device_id,)).fetchone()
         assert row["refresh_token"] == "refresh-123"
         assert row["access_token"] == "access-123"
 
@@ -90,7 +88,10 @@ def test_get_current_track_refreshes_expired_token(app, paired_client):
             "item": {
                 "name": "Song",
                 "artists": [{"name": "Artist"}],
-                "album": {"name": "Album", "images": [{"height": 300, "url": "http://big"}, {"height": 64, "url": "http://small"}]},
+                "album": {
+                    "name": "Album",
+                    "images": [{"height": 300, "url": "http://big"}, {"height": 64, "url": "http://small"}],
+                },
             },
         }
 
@@ -100,8 +101,10 @@ def test_get_current_track_refreshes_expired_token(app, paired_client):
             assert kwargs["data"]["refresh_token"] == "old-refresh"
             return _mock_response(refresh_payload)
 
-        with patch("broker.spotify.requests.post", side_effect=fake_post), \
-             patch("broker.spotify.requests.get", return_value=_mock_response(now_playing_payload)):
+        with (
+            patch("broker.spotify.requests.post", side_effect=fake_post),
+            patch("broker.spotify.requests.get", return_value=_mock_response(now_playing_payload)),
+        ):
             track = spotify_module.get_current_track(device_id)
 
         assert track == {

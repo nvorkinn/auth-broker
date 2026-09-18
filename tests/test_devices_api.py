@@ -25,25 +25,19 @@ def test_pairing_code_requires_auth(client, register_device):
 
 def test_pairing_code_rejects_wrong_secret(client, register_device):
     device_id, _ = register_device()
-    response = client.post(
-        f"/api/devices/{device_id}/pairing-code", headers={"Authorization": "Bearer wrong-secret"}
-    )
+    response = client.post(f"/api/devices/{device_id}/pairing-code", headers={"Authorization": "Bearer wrong-secret"})
     assert response.status_code == 401
 
 
 def test_pairing_code_rejects_unknown_device(client, register_device):
     _, secret = register_device()
-    response = client.post(
-        "/api/devices/does-not-exist/pairing-code", headers={"Authorization": f"Bearer {secret}"}
-    )
+    response = client.post("/api/devices/does-not-exist/pairing-code", headers={"Authorization": f"Bearer {secret}"})
     assert response.status_code == 401
 
 
 def test_pairing_code_uses_unambiguous_alphabet(client, register_device):
     device_id, secret = register_device()
-    response = client.post(
-        f"/api/devices/{device_id}/pairing-code", headers={"Authorization": f"Bearer {secret}"}
-    )
+    response = client.post(f"/api/devices/{device_id}/pairing-code", headers={"Authorization": f"Bearer {secret}"})
     assert response.status_code == 200
     body = response.get_json()
     assert len(body["code"]) == 6
@@ -92,9 +86,7 @@ def test_get_config_returns_decrypted_glowmarkt_credentials(paired_client):
 
 def test_now_playing_returns_null_when_spotify_disabled(client, register_device):
     device_id, secret = register_device()
-    response = client.get(
-        f"/api/devices/{device_id}/now-playing", headers={"Authorization": f"Bearer {secret}"}
-    )
+    response = client.get(f"/api/devices/{device_id}/now-playing", headers={"Authorization": f"Bearer {secret}"})
     assert response.status_code == 200
     assert response.get_json() is None
 
@@ -103,9 +95,7 @@ def test_now_playing_returns_null_when_enabled_but_not_linked(paired_client):
     client, device_id, secret = paired_client
     client.post("/device", data={"interval": "15", "spotify_enabled": "on"})
 
-    response = client.get(
-        f"/api/devices/{device_id}/now-playing", headers={"Authorization": f"Bearer {secret}"}
-    )
+    response = client.get(f"/api/devices/{device_id}/now-playing", headers={"Authorization": f"Bearer {secret}"})
     assert response.status_code == 200
     assert response.get_json() is None
 
@@ -114,11 +104,15 @@ def test_now_playing_proxies_spotify_module(paired_client):
     client, device_id, secret = paired_client
     client.post("/device", data={"interval": "15", "spotify_enabled": "on"})
 
-    track = {"song": "A Song", "artist": "An Artist", "album": "An Album", "album_image": "http://x", "is_playing": True}
+    track = {
+        "song": "A Song",
+        "artist": "An Artist",
+        "album": "An Album",
+        "album_image": "http://x",
+        "is_playing": True,
+    }
     with patch("broker.devices_api.spotify_module.get_current_track", return_value=track) as mocked:
-        response = client.get(
-            f"/api/devices/{device_id}/now-playing", headers={"Authorization": f"Bearer {secret}"}
-        )
+        response = client.get(f"/api/devices/{device_id}/now-playing", headers={"Authorization": f"Bearer {secret}"})
 
     mocked.assert_called_once_with(device_id)
     assert response.get_json() == track
@@ -126,7 +120,5 @@ def test_now_playing_proxies_spotify_module(paired_client):
 
 def test_now_playing_unknown_device_rejected(client, register_device):
     _, secret = register_device()
-    response = client.get(
-        "/api/devices/does-not-exist/now-playing", headers={"Authorization": f"Bearer {secret}"}
-    )
+    response = client.get("/api/devices/does-not-exist/now-playing", headers={"Authorization": f"Bearer {secret}"})
     assert response.status_code == 401

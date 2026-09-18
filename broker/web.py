@@ -1,5 +1,5 @@
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 import requests
@@ -26,11 +26,9 @@ def pair():
 
     code = request.form.get("code", "").strip().upper()
     db = get_db()
-    row = db.execute(
-        "SELECT device_id, expires_at FROM pairing_codes WHERE code = ?", (code,)
-    ).fetchone()
+    row = db.execute("SELECT device_id, expires_at FROM pairing_codes WHERE code = ?", (code,)).fetchone()
 
-    if row is None or datetime.fromisoformat(row["expires_at"]) < datetime.now(timezone.utc):
+    if row is None or datetime.fromisoformat(row["expires_at"]) < datetime.now(UTC):
         return render_template("pair.html", error="That code is invalid or has expired.")
 
     db.execute("DELETE FROM pairing_codes WHERE code = ?", (code,))
@@ -93,9 +91,7 @@ def device_config():
         for stop_id in stop_ids
     ]
 
-    spotify_linked = (
-        db.execute("SELECT 1 FROM spotify_tokens WHERE device_id = ?", (device_id,)).fetchone() is not None
-    )
+    spotify_linked = db.execute("SELECT 1 FROM spotify_tokens WHERE device_id = ?", (device_id,)).fetchone() is not None
 
     glowmarkt_row = db.execute(
         "SELECT username, password_encrypted FROM glowmarkt_credentials WHERE device_id = ?", (device_id,)
@@ -205,29 +201,35 @@ def search_stops():
                         seen.add(nid)
                         lines = [line.get("name") for line in node.get("lines", []) if line.get("name")]
                         name = node.get("commonName", "").removesuffix(" Underground Station").strip()
-                        results.append({
-                            "id": nid,
-                            "name": name,
-                            "mode": "tube",
-                            "letter": "",
-                            "lines": lines,
-                            "subtitle": f"Underground • {', '.join(lines) if lines else 'All lines'}",
-                        })
+                        results.append(
+                            {
+                                "id": nid,
+                                "name": name,
+                                "mode": "tube",
+                                "letter": "",
+                                "lines": lines,
+                                "subtitle": f"Underground • {', '.join(lines) if lines else 'All lines'}",
+                            }
+                        )
                     elif st == "NaptanPublicBusCoachTram":
                         seen.add(nid)
                         letter = node.get("stopLetter") or node.get("indicator") or ""
                         lines = [line.get("name") for line in node.get("lines", []) if line.get("name")]
-                        subtitle = f"Stop {letter} • {', '.join(lines[:6])}" if letter else f"Bus • {', '.join(lines[:6])}"
+                        subtitle = (
+                            f"Stop {letter} • {', '.join(lines[:6])}" if letter else f"Bus • {', '.join(lines[:6])}"
+                        )
                         if len(lines) > 6:
                             subtitle += f" (+{len(lines) - 6} more)"
-                        results.append({
-                            "id": nid,
-                            "name": node.get("commonName", ""),
-                            "mode": "bus",
-                            "letter": letter,
-                            "lines": lines,
-                            "subtitle": subtitle,
-                        })
+                        results.append(
+                            {
+                                "id": nid,
+                                "name": node.get("commonName", ""),
+                                "mode": "bus",
+                                "letter": letter,
+                                "lines": lines,
+                                "subtitle": subtitle,
+                            }
+                        )
 
                     for child in node.get("children", []):
                         extract(child)
