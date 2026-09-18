@@ -50,14 +50,39 @@ python scripts/simulate_device.py
 # -> open http://127.0.0.1:5000/pair and enter the code
 ```
 
+## Running tests
+
+```bash
+pip install -r requirements-dev.txt
+python -m pytest
+```
+
+External calls (Spotify, TfL) are mocked in tests — nothing hits the network.
+`.github/workflows/tests.yml` runs this on every push/PR to `main`.
+
 ## Deploying
 
-Runs behind [Caddy](https://caddyserver.com/) for automatic TLS — see the
-included `Caddyfile`. Point `auth.nikolaivorkinn.com` at the Oracle Cloud
-instance, run this app under `gunicorn` (or similar) via `systemd`, and let
-Caddy terminate TLS and reverse-proxy to `127.0.0.1:5000`. Data lives in a
-single SQLite file (`data/broker.db` by default, override with
-`BROKER_DB_PATH`) — back that file up.
+Tagging a release (`git tag v0.1.0 && git push --tags`) triggers
+`.github/workflows/release.yml`, which builds this into a Docker image and
+pushes it to `ghcr.io/nvorkinn/auth-broker:<tag>` (and `:latest`).
+
+On the Oracle Cloud instance:
+
+```bash
+docker run -d --name auth-broker --restart unless-stopped \
+  -p 127.0.0.1:5000:5000 \
+  -v /opt/auth-broker/data:/app/data \
+  --env-file /opt/auth-broker/.env \
+  ghcr.io/nvorkinn/auth-broker:latest
+```
+
+The `-v` mount is what makes device/token data (SQLite at `data/broker.db`,
+override with `BROKER_DB_PATH`) survive a container restart or image update —
+back that directory up. [Caddy](https://caddyserver.com/) still runs directly
+on the host for TLS — see the included `Caddyfile` — reverse-proxying
+`auth.nikolaivorkinn.com` to `127.0.0.1:5000`, which Docker's `-p` mapping
+above publishes to, so no Caddy config changes needed when moving to a new
+image tag.
 
 ## Not built yet
 
