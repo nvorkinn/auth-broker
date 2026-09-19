@@ -1,3 +1,4 @@
+import logging
 import os
 from datetime import timedelta
 
@@ -8,6 +9,12 @@ from . import db as db_module
 
 def create_app() -> Flask:
     app = Flask(__name__)
+    # Route app.logger through gunicorn's handlers so it lands in `docker logs`.
+    gunicorn_logger = logging.getLogger("gunicorn.error")
+    if gunicorn_logger.handlers:
+        app.logger.handlers = gunicorn_logger.handlers
+        app.logger.setLevel(gunicorn_logger.level)
+
     app.secret_key = os.environ["FLASK_SECRET_KEY"]
     app.permanent_session_lifetime = timedelta(days=30)
 
