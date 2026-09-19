@@ -57,6 +57,28 @@ python scripts/simulate_device.py
 # -> open http://127.0.0.1:5000/pair and enter the code
 ```
 
+## Resetting a device while developing
+
+The database is a SQLite file (`data/broker.db`). To replay pairing from the
+start, use the admin CLI inside the container; it has no network surface:
+
+```bash
+docker compose exec auth-broker python -m broker.admin list
+docker compose exec auth-broker python -m broker.admin unpair <device_id>            # show a pairing code again
+docker compose exec auth-broker python -m broker.admin unpair <device_id> --config   # ...and reset its settings and linked accounts
+docker compose exec auth-broker python -m broker.admin forget <device_id>            # delete it; it must register again
+```
+
+`unpair` keeps the device's identity, so the Pi just shows a new code on its
+next poll. After `forget`, also make the Pi register as a new device:
+
+```bash
+sudo rm /opt/countdown/.auth_broker_device && sudo systemctl restart countdown
+```
+
+When the `paired_at` column is first added to an existing database, devices
+with an unredeemed code stay unpaired and every other device is marked paired.
+
 ## Running tests
 
 ```bash
