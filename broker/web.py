@@ -161,8 +161,8 @@ def _resolve_stop_info(stop_id: str, http: requests.Session) -> dict[str, Any] |
             "lines": lines[:8],
             "line_count": len(lines),
         }
-    except Exception as e:
-        print(f"Error resolving stop {stop_id}: {e}")
+    except Exception:
+        current_app.logger.exception("Error resolving stop %s", stop_id)
         return None
 
 
@@ -235,10 +235,10 @@ def search_stops():
                         extract(child)
 
                 extract(sp)
-            except Exception as ex:
-                print(f"Error parsing search result {mid}: {ex}")
+            except Exception:
+                current_app.logger.exception("Error parsing search result %s", mid)
 
         return jsonify(results)
-    except Exception as e:
-        print(f"TfL Search API error: {e}")
+    except Exception:
+        current_app.logger.exception("TfL Search API error")
         return jsonify([]), 500

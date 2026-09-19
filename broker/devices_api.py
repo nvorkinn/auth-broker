@@ -105,3 +105,17 @@ def now_playing(device_id):
         return jsonify(None)
 
     return jsonify(spotify_module.get_current_track(device_id))
+
+
+@bp.get("/<device_id>/queue")
+@require_device_auth
+def queue(device_id):
+    """Upcoming Spotify queue, same auth and token handling as now-playing.
+    Always a JSON list; empty when Spotify is disabled, unlinked or nothing is queued."""
+    row = get_db().execute("SELECT spotify_enabled FROM device_config WHERE device_id = ?", (device_id,)).fetchone()
+    if row is None:
+        return jsonify(error="not found"), 404
+    if not row["spotify_enabled"]:
+        return jsonify([])
+
+    return jsonify(spotify_module.get_queue(device_id))

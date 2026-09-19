@@ -193,3 +193,36 @@ def test_now_playing_unknown_device_rejected(client, register_device):
     _, secret = register_device()
     response = client.get("/api/devices/does-not-exist/now-playing", headers={"Authorization": f"Bearer {secret}"})
     assert response.status_code == 401
+
+
+def test_queue_requires_auth(client, register_device):
+    device_id, _ = register_device()
+    assert client.get(f"/api/devices/{device_id}/queue").status_code == 401
+
+
+def test_queue_returns_empty_list_when_spotify_disabled(client, register_device):
+    device_id, secret = register_device()
+    response = client.get(f"/api/devices/{device_id}/queue", headers={"Authorization": f"Bearer {secret}"})
+    assert response.status_code == 200
+    assert response.get_json() == []
+
+
+def test_queue_returns_empty_list_when_enabled_but_not_linked(paired_client):
+    client, device_id, secret = paired_client
+    client.post("/device", data={"interval": "15", "spotify_enabled": "on"})
+
+    response = client.get(f"/api/devices/{device_id}/queue", headers={"Authorization": f"Bearer {secret}"})
+    assert response.status_code == 200
+    assert response.get_json() == []
+
+
+def test_queue_proxies_spotify_module(paired_client):
+    client, device_id, secret = paired_client
+    client.post("/device", data={"interval": "15", "spotify_enabled": "on"})
+
+    queue = [{"song": "A Song", "artist": "An Artist", "album": "An Album", "album_image": "http://x"}]
+    with patch("broker.devices_api.spotify_module.get_queue", return_value=queue) as mocked:
+        response = client.get(f"/api/devices/{device_id}/queue", headers={"Authorization": f"Bearer {secret}"})
+
+    mocked.assert_called_once_with(device_id)
+    assert response.get_json() == queue
