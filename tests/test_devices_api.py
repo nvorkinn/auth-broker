@@ -70,13 +70,15 @@ def test_get_config_returns_defaults_and_shared_keys(client, register_device):
     device_id, secret = register_device()
     response = client.get(f"/api/devices/{device_id}/config", headers={"Authorization": f"Bearer {secret}"})
     assert response.status_code == 200
-    assert response.get_json() == {
+    body = response.get_json()
+    assert body == {
         "interval": 15,
         "weather": {"api_key": "test-weather-key", "location": ""},
         "tfl": {"app_key": "test-tfl-key", "stop_ids": []},
         "spotify": {"enabled": False},
         "glowmarkt": {"username": None, "password": None},
-        "pairing_code": None,
+        "pairing_code": body["pairing_code"],
+        "setup_missing": ["a weather location", "a bus or tube stop"],
     }
 
 
@@ -115,9 +117,11 @@ def test_get_config_pairing_code_cleared_once_paired(client, register_device):
     assert _get_pairing_code(client, device_id, secret) is None
 
 
-def test_get_config_pairing_code_omitted_once_expired(app, client, register_device):
+def test_get_config_replaces_an_expired_code_for_an_unpaired_device(app, client, register_device):
     device_id, secret = register_device()
-    client.post(f"/api/devices/{device_id}/pairing-code", headers={"Authorization": f"Bearer {secret}"})
+    code = client.post(
+        f"/api/devices/{device_id}/pairing-code", headers={"Authorization": f"Bearer {secret}"}
+    ).get_json()["code"]
 
     with app.app_context():
         db = get_db()
@@ -127,7 +131,9 @@ def test_get_config_pairing_code_omitted_once_expired(app, client, register_devi
         )
         db.commit()
 
-    assert _get_pairing_code(client, device_id, secret) is None
+    fresh = _get_pairing_code(client, device_id, secret)
+    assert fresh is not None
+    assert fresh != code
 
 
 def test_get_config_pairing_code_is_the_latest_one(client, register_device):
@@ -144,7 +150,7 @@ def test_get_config_pairing_code_not_leaked_to_other_devices(client, register_de
     other_id, other_secret = register_device("another-very-long-device-secret")
     client.post(f"/api/devices/{device_id}/pairing-code", headers={"Authorization": f"Bearer {secret}"})
 
-    assert _get_pairing_code(client, other_id, other_secret) is None
+    assert _get_pairing_code(client, other_id, other_secret) != _get_pairing_code(client, device_id, secret)
 
 
 def test_get_config_returns_decrypted_glowmarkt_credentials(paired_client):
@@ -226,3 +232,86 @@ def test_queue_proxies_spotify_module(paired_client):
 
     mocked.assert_called_once_with(device_id)
     assert response.get_json() == queue
+
+
+def test_get_config_issues_a_code_to_an_unpaired_device_and_keeps_it_stable(client, register_device):
+    device_id, secret = register_device()
+
+    code = _get_pairing_code(client, device_id, secret)
+
+    assert len(code) == 6
+    assert not set(code) & set("0O1IL")
+    assert _get_pairing_code(client, device_id, secret) == code
+
+
+def test_a_paired_device_gets_no_code_and_none_is_issued_again(app, client, register_device):
+    device_id, secret = register_device()
+    code = _get_pairing_code(client, device_id, secret)
+    assert client.post("/pair", data={"code": code}).status_code == 302
+
+    assert _get_pairing_code(client, device_id, secret) is None
+    assert _get_pairing_code(client, device_id, secret) is None
+    with app.app_context():
+        db = get_db()
+        assert db.execute("SELECT paired_at FROM devices WHERE device_id = ?", (device_id,)).fetchone()["paired_at"]
+        assert db.execute("SELECT COUNT(*) FROM pairing_codes WHERE device_id = ?", (device_id,)).fetchone()[0] == 0
+
+
+def test_a_failed_pairing_attempt_does_not_mark_the_device_paired(app, client, register_device):
+    device_id, secret = register_device()
+    _get_pairing_code(client, device_id, secret)
+
+    client.post("/pair", data={"code": "WRONG1"})
+
+    with app.app_context():
+        row = get_db().execute("SELECT paired_at FROM devices WHERE device_id = ?", (device_id,)).fetchone()
+        assert row["paired_at"] is None
+
+
+def test_a_forced_code_for_a_paired_device_is_shown_until_redeemed(client, register_device):
+    device_id, secret = register_device()
+    client.post("/pair", data={"code": _get_pairing_code(client, device_id, secret)})
+    forced = client.post(
+        f"/api/devices/{device_id}/pairing-code", headers={"Authorization": f"Bearer {secret}"}
+    ).get_json()["code"]
+
+    assert _get_pairing_code(client, device_id, secret) == forced
+
+    client.post("/pair", data={"code": forced})
+    assert _get_pairing_code(client, device_id, secret) is None
+
+
+def _setup_missing(client, device_id, secret):
+    response = client.get(f"/api/devices/{device_id}/config", headers={"Authorization": f"Bearer {secret}"})
+    return response.get_json()["setup_missing"]
+
+
+def test_setup_missing_lists_what_is_still_needed(app, client, register_device):
+    device_id, secret = register_device()
+    assert _setup_missing(client, device_id, secret) == ["a weather location", "a bus or tube stop"]
+
+    def configure(**columns):
+        with app.app_context():
+            db = get_db()
+            for column, value in columns.items():
+                db.execute(f"UPDATE device_config SET {column} = ? WHERE device_id = ?", (value, device_id))
+            db.commit()
+
+    configure(weather_location="London")
+    assert _setup_missing(client, device_id, secret) == ["a bus or tube stop"]
+
+    configure(weather_location="", tfl_stop_ids='["940GZZLUKNG"]')
+    assert _setup_missing(client, device_id, secret) == ["a weather location"]
+
+    configure(weather_location="London")
+    assert _setup_missing(client, device_id, secret) == []
+
+
+def test_a_blank_weather_location_still_counts_as_missing(app, client, register_device):
+    device_id, secret = register_device()
+    with app.app_context():
+        db = get_db()
+        db.execute("UPDATE device_config SET weather_location = '   ' WHERE device_id = ?", (device_id,))
+        db.commit()
+
+    assert "a weather location" in _setup_missing(client, device_id, secret)

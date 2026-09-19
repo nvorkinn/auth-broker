@@ -14,10 +14,16 @@ a Spotify token.
 1. **First boot:** the Pi generates its own `device_id`/`device_secret` pair
    and calls `POST /api/devices/register` once. The server only ever stores a
    hash of the secret; the Pi is the only place the plaintext secret lives.
-2. **Pairing:** the Pi asks for a short-lived code (`POST
-   /api/devices/<id>/pairing-code`) and shows it on its screen. The recipient
-   goes to the site, enters the code at `/pair`, and that binds their browser
-   session to that device for `/device` (settings) and Spotify linking.
+2. **Pairing:** the Pi polls `GET /api/devices/<id>/config`. While the
+   device is unpaired, the response carries a short-lived `pairing_code` (the
+   server issues a fresh one whenever the last expires), which the Pi shows on
+   its screen. The recipient enters it at `/pair`, which binds their browser
+   session to that device for `/device` (settings) and Spotify linking, and
+   marks the device paired (`devices.paired_at`): from then on `pairing_code`
+   is `null`. `setup_missing` in the same response lists what the device still
+   needs before it's worth showing (a weather location, a bus or tube stop),
+   so the Pi can tell the recipient. `POST /api/devices/<id>/pairing-code`
+   forces a new code, e.g. to link another browser to an already-paired device.
 3. **Spotify:** from `/device`, "Connect Spotify" kicks off the OAuth flow.
    The server exchanges the code for tokens and keeps them — the Pi never
    sees a Spotify token, only its own device secret.
@@ -50,6 +56,28 @@ python scripts/simulate_device.py
 # prints a device_id, device_secret, and a pairing code
 # -> open http://127.0.0.1:5000/pair and enter the code
 ```
+
+## Resetting a device while developing
+
+The database is a SQLite file (`data/broker.db`). To replay pairing from the
+start, use the admin CLI inside the container; it has no network surface:
+
+```bash
+docker compose exec auth-broker python -m broker.admin list
+docker compose exec auth-broker python -m broker.admin unpair <device_id>            # show a pairing code again
+docker compose exec auth-broker python -m broker.admin unpair <device_id> --config   # ...and reset its settings and linked accounts
+docker compose exec auth-broker python -m broker.admin forget <device_id>            # delete it; it must register again
+```
+
+`unpair` keeps the device's identity, so the Pi just shows a new code on its
+next poll. After `forget`, also make the Pi register as a new device:
+
+```bash
+sudo rm /opt/countdown/.auth_broker_device && sudo systemctl restart countdown
+```
+
+When the `paired_at` column is first added to an existing database, devices
+with an unredeemed code stay unpaired and every other device is marked paired.
 
 ## Running tests
 

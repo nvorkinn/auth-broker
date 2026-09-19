@@ -32,6 +32,10 @@ def pair():
         return render_template("pair.html", error="That code is invalid or has expired.")
 
     db.execute("DELETE FROM pairing_codes WHERE code = ?", (code,))
+    db.execute(
+        "UPDATE devices SET paired_at = ? WHERE device_id = ? AND paired_at IS NULL",
+        (datetime.now(UTC).isoformat(), row["device_id"]),
+    )
     db.commit()
 
     session.clear()

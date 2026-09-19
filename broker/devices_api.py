@@ -39,20 +39,44 @@ def register():
     return jsonify(device_id=device_id), 201
 
 
-@bp.post("/<device_id>/pairing-code")
-@require_device_auth
-def create_pairing_code(device_id):
-    """Called by the Pi whenever it wants to show a fresh pairing code on screen."""
+def _issue_pairing_code(db, device_id: str) -> str:
     code = "".join(secrets.choice(PAIRING_CODE_ALPHABET) for _ in range(PAIRING_CODE_LENGTH))
     expires_at = datetime.now(UTC) + PAIRING_CODE_TTL
-
-    db = get_db()
     db.execute("DELETE FROM pairing_codes WHERE device_id = ?", (device_id,))
     db.execute(
         "INSERT INTO pairing_codes (code, device_id, expires_at) VALUES (?, ?, ?)",
         (code, device_id, expires_at.isoformat()),
     )
     db.commit()
+    return code
+
+
+def _pairing_code_for(db, device_id: str) -> str | None:
+    """A live code if there is one; otherwise a new one, unless the device is already paired."""
+    live = db.execute(
+        "SELECT code FROM pairing_codes WHERE device_id = ? AND expires_at > ?",
+        (device_id, datetime.now(UTC).isoformat()),
+    ).fetchone()
+    if live:
+        return live["code"]
+    paired_at = db.execute("SELECT paired_at FROM devices WHERE device_id = ?", (device_id,)).fetchone()["paired_at"]
+    return None if paired_at else _issue_pairing_code(db, device_id)
+
+
+def _setup_missing(config_row) -> list[str]:
+    missing = []
+    if not config_row["weather_location"].strip():
+        missing.append("a weather location")
+    if not json.loads(config_row["tfl_stop_ids"]):
+        missing.append("a bus or tube stop")
+    return missing
+
+
+@bp.post("/<device_id>/pairing-code")
+@require_device_auth
+def create_pairing_code(device_id):
+    """Forces a fresh code, e.g. to link a new browser to an already-paired device."""
+    code = _issue_pairing_code(get_db(), device_id)
     return jsonify(code=code, expires_in_seconds=int(PAIRING_CODE_TTL.total_seconds()))
 
 
@@ -77,19 +101,14 @@ def get_config(device_id):
         else None,
     }
 
-    pairing_row = db.execute(
-        "SELECT code FROM pairing_codes WHERE device_id = ? AND expires_at > ?",
-        (device_id, datetime.now(UTC).isoformat()),
-    ).fetchone()
-    pairing_code = pairing_row["code"] if pairing_row else None
-
     return jsonify(
         interval=row["interval"],
         weather={"api_key": current_app.config["WEATHER_API_KEY"], "location": row["weather_location"]},
         tfl={"app_key": current_app.config["TFL_APP_KEY"], "stop_ids": json.loads(row["tfl_stop_ids"])},
         spotify={"enabled": bool(row["spotify_enabled"])},
         glowmarkt=glowmarkt,
-        pairing_code=pairing_code,
+        pairing_code=_pairing_code_for(db, device_id),
+        setup_missing=_setup_missing(row),
     )
 
 
