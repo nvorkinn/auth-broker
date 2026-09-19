@@ -149,3 +149,85 @@ def test_get_current_track_returns_none_when_nothing_playing(app, paired_client)
 
         with patch("broker.spotify.requests.get", return_value=_mock_response({"is_playing": False, "item": None})):
             assert spotify_module.get_current_track(device_id) is None
+
+
+def _link_spotify(app_db, device_id):
+    app_db.execute(
+        "INSERT INTO spotify_tokens (device_id, refresh_token, access_token, expires_at) VALUES (?, ?, ?, ?)",
+        (device_id, "refresh", "access", time.time() + 3600),
+    )
+    app_db.commit()
+
+
+def test_get_queue_returns_empty_when_not_linked(app, paired_client):
+    _, device_id, _ = paired_client
+    with app.app_context():
+        assert spotify_module.get_queue(device_id) == []
+
+
+def test_get_queue_maps_tracks_and_episodes(app, paired_client):
+    _, device_id, _ = paired_client
+    payload = {
+        "currently_playing": {"name": "Now"},
+        "queue": [
+            {
+                "type": "track",
+                "name": "Song",
+                "artists": [{"name": "A"}, {"name": "B"}],
+                "album": {
+                    "name": "Album",
+                    "images": [{"height": 300, "url": "http://big"}, {"height": 64, "url": "http://small"}],
+                },
+            },
+            {
+                "type": "episode",
+                "name": "Episode",
+                "show": {"name": "Show", "publisher": "Pub", "images": [{"height": 64, "url": "http://show"}]},
+                "images": [],
+            },
+        ],
+    }
+
+    with app.app_context():
+        _link_spotify(get_db(), device_id)
+        with patch("broker.spotify.requests.get", return_value=_mock_response(payload)) as mocked:
+            queue = spotify_module.get_queue(device_id)
+
+    assert mocked.call_args.args[0] == "https://api.spotify.com/v1/me/player/queue"
+    assert mocked.call_args.kwargs["headers"] == {"Authorization": "Bearer access"}
+    assert queue == [
+        {"song": "Song", "artist": "A, B", "album": "Album", "album_image": "http://small"},
+        {"song": "Episode", "artist": "Pub", "album": "Show", "album_image": "http://show"},
+    ]
+
+
+def test_get_queue_returns_empty_on_204(app, paired_client):
+    _, device_id, _ = paired_client
+
+    with app.app_context():
+        _link_spotify(get_db(), device_id)
+        with patch("broker.spotify.requests.get", return_value=_mock_response(status_code=204, content=b"")):
+            assert spotify_module.get_queue(device_id) == []
+
+
+def test_get_queue_refreshes_expired_token(app, paired_client):
+    _, device_id, _ = paired_client
+
+    with app.app_context():
+        db = get_db()
+        db.execute(
+            "INSERT INTO spotify_tokens (device_id, refresh_token, access_token, expires_at) VALUES (?, ?, ?, ?)",
+            (device_id, "old-refresh", "old-access", time.time() - 100),
+        )
+        db.commit()
+
+        with (
+            patch(
+                "broker.spotify.requests.post",
+                return_value=_mock_response({"access_token": "new-access", "expires_in": 3600}),
+            ),
+            patch("broker.spotify.requests.get", return_value=_mock_response({"queue": []})) as mocked,
+        ):
+            assert spotify_module.get_queue(device_id) == []
+
+        assert mocked.call_args.kwargs["headers"] == {"Authorization": "Bearer new-access"}

@@ -95,17 +95,25 @@ def _refresh_access_token(device_id: str, refresh_token: str) -> str:
     return payload["access_token"]
 
 
-def get_current_track(device_id: str) -> dict[str, object] | None:
-    """Mirrors the shape of countdown's SpotifyClient.get_current_track(), so the
-    Pi side can eventually swap a direct spotipy call for a call to this broker
-    without touching the display code that consumes it."""
+def _get_access_token(device_id: str) -> str | None:
+    """Returns a valid access token for the device, refreshing it if needed, or
+    None when the device hasn't linked Spotify."""
     row = get_db().execute("SELECT * FROM spotify_tokens WHERE device_id = ?", (device_id,)).fetchone()
     if row is None:
         return None
 
-    access_token = row["access_token"]
     if row["expires_at"] is None or float(row["expires_at"]) - 30 < datetime.now(UTC).timestamp():
-        access_token = _refresh_access_token(device_id, row["refresh_token"])
+        return _refresh_access_token(device_id, row["refresh_token"])
+    return row["access_token"]
+
+
+def get_current_track(device_id: str) -> dict[str, object] | None:
+    """Mirrors the shape of countdown's SpotifyClient.get_current_track(), so the
+    Pi side can eventually swap a direct spotipy call for a call to this broker
+    without touching the display code that consumes it."""
+    access_token = _get_access_token(device_id)
+    if access_token is None:
+        return None
 
     response = requests.get(
         "https://api.spotify.com/v1/me/player/currently-playing",
@@ -128,3 +136,44 @@ def get_current_track(device_id: str) -> dict[str, object] | None:
         "album_image": min(track["album"]["images"], key=lambda image: image["height"])["url"],
         "is_playing": data["is_playing"],
     }
+
+
+def _queue_item(item: dict[str, object]) -> dict[str, object]:
+    """Same shape as get_current_track() minus is_playing. The queue can hold
+    podcast episodes, which have a show instead of artists/album."""
+    if item.get("type") == "episode":
+        show = item["show"]
+        images = item.get("images") or show.get("images") or []
+        return {
+            "song": item["name"],
+            "artist": show.get("publisher", ""),
+            "album": show["name"],
+            "album_image": min(images, key=lambda image: image["height"])["url"] if images else None,
+        }
+
+    album = item["album"]
+    return {
+        "song": item["name"],
+        "artist": ", ".join(artist["name"] for artist in item["artists"]),
+        "album": album["name"],
+        "album_image": min(album["images"], key=lambda image: image["height"])["url"] if album["images"] else None,
+    }
+
+
+def get_queue(device_id: str) -> list[dict[str, object]]:
+    """Upcoming items (not the one currently playing), in play order. Empty when
+    Spotify isn't linked or nothing is queued."""
+    access_token = _get_access_token(device_id)
+    if access_token is None:
+        return []
+
+    response = requests.get(
+        "https://api.spotify.com/v1/me/player/queue",
+        headers={"Authorization": f"Bearer {access_token}"},
+        timeout=10,
+    )
+    if response.status_code == 204 or not response.content:
+        return []
+    response.raise_for_status()
+
+    return [_queue_item(item) for item in response.json().get("queue", []) if item]
