@@ -8,7 +8,8 @@ SCHEMA = """
 CREATE TABLE IF NOT EXISTS devices (
     device_id TEXT PRIMARY KEY,
     device_secret_hash TEXT NOT NULL,
-    created_at TEXT NOT NULL
+    created_at TEXT NOT NULL,
+    paired_at TEXT
 );
 
 CREATE TABLE IF NOT EXISTS pairing_codes (
@@ -58,11 +59,23 @@ def close_db(_exc=None) -> None:
         db.close()
 
 
+def _migrate(conn: sqlite3.Connection) -> None:
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(devices)")}
+    if "paired_at" in columns:
+        return
+    conn.execute("ALTER TABLE devices ADD COLUMN paired_at TEXT")
+    # A device with an unredeemed code is mid-pairing; any other existing device is treated as paired.
+    conn.execute(
+        "UPDATE devices SET paired_at = created_at WHERE device_id NOT IN (SELECT device_id FROM pairing_codes)"
+    )
+
+
 def init_app(app) -> None:
     path = _db_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(path)
     conn.executescript(SCHEMA)
+    _migrate(conn)
     conn.commit()
     conn.close()
 

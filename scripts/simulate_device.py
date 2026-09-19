@@ -1,5 +1,5 @@
 """Stands in for a real Pi during local development: registers a device and
-prints a pairing code, so you can test the /pair -> /device browser flow
+shows its pairing code (as a real Pi would get it from /config), so you can test the /pair -> /device browser flow
 without real hardware.
 
 Usage: python scripts/simulate_device.py [base_url]
@@ -17,13 +17,14 @@ register = requests.post(f"{base_url}/api/devices/register", json={"device_secre
 register.raise_for_status()
 device_id = register.json()["device_id"]
 
-code = requests.post(
-    f"{base_url}/api/devices/{device_id}/pairing-code",
+config = requests.get(
+    f"{base_url}/api/devices/{device_id}/config",
     headers={"Authorization": f"Bearer {device_secret}"},
 )
-code.raise_for_status()
+config.raise_for_status()
 
 print(f"device_id:      {device_id}")
 print(f"device_secret:  {device_secret}")
-print(f"pairing code:   {code.json()['code']}  (expires in {code.json()['expires_in_seconds']}s)")
+print(f"pairing code:   {config.json()['pairing_code']}")
+print(f"still needed:   {', '.join(config.json()['setup_missing'])}")
 print(f"\nEnter the pairing code at {base_url}/pair")

@@ -14,10 +14,16 @@ a Spotify token.
 1. **First boot:** the Pi generates its own `device_id`/`device_secret` pair
    and calls `POST /api/devices/register` once. The server only ever stores a
    hash of the secret; the Pi is the only place the plaintext secret lives.
-2. **Pairing:** the Pi asks for a short-lived code (`POST
-   /api/devices/<id>/pairing-code`) and shows it on its screen. The recipient
-   goes to the site, enters the code at `/pair`, and that binds their browser
-   session to that device for `/device` (settings) and Spotify linking.
+2. **Pairing:** the Pi polls `GET /api/devices/<id>/config`. While the
+   device is unpaired, the response carries a short-lived `pairing_code` (the
+   server issues a fresh one whenever the last expires), which the Pi shows on
+   its screen. The recipient enters it at `/pair`, which binds their browser
+   session to that device for `/device` (settings) and Spotify linking, and
+   marks the device paired (`devices.paired_at`): from then on `pairing_code`
+   is `null`. `setup_missing` in the same response lists what the device still
+   needs before it's worth showing (a weather location, a bus or tube stop),
+   so the Pi can tell the recipient. `POST /api/devices/<id>/pairing-code`
+   forces a new code, e.g. to link another browser to an already-paired device.
 3. **Spotify:** from `/device`, "Connect Spotify" kicks off the OAuth flow.
    The server exchanges the code for tokens and keeps them — the Pi never
    sees a Spotify token, only its own device secret.
