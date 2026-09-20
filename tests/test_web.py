@@ -1,5 +1,6 @@
 from unittest.mock import Mock, patch
 
+from broker import admin
 from broker.db import get_db
 
 
@@ -217,3 +218,39 @@ def test_search_stops_finds_tube_and_bus_matches(client):
     assert len(results) == 1
     assert results[0]["mode"] == "tube"
     assert results[0]["name"] == "Kings Cross"
+
+
+def _redirects_to_pair(response):
+    return response.status_code == 302 and response.headers["Location"] == "/pair"
+
+
+def test_unpairing_a_device_revokes_the_browser_that_paired_it(paired_client):
+    client, device_id, _ = paired_client
+    assert client.get("/device").status_code == 200
+
+    admin.main(["unpair", device_id])
+
+    assert _redirects_to_pair(client.get("/device"))
+    assert _redirects_to_pair(client.post("/device/spotify/disconnect"))
+    assert _redirects_to_pair(client.get("/"))  # the stale session was cleared, not just refused
+
+
+def test_a_forgotten_device_sends_the_browser_to_pair_instead_of_erroring(paired_client):
+    client, device_id, _ = paired_client
+
+    admin.main(["forget", device_id])
+
+    assert _redirects_to_pair(client.get("/device"))
+    assert _redirects_to_pair(client.get("/"))
+
+
+def test_pairing_again_after_an_unpair_restores_access(paired_client):
+    client, device_id, secret = paired_client
+    admin.main(["unpair", device_id])
+    code = client.get(f"/api/devices/{device_id}/config", headers={"Authorization": f"Bearer {secret}"}).get_json()[
+        "pairing_code"
+    ]
+
+    assert client.post("/pair", data={"code": code}).status_code == 302
+
+    assert client.get("/device").status_code == 200
