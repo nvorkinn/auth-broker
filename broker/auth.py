@@ -28,11 +28,20 @@ def require_device_auth(view):
 
 def require_paired_session(view):
     """Protects browser-facing pages that act on 'whichever device this browser
-    paired with', established by entering a pairing code."""
+    paired with'. The cookie only carries the device_id, so check the device still
+    exists and is paired: unpair and forget must take effect on browsers too."""
 
     @functools.wraps(view)
     def wrapped(*args, **kwargs):
-        if "device_id" not in session:
+        device = None
+        if "device_id" in session:
+            device = (
+                get_db()
+                .execute("SELECT paired_at FROM devices WHERE device_id = ?", (session["device_id"],))
+                .fetchone()
+            )
+        if device is None or device["paired_at"] is None:
+            session.clear()
             return redirect(url_for("web.pair"))
         return view(*args, **kwargs)
 
