@@ -234,6 +234,50 @@ def test_queue_proxies_spotify_module(paired_client):
     assert response.get_json() == queue
 
 
+def test_spotify_view_is_not_called_when_spotify_disabled(client, register_device):
+    device_id, secret = register_device()
+
+    with (
+        patch("broker.devices_api.spotify_module.get_current_track") as now_playing,
+        patch("broker.devices_api.spotify_module.get_queue") as queue,
+    ):
+        client.get(f"/api/devices/{device_id}/now-playing", headers={"Authorization": f"Bearer {secret}"})
+        client.get(f"/api/devices/{device_id}/queue", headers={"Authorization": f"Bearer {secret}"})
+
+    now_playing.assert_not_called()
+    queue.assert_not_called()
+
+
+def test_spotify_disabled_check_runs_after_auth(client, register_device):
+    """A caller without the device secret must get a 401, not the disabled default,
+    otherwise anyone could probe which devices have Spotify switched on."""
+    device_id, _ = register_device()
+
+    for path in ("now-playing", "queue", "top/tracks"):
+        assert client.get(f"/api/devices/{device_id}/{path}").status_code == 401
+        wrong = client.get(f"/api/devices/{device_id}/{path}", headers={"Authorization": "Bearer wrong-secret"})
+        assert wrong.status_code == 401
+
+
+def test_spotify_endpoints_return_404_when_device_has_no_config_row(app, client, register_device):
+    device_id, secret = register_device()
+    with app.app_context():
+        db = get_db()
+        db.execute("DELETE FROM device_config WHERE device_id = ?", (device_id,))
+        db.commit()
+
+    for path in ("now-playing", "queue", "top/tracks"):
+        response = client.get(f"/api/devices/{device_id}/{path}", headers={"Authorization": f"Bearer {secret}"})
+        assert response.status_code == 404
+
+
+def test_top_returns_null_when_spotify_disabled(client, register_device):
+    device_id, secret = register_device()
+    response = client.get(f"/api/devices/{device_id}/top/tracks", headers={"Authorization": f"Bearer {secret}"})
+    assert response.status_code == 200
+    assert response.get_json() is None
+
+
 def test_get_config_issues_a_code_to_an_unpaired_device_and_keeps_it_stable(client, register_device):
     device_id, secret = register_device()
 

@@ -1,3 +1,4 @@
+import functools
 import json
 import secrets
 import string
@@ -72,6 +73,30 @@ def _setup_missing(config_row) -> list[str]:
     return missing
 
 
+def require_spotify_enabled(default):
+    """For Pi-facing Spotify endpoints: answers with `default` (as JSON) instead of
+    running the view when the device has Spotify switched off. Apply it below
+    @require_device_auth so unauthenticated callers can't probe device settings."""
+
+    def decorator(view):
+        @functools.wraps(view)
+        def wrapped(device_id, *args, **kwargs):
+            row = (
+                get_db()
+                .execute("SELECT spotify_enabled FROM device_config WHERE device_id = ?", (device_id,))
+                .fetchone()
+            )
+            if row is None:
+                return jsonify(error="not found"), 404
+            if not row["spotify_enabled"]:
+                return jsonify(default)
+            return view(device_id, *args, **kwargs)
+
+        return wrapped
+
+    return decorator
+
+
 @bp.post("/<device_id>/pairing-code")
 @require_device_auth
 def create_pairing_code(device_id):
@@ -114,27 +139,24 @@ def get_config(device_id):
 
 @bp.get("/<device_id>/now-playing")
 @require_device_auth
+@require_spotify_enabled(default=None)
 def now_playing(device_id):
     """Polled by the Pi in place of talking to Spotify directly - this device
     never sees a Spotify token, only its own device secret."""
-    row = get_db().execute("SELECT spotify_enabled FROM device_config WHERE device_id = ?", (device_id,)).fetchone()
-    if row is None:
-        return jsonify(error="not found"), 404
-    if not row["spotify_enabled"]:
-        return jsonify(None)
-
     return jsonify(spotify_module.get_current_track(device_id))
 
 
 @bp.get("/<device_id>/queue")
 @require_device_auth
+@require_spotify_enabled(default=[])
 def queue(device_id):
     """Upcoming Spotify queue, same auth and token handling as now-playing.
     Always a JSON list; empty when Spotify is disabled, unlinked or nothing is queued."""
-    row = get_db().execute("SELECT spotify_enabled FROM device_config WHERE device_id = ?", (device_id,)).fetchone()
-    if row is None:
-        return jsonify(error="not found"), 404
-    if not row["spotify_enabled"]:
-        return jsonify([])
-
     return jsonify(spotify_module.get_queue(device_id))
+
+
+@bp.get("/<device_id>/top/<type_>")
+@require_device_auth
+@require_spotify_enabled(default=None)
+def top(device_id: str, type_: str):
+    return jsonify(spotify_module.get_users_top_items(device_id, type_))
