@@ -223,3 +223,33 @@ def test_get_queue_refreshes_expired_token(app, paired_client):
             assert spotify_module.get_queue(device_id) == {"queue": []}
 
         assert mocked.call_args.kwargs["headers"] == {"Authorization": "Bearer new-access"}
+
+
+def test_get_users_top_items_returns_none_when_not_linked(app, paired_client):
+    _, device_id, _ = paired_client
+    with app.app_context():
+        assert spotify_module.get_users_top_items(device_id, "tracks", {}) is None
+
+
+def test_get_users_top_items_passes_type_and_params_and_returns_raw_response(app, paired_client):
+    _, device_id, _ = paired_client
+    payload = {"items": [{"name": "Song", "popularity": 50}], "total": 1}
+
+    with app.app_context():
+        _link_spotify(get_db(), device_id)
+        with patch("broker.spotify.requests.get", return_value=_mock_response(payload)) as mocked:
+            result = spotify_module.get_users_top_items(device_id, "tracks", {"limit": "5"})
+
+    assert mocked.call_args.args[0] == "https://api.spotify.com/v1/me/top/tracks"
+    assert mocked.call_args.kwargs["headers"] == {"Authorization": "Bearer access"}
+    assert mocked.call_args.kwargs["params"] == {"limit": "5"}
+    assert result == payload
+
+
+def test_get_users_top_items_returns_empty_on_204(app, paired_client):
+    _, device_id, _ = paired_client
+
+    with app.app_context():
+        _link_spotify(get_db(), device_id)
+        with patch("broker.spotify.requests.get", return_value=_mock_response(status_code=204, content=b"")):
+            assert spotify_module.get_users_top_items(device_id, "artists", {}) == []

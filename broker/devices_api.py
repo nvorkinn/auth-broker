@@ -159,4 +159,4 @@ def queue(device_id):
 @require_device_auth
 @require_spotify_enabled(default=None)
 def top(device_id: str, type_: str):
-    return jsonify(spotify_module.get_users_top_items(device_id, type_))
+    return jsonify(spotify_module.get_users_top_items(device_id, type_, request.args.to_dict()))

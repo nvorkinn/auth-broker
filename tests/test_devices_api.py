@@ -278,6 +278,33 @@ def test_top_returns_null_when_spotify_disabled(client, register_device):
     assert response.get_json() is None
 
 
+def test_top_proxies_spotify_module_with_query_params(paired_client):
+    client, device_id, secret = paired_client
+    client.post("/device", data={"interval": "15", "spotify_enabled": "on"})
+
+    top_items = {"items": [{"name": "A Song"}]}
+    with patch("broker.devices_api.spotify_module.get_users_top_items", return_value=top_items) as mocked:
+        response = client.get(
+            f"/api/devices/{device_id}/top/tracks?limit=5&time_range=short_term",
+            headers={"Authorization": f"Bearer {secret}"},
+        )
+
+    mocked.assert_called_once_with(device_id, "tracks", {"limit": "5", "time_range": "short_term"})
+    assert response.get_json() == top_items
+
+
+def test_top_passes_empty_params_when_no_query_string(paired_client):
+    client, device_id, secret = paired_client
+    client.post("/device", data={"interval": "15", "spotify_enabled": "on"})
+
+    with patch("broker.devices_api.spotify_module.get_users_top_items", return_value=None) as mocked:
+        response = client.get(f"/api/devices/{device_id}/top/artists", headers={"Authorization": f"Bearer {secret}"})
+
+    mocked.assert_called_once_with(device_id, "artists", {})
+    assert response.status_code == 200
+    assert response.get_json() is None
+
+
 def test_get_config_issues_a_code_to_an_unpaired_device_and_keeps_it_stable(client, register_device):
     device_id, secret = register_device()
 
