@@ -105,6 +105,17 @@ def create_pairing_code(device_id):
     return jsonify(code=code, expires_in_seconds=int(PAIRING_CODE_TTL.total_seconds()))
 
 
+def _update_device_name(db, device_id: str) -> None:
+    """Opportunistically keeps devices.device_name in sync with the Pi's own
+    DEVICE_ID (sent as X-Device-Name on every config poll) -- a purely cosmetic
+    label for logs/admin output, never the device's real identity, so a rename
+    on the Pi just needs its next poll to take effect here, no re-pairing."""
+    name = request.headers.get("X-Device-Name", "").strip()
+    if name:
+        db.execute("UPDATE devices SET device_name = ? WHERE device_id = ?", (name, device_id))
+        db.commit()
+
+
 @bp.get("/<device_id>/config")
 @require_device_auth
 def get_config(device_id):
@@ -112,6 +123,7 @@ def get_config(device_id):
     shared app-level API keys, so a key rotation doesn't require re-flashing
     every gifted device."""
     db = get_db()
+    _update_device_name(db, device_id)
     row = db.execute("SELECT * FROM device_config WHERE device_id = ?", (device_id,)).fetchone()
     if row is None:
         return jsonify(error="not found"), 404

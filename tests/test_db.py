@@ -46,3 +46,30 @@ def test_migration_is_a_no_op_the_second_time(tmp_path):
     _migrate(conn)
 
     assert conn.execute("SELECT paired_at FROM devices").fetchone()[0] is None
+
+
+def test_migration_adds_device_name_column(tmp_path):
+    conn = sqlite3.connect(tmp_path / "old.db")
+    conn.executescript(OLD_DEVICES_SCHEMA)
+    conn.execute("INSERT INTO devices VALUES ('d', 'hash', '2026-01-01')")
+
+    _migrate(conn)
+
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(devices)")}
+    assert "device_name" in columns
+    assert conn.execute("SELECT device_name FROM devices WHERE device_id = 'd'").fetchone()[0] is None
+
+
+def test_migration_adds_device_name_to_a_db_that_already_has_paired_at(tmp_path):
+    """A DB that already ran the paired_at migration in the past must still pick up
+    device_name later -- the two migrations must not gate on the same early return."""
+    conn = sqlite3.connect(tmp_path / "old.db")
+    conn.executescript(OLD_DEVICES_SCHEMA)
+    conn.execute("INSERT INTO devices VALUES ('d', 'hash', '2026-01-01')")
+    _migrate(conn)
+
+    conn.execute("ALTER TABLE devices DROP COLUMN device_name")
+    _migrate(conn)
+
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(devices)")}
+    assert "device_name" in columns

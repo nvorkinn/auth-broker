@@ -153,6 +153,52 @@ def test_get_config_pairing_code_not_leaked_to_other_devices(client, register_de
     assert _get_pairing_code(client, other_id, other_secret) != _get_pairing_code(client, device_id, secret)
 
 
+def test_get_config_stores_device_name_from_header(app, client, register_device):
+    device_id, secret = register_device()
+    client.get(
+        f"/api/devices/{device_id}/config",
+        headers={"Authorization": f"Bearer {secret}", "X-Device-Name": "camilla"},
+    )
+
+    with app.app_context():
+        row = get_db().execute("SELECT device_name FROM devices WHERE device_id = ?", (device_id,)).fetchone()
+    assert row["device_name"] == "camilla"
+
+
+def test_get_config_without_device_name_header_leaves_it_unset(app, client, register_device):
+    device_id, secret = register_device()
+    client.get(f"/api/devices/{device_id}/config", headers={"Authorization": f"Bearer {secret}"})
+
+    with app.app_context():
+        row = get_db().execute("SELECT device_name FROM devices WHERE device_id = ?", (device_id,)).fetchone()
+    assert row["device_name"] is None
+
+
+def test_get_config_device_name_self_heals_on_rename(app, client, register_device):
+    """A renamed Pi's next poll updates the stored name -- no re-registration needed."""
+    device_id, secret = register_device()
+    headers = {"Authorization": f"Bearer {secret}"}
+    client.get(f"/api/devices/{device_id}/config", headers={**headers, "X-Device-Name": "old-name"})
+
+    client.get(f"/api/devices/{device_id}/config", headers={**headers, "X-Device-Name": "new-name"})
+
+    with app.app_context():
+        row = get_db().execute("SELECT device_name FROM devices WHERE device_id = ?", (device_id,)).fetchone()
+    assert row["device_name"] == "new-name"
+
+
+def test_get_config_blank_device_name_header_does_not_overwrite(app, client, register_device):
+    device_id, secret = register_device()
+    headers = {"Authorization": f"Bearer {secret}"}
+    client.get(f"/api/devices/{device_id}/config", headers={**headers, "X-Device-Name": "camilla"})
+
+    client.get(f"/api/devices/{device_id}/config", headers={**headers, "X-Device-Name": "  "})
+
+    with app.app_context():
+        row = get_db().execute("SELECT device_name FROM devices WHERE device_id = ?", (device_id,)).fetchone()
+    assert row["device_name"] == "camilla"
+
+
 def test_get_config_returns_decrypted_glowmarkt_credentials(paired_client):
     client, device_id, secret = paired_client
     client.post("/device", data={"glowmarkt_username": "someone@example.com", "glowmarkt_password": "hunter2"})

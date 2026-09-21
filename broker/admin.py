@@ -30,7 +30,7 @@ def list_devices(conn) -> None:
     now = datetime.now(UTC).isoformat()
     rows = conn.execute(
         """
-        SELECT d.device_id, d.created_at, d.paired_at, c.weather_location, c.tfl_stop_ids,
+        SELECT d.device_id, d.device_name, d.created_at, d.paired_at, c.weather_location, c.tfl_stop_ids,
                (SELECT code FROM pairing_codes p WHERE p.device_id = d.device_id AND p.expires_at > ?) AS code
         FROM devices d LEFT JOIN device_config c ON c.device_id = d.device_id
         ORDER BY d.created_at
@@ -40,10 +40,11 @@ def list_devices(conn) -> None:
     if not rows:
         print("No devices.")
     for row in rows:
+        name = row["device_name"] or "unnamed"
         paired = f"paired {row['paired_at']}" if row["paired_at"] else "NOT paired"
         code = f"  code {row['code']}" if row["code"] else ""
         weather = row["weather_location"] or "-"
-        fields = [row["device_id"], f"created {row['created_at']}", paired, f"weather={weather}"]
+        fields = [f"{name} ({row['device_id']})", f"created {row['created_at']}", paired, f"weather={weather}"]
         print("  ".join([*fields, f"stops={row['tfl_stop_ids']}"]) + code)
 
 
