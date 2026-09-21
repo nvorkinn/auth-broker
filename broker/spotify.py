@@ -38,7 +38,7 @@ def callback():
     if request.args.get("state") != session.pop("spotify_oauth_state", None):
         return "Invalid or expired login attempt, please try connecting again.", 400
 
-    device_id = session.get("device_id")
+    device_id: str | None = session.get("device_id")
     if not device_id:
         return redirect(url_for("web.pair"))
 
@@ -124,40 +124,7 @@ def get_current_track(device_id: str) -> dict[str, object] | None:
         return None
     response.raise_for_status()
 
-    data = response.json()
-    track = data.get("item")
-    if not track:
-        return None
-
-    return {
-        "song": track["name"],
-        "artist": ", ".join(artist["name"] for artist in track["artists"]),
-        "album": track["album"]["name"],
-        "album_image": min(track["album"]["images"], key=lambda image: image["height"])["url"],
-        "is_playing": data["is_playing"],
-    }
-
-
-def _queue_item(item: dict[str, object]) -> dict[str, object]:
-    """Same shape as get_current_track() minus is_playing. The queue can hold
-    podcast episodes, which have a show instead of artists/album."""
-    if item.get("type") == "episode":
-        show = item["show"]
-        images = item.get("images") or show.get("images") or []
-        return {
-            "song": item["name"],
-            "artist": show.get("publisher", ""),
-            "album": show["name"],
-            "album_image": min(images, key=lambda image: image["height"])["url"] if images else None,
-        }
-
-    album = item["album"]
-    return {
-        "song": item["name"],
-        "artist": ", ".join(artist["name"] for artist in item["artists"]),
-        "album": album["name"],
-        "album_image": min(album["images"], key=lambda image: image["height"])["url"] if album["images"] else None,
-    }
+    return response.json()
 
 
 def get_queue(device_id: str) -> list[dict[str, object]]:
@@ -175,5 +142,20 @@ def get_queue(device_id: str) -> list[dict[str, object]]:
     if response.status_code == 204 or not response.content:
         return []
     response.raise_for_status()
+    return response.json()
 
-    return [_queue_item(item) for item in response.json().get("queue", []) if item]
+
+def get_users_top_items(device_id: str, type_: str, params) -> list[dict[str, object]] | None:
+    access_token = _get_access_token(device_id)
+    if access_token is None:
+        return None
+    response = requests.get(
+        f"https://api.spotify.com/v1/me/top/{type_}",
+        headers={"Authorization": f"Bearer {access_token}"},
+        timeout=10,
+        params=params,
+    )
+    if response.status_code == 204 or not response.content:
+        return []
+    response.raise_for_status()
+    return response.json()
