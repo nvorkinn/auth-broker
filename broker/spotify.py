@@ -10,7 +10,7 @@ from .db import get_db
 
 bp = Blueprint("spotify", __name__, url_prefix="/auth/spotify")
 
-SCOPE = "user-read-currently-playing user-read-playback-state"
+SCOPE = "user-read-currently-playing user-read-playback-state user-top-read"
 TOKEN_URL = "https://accounts.spotify.com/api/token"
 
 
