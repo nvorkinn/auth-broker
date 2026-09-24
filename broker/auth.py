@@ -1,6 +1,6 @@
 import functools
 
-from flask import jsonify, redirect, request, session, url_for
+from flask import current_app, jsonify, redirect, request, session, url_for
 from werkzeug.security import check_password_hash
 
 from .db import get_db
@@ -17,10 +17,19 @@ def require_device_auth(view):
             return jsonify(error="unauthorized"), 401
 
         secret = auth_header.removeprefix("Bearer ")
-        row = get_db().execute("SELECT device_secret_hash FROM devices WHERE device_id = ?", (device_id,)).fetchone()
+        row = (
+            get_db()
+            .execute("SELECT device_secret_hash, device_name FROM devices WHERE device_id = ?", (device_id,))
+            .fetchone()
+        )
         if row is None or not check_password_hash(row["device_secret_hash"], secret):
             return jsonify(error="unauthorized"), 401
 
+        # device_name is just the Pi's own DEVICE_ID, echoed back here purely so a log line
+        # reads as a name instead of an opaque id -- never used for anything else.
+        current_app.logger.info(
+            "%s %s device=%s (%s)", request.method, request.path, row["device_name"] or "unnamed", device_id
+        )
         return view(device_id, *args, **kwargs)
 
     return wrapped

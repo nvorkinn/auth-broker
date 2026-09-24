@@ -35,6 +35,18 @@ def test_list_with_no_devices(app, capsys):
     assert "No devices." in capsys.readouterr().out
 
 
+def test_list_shows_device_name_when_set_and_unnamed_otherwise(app, client, register_device, capsys):
+    named_id, secret = register_device()
+    client.get(f"/api/devices/{named_id}/config", headers={**_headers(secret), "X-Device-Name": "camilla"})
+    unnamed_id, _ = register_device("another-very-long-device-secret")
+
+    assert admin.main(["list"]) == 0
+
+    out = capsys.readouterr().out
+    assert f"camilla ({named_id})" in out
+    assert f"unnamed ({unnamed_id})" in out
+
+
 def test_unpair_brings_the_device_back_to_showing_a_code_but_keeps_its_settings(app, client, register_device):
     device_id, secret = _paired_device(client, register_device)
     with app.app_context():
