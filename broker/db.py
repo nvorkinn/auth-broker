@@ -23,6 +23,7 @@ CREATE TABLE IF NOT EXISTS device_config (
     device_id TEXT PRIMARY KEY REFERENCES devices(device_id),
     interval INTEGER NOT NULL DEFAULT 15,
     weather_location TEXT NOT NULL DEFAULT '',
+    postcode TEXT NOT NULL DEFAULT '',
     spotify_enabled INTEGER NOT NULL DEFAULT 0,
     tfl_stop_ids TEXT NOT NULL DEFAULT '[]'
 );
@@ -70,6 +71,10 @@ def _migrate(conn: sqlite3.Connection) -> None:
         )
     if "device_name" not in columns:
         conn.execute("ALTER TABLE devices ADD COLUMN device_name TEXT")
+
+    config_columns = {row[1] for row in conn.execute("PRAGMA table_info(device_config)")}
+    if config_columns and "postcode" not in config_columns:
+        conn.execute("ALTER TABLE device_config ADD COLUMN postcode TEXT NOT NULL DEFAULT ''")
 
 
 def init_app(app) -> None:

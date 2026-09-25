@@ -53,8 +53,8 @@ def unpair(conn, device_id: str, wipe_config: bool) -> None:
     conn.execute("DELETE FROM pairing_codes WHERE device_id = ?", (device_id,))
     if wipe_config:
         conn.execute(
-            "UPDATE device_config SET interval = 15, weather_location = '', spotify_enabled = 0, tfl_stop_ids = '[]' "
-            "WHERE device_id = ?",
+            "UPDATE device_config SET interval = 15, weather_location = '', postcode = '', spotify_enabled = 0, "
+            "tfl_stop_ids = '[]' WHERE device_id = ?",
             (device_id,),
         )
         conn.execute("DELETE FROM spotify_tokens WHERE device_id = ?", (device_id,))

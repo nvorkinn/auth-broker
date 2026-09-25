@@ -21,7 +21,7 @@ a Spotify token.
    session to that device for `/device` (settings) and Spotify linking, and
    marks the device paired (`devices.paired_at`): from then on `pairing_code`
    is `null`. `setup_missing` in the same response lists what the device still
-   needs before it's worth showing (a weather location, a bus or tube stop),
+   needs before it's worth showing (a weather location, a postcode, a bus or tube stop),
    so the Pi can tell the recipient. `POST /api/devices/<id>/pairing-code`
    forces a new code, e.g. to link another browser to an already-paired device.
 3. **Spotify:** from `/device`, "Connect Spotify" kicks off the OAuth flow.

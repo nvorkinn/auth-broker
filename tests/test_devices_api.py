@@ -74,11 +74,12 @@ def test_get_config_returns_defaults_and_shared_keys(client, register_device):
     assert body == {
         "interval": 15,
         "weather": {"api_key": "test-weather-key", "location": ""},
+        "postcode": None,
         "tfl": {"app_key": "test-tfl-key", "stop_ids": []},
         "spotify": {"enabled": False},
         "glowmarkt": {"username": None, "password": None},
         "pairing_code": body["pairing_code"],
-        "setup_missing": ["a weather location", "a bus or tube stop"],
+        "setup_missing": ["a weather location", "a postcode", "a bus or tube stop"],
     }
 
 
@@ -405,7 +406,7 @@ def _setup_missing(client, device_id, secret):
 
 def test_setup_missing_lists_what_is_still_needed(app, client, register_device):
     device_id, secret = register_device()
-    assert _setup_missing(client, device_id, secret) == ["a weather location", "a bus or tube stop"]
+    assert _setup_missing(client, device_id, secret) == ["a weather location", "a postcode", "a bus or tube stop"]
 
     def configure(**columns):
         with app.app_context():
@@ -415,13 +416,30 @@ def test_setup_missing_lists_what_is_still_needed(app, client, register_device):
             db.commit()
 
     configure(weather_location="London")
+    assert _setup_missing(client, device_id, secret) == ["a postcode", "a bus or tube stop"]
+
+    configure(postcode="SW1A 1AA")
     assert _setup_missing(client, device_id, secret) == ["a bus or tube stop"]
 
     configure(weather_location="", tfl_stop_ids='["940GZZLUKNG"]')
     assert _setup_missing(client, device_id, secret) == ["a weather location"]
 
-    configure(weather_location="London")
+    configure(weather_location="London", postcode="")
+    assert _setup_missing(client, device_id, secret) == ["a postcode"]
+
+    configure(postcode="SW1A 1AA")
     assert _setup_missing(client, device_id, secret) == []
+
+
+def test_get_config_returns_the_saved_postcode(app, client, register_device):
+    device_id, secret = register_device()
+    with app.app_context():
+        db = get_db()
+        db.execute("UPDATE device_config SET postcode = 'SW1A 1AA' WHERE device_id = ?", (device_id,))
+        db.commit()
+
+    response = client.get(f"/api/devices/{device_id}/config", headers={"Authorization": f"Bearer {secret}"})
+    assert response.get_json()["postcode"] == "SW1A 1AA"
 
 
 def test_a_blank_weather_location_still_counts_as_missing(app, client, register_device):

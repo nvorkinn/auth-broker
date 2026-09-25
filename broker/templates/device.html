@@ -4,6 +4,10 @@
 {% block heading %}Display Settings{% endblock %}
 
 {% block content %}
+{% if error %}
+    <div class="error-banner">{{ error }}</div>
+{% endif %}
+
 <!-- Spotify -->
 <div class="card">
     <div class="card-header">
@@ -92,6 +96,22 @@
             <div class="form-group">
                 <label for="weather_location">Weather Location</label>
                 <input type="text" id="weather_location" name="weather_location" value="{{ config.weather_location }}">
+            </div>
+
+            <div class="form-group">
+                <label for="postcode">Postcode</label>
+                <input
+                    type="text"
+                    id="postcode"
+                    name="postcode"
+                    value="{{ config.postcode }}"
+                    placeholder="e.g. SW1A 1AA"
+                    pattern="\s*[A-Za-z]{1,2}[0-9][A-Za-z0-9]?\s*[0-9][A-Za-z]{2}\s*"
+                    title="A UK postcode, e.g. SW1A 1AA"
+                    autocapitalize="characters"
+                    autocomplete="postal-code"
+                    maxlength="10"
+                >
             </div>
 
             <div class="form-group checkbox-group">
