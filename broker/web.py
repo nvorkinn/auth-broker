@@ -13,6 +13,7 @@ from .db import get_db
 bp = Blueprint("web", __name__)
 
 TFL_API_BASE = "https://api.tfl.gov.uk"
+OPEN_METEO_GEOCODING_URL = "https://geocoding-api.open-meteo.com/v1/search"
 
 # UK postcode shape: outward code (e.g. SW1A, N1, EC2V) then inward code (digit + two letters).
 UK_POSTCODE_RE = re.compile(r"^([A-Z]{1,2}[0-9][A-Z0-9]?)([0-9][A-Z]{2})$")
@@ -25,6 +26,20 @@ def normalize_postcode(value: str) -> str | None:
         return ""
     match = UK_POSTCODE_RE.match(compact)
     return f"{match[1]} {match[2]}" if match else None
+
+
+def weather_location_found(location: str) -> bool | None:
+    """Whether Open-Meteo's geocoding finds the location, using the same lookup the device does
+    (WeatherClient._geocode in countdown). None if Open-Meteo couldn't be asked."""
+    try:
+        response = requests.get(
+            OPEN_METEO_GEOCODING_URL, params={"name": location, "count": 1, "format": "json"}, timeout=5
+        )
+        response.raise_for_status()
+        return bool(response.json().get("results"))
+    except (requests.RequestException, ValueError):
+        current_app.logger.warning("Couldn't check weather location %r with Open-Meteo", location, exc_info=True)
+        return None
 
 
 @bp.get("/")
@@ -75,10 +90,22 @@ def device_config():
 
         raw_postcode = request.form.get("postcode", "")
         postcode = normalize_postcode(raw_postcode)
+
+        errors = []
+        # Only a location Open-Meteo resolves is ever stored, so a stored one is one the device can use;
+        # if it can't be checked right now, that's refused too rather than saved unverified.
+        found = weather_location_found(weather_location) if weather_location else True
+        if found is False:
+            errors.append(
+                f'We couldn\'t find "{weather_location}" for the weather: try just the town or city name, '
+                'not a postcode (e.g. "Kennington" or "London").'
+            )
+        elif found is None:
+            errors.append("We couldn't check the weather location just now. Please try again in a minute.")
         if postcode is None:
-            return _render_device_config(
-                db, device_id, error=f'"{raw_postcode.strip()}" isn\'t a valid UK postcode. Nothing was saved.'
-            ), 400
+            errors.append(f'"{raw_postcode.strip()}" isn\'t a valid UK postcode.')
+        if errors:
+            return _render_device_config(db, device_id, errors=[*errors, "Nothing was saved."]), 400
 
         db.execute(
             """
@@ -108,7 +135,7 @@ def device_config():
     return _render_device_config(db, device_id)
 
 
-def _render_device_config(db, device_id: str, error: str | None = None):
+def _render_device_config(db, device_id: str, errors: list[str] | None = None):
     config = db.execute("SELECT * FROM device_config WHERE device_id = ?", (device_id,)).fetchone()
     stop_ids = json.loads(config["tfl_stop_ids"])
 
@@ -136,7 +163,7 @@ def _render_device_config(db, device_id: str, error: str | None = None):
         stops=resolved_stops,
         spotify_linked=spotify_linked,
         glowmarkt=glowmarkt,
-        error=error,
+        errors=errors or [],
     )
 
 

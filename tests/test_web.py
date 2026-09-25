@@ -1,10 +1,18 @@
 from unittest.mock import Mock, patch
 
 import pytest
+import requests
 
 from broker import admin
 from broker.db import get_db
-from broker.web import normalize_postcode
+from broker.web import normalize_postcode, weather_location_found
+
+
+@pytest.fixture(autouse=True)
+def weather_location_lookup():
+    """Stands in for the Open-Meteo check on save so no test hits the network; finds every location by default."""
+    with patch("broker.web.weather_location_found", return_value=True) as lookup:
+        yield lookup
 
 
 def _mock_get(json_data, status_code=200):
@@ -303,3 +311,83 @@ def test_device_config_post_rejects_invalid_postcode_and_saves_nothing(app, pair
     with app.app_context():
         row = get_db().execute("SELECT * FROM device_config WHERE device_id = ?", (device_id,)).fetchone()
         assert (row["interval"], row["postcode"], row["weather_location"]) == (15, "SW1A 1AA", "London")
+
+
+def test_device_config_post_rejects_weather_location_open_meteo_cant_find(app, paired_client, weather_location_lookup):
+    client, device_id, _ = paired_client
+    client.post("/device", data={"interval": "15", "weather_location": "London"})
+
+    weather_location_lookup.return_value = False
+    response = client.post("/device", data={"interval": "30", "weather_location": "SE17 2PX"})
+
+    assert response.status_code == 400
+    assert b"find &#34;SE17 2PX&#34;" in response.data
+    assert b"Nothing was saved" in response.data
+    weather_location_lookup.assert_called_with("SE17 2PX")
+    with app.app_context():
+        row = get_db().execute("SELECT * FROM device_config WHERE device_id = ?", (device_id,)).fetchone()
+        assert (row["interval"], row["weather_location"]) == (15, "London")
+
+
+def test_device_config_post_refuses_an_unverified_weather_location_when_open_meteo_is_unreachable(
+    app, paired_client, weather_location_lookup
+):
+    client, device_id, _ = paired_client
+    weather_location_lookup.return_value = None
+
+    response = client.post("/device", data={"interval": "15", "weather_location": "London"})
+
+    assert response.status_code == 400
+    assert b"try again in a minute" in response.data
+    with app.app_context():
+        row = (
+            get_db().execute("SELECT weather_location FROM device_config WHERE device_id = ?", (device_id,)).fetchone()
+        )
+        assert row["weather_location"] == ""
+
+
+def test_device_config_post_blank_weather_location_skips_the_lookup(paired_client, weather_location_lookup):
+    client, _, _ = paired_client
+    assert client.post("/device", data={"interval": "15", "weather_location": "  "}).status_code == 302
+    weather_location_lookup.assert_not_called()
+
+
+def test_device_config_post_reports_every_invalid_field_at_once(paired_client, weather_location_lookup):
+    client, _, _ = paired_client
+    weather_location_lookup.return_value = False
+
+    response = client.post("/device", data={"interval": "15", "weather_location": "Nowhere", "postcode": "nope"})
+
+    assert response.status_code == 400
+    assert b"find &#34;Nowhere&#34;" in response.data
+    assert b"valid UK postcode" in response.data
+
+
+def _geocoding_response(json_data):
+    response = Mock()
+    response.json.return_value = json_data
+    response.raise_for_status = Mock()
+    return response
+
+
+def test_weather_location_found_asks_open_meteo_the_same_way_the_device_does(app):
+    found = {"results": [{"name": "London", "latitude": 51.5, "longitude": -0.13}]}
+    with app.app_context(), patch("broker.web.requests.get", return_value=_geocoding_response(found)) as get:
+        assert weather_location_found("London") is True
+
+    get.assert_called_once_with(
+        "https://geocoding-api.open-meteo.com/v1/search",
+        params={"name": "London", "count": 1, "format": "json"},
+        timeout=5,
+    )
+
+
+def test_weather_location_found_is_false_when_open_meteo_has_no_results(app):
+    not_found = {"generationtime_ms": 0.4}  # Open-Meteo leaves "results" out entirely when nothing matches
+    with app.app_context(), patch("broker.web.requests.get", return_value=_geocoding_response(not_found)):
+        assert weather_location_found("SE17 2PX") is False
+
+
+def test_weather_location_found_is_none_when_open_meteo_is_unreachable(app):
+    with app.app_context(), patch("broker.web.requests.get", side_effect=requests.ConnectionError):
+        assert weather_location_found("London") is None
