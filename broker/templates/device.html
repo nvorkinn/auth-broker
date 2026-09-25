@@ -98,6 +98,20 @@
                 <input type="text" id="weather_location" name="weather_location" value="{{ config.weather_location }}">
             </div>
 
+            <div class="form-group checkbox-group">
+                <input type="checkbox" id="spotify_enabled" name="spotify_enabled" {% if config.spotify_enabled %}checked{% endif %}>
+                <label for="spotify_enabled" style="margin: 0; cursor: pointer;">Enable Spotify Now Playing Panel</label>
+            </div>
+        </div>
+    </div>
+
+    <!-- Notice Board -->
+    <div class="card">
+        <div class="card-header">
+            <h2 class="card-title">Notice Board</h2>
+            <p class="card-subtitle">Local information shown on the display for your area.</p>
+        </div>
+        <div class="form-grid">
             <div class="form-group">
                 <label for="postcode">Postcode</label>
                 <input
@@ -112,11 +126,6 @@
                     autocomplete="postal-code"
                     maxlength="10"
                 >
-            </div>
-
-            <div class="form-group checkbox-group">
-                <input type="checkbox" id="spotify_enabled" name="spotify_enabled" {% if config.spotify_enabled %}checked{% endif %}>
-                <label for="spotify_enabled" style="margin: 0; cursor: pointer;">Enable Spotify Now Playing Panel</label>
             </div>
         </div>
     </div>

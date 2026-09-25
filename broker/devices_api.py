@@ -143,7 +143,7 @@ def get_config(device_id):
     return jsonify(
         interval=row["interval"],
         weather={"api_key": current_app.config["WEATHER_API_KEY"], "location": row["weather_location"]},
-        postcode=row["postcode"] or None,
+        notice_board={"postcode": row["postcode"] or None},
         tfl={"app_key": current_app.config["TFL_APP_KEY"], "stop_ids": json.loads(row["tfl_stop_ids"])},
         spotify={"enabled": bool(row["spotify_enabled"])},
         glowmarkt=glowmarkt,

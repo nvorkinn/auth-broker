@@ -74,7 +74,7 @@ def test_get_config_returns_defaults_and_shared_keys(client, register_device):
     assert body == {
         "interval": 15,
         "weather": {"api_key": "test-weather-key", "location": ""},
-        "postcode": None,
+        "notice_board": {"postcode": None},
         "tfl": {"app_key": "test-tfl-key", "stop_ids": []},
         "spotify": {"enabled": False},
         "glowmarkt": {"username": None, "password": None},
@@ -439,7 +439,7 @@ def test_get_config_returns_the_saved_postcode(app, client, register_device):
         db.commit()
 
     response = client.get(f"/api/devices/{device_id}/config", headers={"Authorization": f"Bearer {secret}"})
-    assert response.get_json()["postcode"] == "SW1A 1AA"
+    assert response.get_json()["notice_board"] == {"postcode": "SW1A 1AA"}
 
 
 def test_a_blank_weather_location_still_counts_as_missing(app, client, register_device):
