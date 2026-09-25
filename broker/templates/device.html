@@ -4,8 +4,10 @@
 {% block heading %}Display Settings{% endblock %}
 
 {% block content %}
-{% if error %}
-    <div class="error-banner">{{ error }}</div>
+{% if errors %}
+    <div class="error-banner">
+        {% for error in errors %}<p style="margin: 0;">{{ error }}</p>{% endfor %}
+    </div>
 {% endif %}
 
 <!-- Spotify -->
@@ -95,7 +97,7 @@
 
             <div class="form-group">
                 <label for="weather_location">Weather Location</label>
-                <input type="text" id="weather_location" name="weather_location" value="{{ config.weather_location }}">
+                <input type="text" id="weather_location" name="weather_location" value="{{ config.weather_location }}" placeholder="Town or city, e.g. London">
             </div>
 
             <div class="form-group checkbox-group">
