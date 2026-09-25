@@ -1,7 +1,10 @@
 from unittest.mock import Mock, patch
 
+import pytest
+
 from broker import admin
 from broker.db import get_db
+from broker.web import normalize_postcode
 
 
 def _mock_get(json_data, status_code=200):
@@ -254,3 +257,49 @@ def test_pairing_again_after_an_unpair_restores_access(paired_client):
     assert client.post("/pair", data={"code": code}).status_code == 302
 
     assert client.get("/device").status_code == 200
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ("SW1A 1AA", "SW1A 1AA"),
+        ("sw1a1aa", "SW1A 1AA"),
+        ("  n1  9gu ", "N1 9GU"),
+        ("EC2V 7HH", "EC2V 7HH"),
+        ("M1 1AE", "M1 1AE"),
+        ("B33 8TH", "B33 8TH"),
+        ("", ""),
+        ("   ", ""),
+        ("London", None),
+        ("SW1A", None),
+        ("12345", None),
+        ("SW1A 1AAA", None),
+    ],
+)
+def test_normalize_postcode(raw, expected):
+    assert normalize_postcode(raw) == expected
+
+
+def test_device_config_post_saves_normalized_postcode(app, paired_client):
+    client, device_id, _ = paired_client
+    response = client.post("/device", data={"interval": "15", "postcode": " sw1a1aa "})
+    assert response.status_code == 302
+
+    with app.app_context():
+        row = get_db().execute("SELECT postcode FROM device_config WHERE device_id = ?", (device_id,)).fetchone()
+        assert row["postcode"] == "SW1A 1AA"
+
+
+def test_device_config_post_rejects_invalid_postcode_and_saves_nothing(app, paired_client):
+    client, device_id, _ = paired_client
+    client.post("/device", data={"interval": "15", "postcode": "SW1A 1AA", "weather_location": "London"})
+
+    response = client.post(
+        "/device", data={"interval": "30", "postcode": "not a postcode", "weather_location": "Leeds"}
+    )
+    assert response.status_code == 400
+    assert b"valid UK postcode" in response.data
+
+    with app.app_context():
+        row = get_db().execute("SELECT * FROM device_config WHERE device_id = ?", (device_id,)).fetchone()
+        assert (row["interval"], row["postcode"], row["weather_location"]) == (15, "SW1A 1AA", "London")

@@ -73,3 +73,15 @@ def test_migration_adds_device_name_to_a_db_that_already_has_paired_at(tmp_path)
 
     columns = {row[1] for row in conn.execute("PRAGMA table_info(devices)")}
     assert "device_name" in columns
+
+
+def test_migration_adds_postcode_column_to_existing_device_config(tmp_path):
+    conn = sqlite3.connect(tmp_path / "old.db")
+    conn.executescript(OLD_DEVICES_SCHEMA)
+    conn.execute("CREATE TABLE device_config (device_id TEXT PRIMARY KEY, weather_location TEXT NOT NULL DEFAULT '')")
+    conn.execute("INSERT INTO device_config (device_id) VALUES ('d')")
+
+    _migrate(conn)
+    _migrate(conn)
+
+    assert conn.execute("SELECT postcode FROM device_config WHERE device_id = 'd'").fetchone()[0] == ""

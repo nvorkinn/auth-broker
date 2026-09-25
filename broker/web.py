@@ -1,4 +1,5 @@
 import json
+import re
 from datetime import UTC, datetime
 from typing import Any
 
@@ -12,6 +13,18 @@ from .db import get_db
 bp = Blueprint("web", __name__)
 
 TFL_API_BASE = "https://api.tfl.gov.uk"
+
+# UK postcode shape: outward code (e.g. SW1A, N1, EC2V) then inward code (digit + two letters).
+UK_POSTCODE_RE = re.compile(r"^([A-Z]{1,2}[0-9][A-Z0-9]?)([0-9][A-Z]{2})$")
+
+
+def normalize_postcode(value: str) -> str | None:
+    """Returns the postcode in canonical form ("SW1A 1AA"), "" if blank, or None if it isn't a valid UK postcode."""
+    compact = re.sub(r"\s+", "", value).upper()
+    if not compact:
+        return ""
+    match = UK_POSTCODE_RE.match(compact)
+    return f"{match[1]} {match[2]}" if match else None
 
 
 @bp.get("/")
@@ -60,13 +73,20 @@ def device_config():
         weather_location = request.form.get("weather_location", "").strip()
         spotify_enabled = request.form.get("spotify_enabled") == "on"
 
+        raw_postcode = request.form.get("postcode", "")
+        postcode = normalize_postcode(raw_postcode)
+        if postcode is None:
+            return _render_device_config(
+                db, device_id, error=f'"{raw_postcode.strip()}" isn\'t a valid UK postcode. Nothing was saved.'
+            ), 400
+
         db.execute(
             """
             UPDATE device_config
-            SET interval = ?, weather_location = ?, spotify_enabled = ?, tfl_stop_ids = ?
+            SET interval = ?, weather_location = ?, postcode = ?, spotify_enabled = ?, tfl_stop_ids = ?
             WHERE device_id = ?
             """,
-            (interval, weather_location, int(spotify_enabled), json.dumps(stop_ids), device_id),
+            (interval, weather_location, postcode, int(spotify_enabled), json.dumps(stop_ids), device_id),
         )
 
         glowmarkt_username = request.form.get("glowmarkt_username", "").strip()
@@ -85,6 +105,10 @@ def device_config():
         db.commit()
         return redirect(url_for("web.device_config"))
 
+    return _render_device_config(db, device_id)
+
+
+def _render_device_config(db, device_id: str, error: str | None = None):
     config = db.execute("SELECT * FROM device_config WHERE device_id = ?", (device_id,)).fetchone()
     stop_ids = json.loads(config["tfl_stop_ids"])
 
@@ -112,6 +136,7 @@ def device_config():
         stops=resolved_stops,
         spotify_linked=spotify_linked,
         glowmarkt=glowmarkt,
+        error=error,
     )
 
 

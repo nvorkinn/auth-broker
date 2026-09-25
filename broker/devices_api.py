@@ -68,6 +68,8 @@ def _setup_missing(config_row) -> list[str]:
     missing = []
     if not config_row["weather_location"].strip():
         missing.append("a weather location")
+    if not config_row["postcode"].strip():
+        missing.append("a postcode")
     if not json.loads(config_row["tfl_stop_ids"]):
         missing.append("a bus or tube stop")
     return missing
@@ -141,6 +143,7 @@ def get_config(device_id):
     return jsonify(
         interval=row["interval"],
         weather={"api_key": current_app.config["WEATHER_API_KEY"], "location": row["weather_location"]},
+        notice_board={"postcode": row["postcode"] or None},
         tfl={"app_key": current_app.config["TFL_APP_KEY"], "stop_ids": json.loads(row["tfl_stop_ids"])},
         spotify={"enabled": bool(row["spotify_enabled"])},
         glowmarkt=glowmarkt,
