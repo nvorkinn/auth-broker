@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 
-{% block title %}Display Settings{% endblock %}
-{% block heading %}Display Settings{% endblock %}
+{% block title %}Countdown{% endblock %}
+{% block heading %}{% endblock %}
 
 {% block content %}
 {% if errors %}
@@ -10,44 +10,53 @@
     </div>
 {% endif %}
 
-<!-- Spotify -->
-<div class="card">
-    <div class="card-header">
-        <h2 class="card-title">Spotify</h2>
-        <p class="card-subtitle">Show what's currently playing on the display.</p>
-    </div>
-    <div class="status-row">
-        {% if spotify_linked %}
-            <span class="status-pill status-linked">Connected</span>
-            <form method="POST" action="{{ url_for('web.spotify_disconnect') }}" style="margin:0;">
-                <button type="submit" class="btn-action btn-delete">Disconnect</button>
-            </form>
-        {% else %}
-            <span class="status-pill status-unlinked">Not connected</span>
-            <a href="{{ url_for('spotify.login') }}" class="btn-action" style="text-decoration:none;">Connect Spotify</a>
-        {% endif %}
-    </div>
-</div>
-
-<!-- Search & Add Stops -->
-<div class="card">
-    <div class="card-header">
-        <h2 class="card-title">Search & Add TfL Stops</h2>
-        <p class="card-subtitle">Search for Tube stations, interchange hubs, or Bus stops (e.g. "Kennington", "Kings Cross", "Elephant")</p>
-    </div>
-    <div class="search-container">
-        <input type="text" id="searchInput" class="search-input" placeholder="Type a station, street, or stop name..." autocomplete="off">
-        <span id="searchSpinner" class="search-spinner">Searching TfL...</span>
-        <div id="searchResults" class="search-results"></div>
-    </div>
-</div>
+<!-- Lives outside the settings form because forms can't nest; the Disconnect button points at it. -->
+<form id="spotifyDisconnectForm" method="POST" action="{{ url_for('web.spotify_disconnect') }}"></form>
 
 <form method="POST">
-    <!-- Ordered Stops List -->
+    <!-- General -->
     <div class="card">
         <div class="card-header">
-            <h2 class="card-title">Configured Arrival Stops</h2>
-            <p class="card-subtitle">The display shows 2 stops at a time and cycles through this list on each refresh cycle.</p>
+            <h2 class="card-title">General</h2>
+        </div>
+        <div class="form-grid">
+            <div class="form-group">
+                <label for="postcode">Postcode</label>
+                <input
+                    type="text"
+                    id="postcode"
+                    name="postcode"
+                    value="{{ config.postcode }}"
+                    placeholder="e.g. SW1A 1AA"
+                    pattern="\s*[A-Za-z]{1,2}[0-9][A-Za-z0-9]?\s*[0-9][A-Za-z]{2}\s*"
+                    title="A UK postcode, e.g. SW1A 1AA"
+                    autocapitalize="characters"
+                    autocomplete="postal-code"
+                    maxlength="10"
+                >
+            </div>
+
+            <div class="form-group">
+                <label for="weather_location">Weather location</label>
+                <input type="text" id="weather_location" name="weather_location" value="{{ config.weather_location }}" placeholder="e.g. London">
+            </div>
+
+            <div class="form-group">
+                <label for="interval">Refresh interval (seconds)</label>
+                <input type="number" id="interval" name="interval" value="{{ config.interval }}" min="5" max="300" required>
+            </div>
+        </div>
+    </div>
+
+    <!-- TfL -->
+    <div class="card">
+        <div class="card-header">
+            <h2 class="card-title">TfL</h2>
+        </div>
+        <div class="search-container">
+            <input type="text" id="searchInput" class="search-input" placeholder="Search for a station or stop" autocomplete="off">
+            <span id="searchSpinner" class="search-spinner">Searching…</span>
+            <div id="searchResults" class="search-results"></div>
         </div>
 
         <input type="hidden" name="stops_order" id="stopsOrderInput" value="{{ stops | map(attribute='id') | join(',') }}">
@@ -78,86 +87,58 @@
                     </div>
                 {% endfor %}
             {% else %}
-                <div class="empty-stops">No stops configured. Search and add stops above to begin.</div>
+                <div class="empty-stops">No stops yet.</div>
             {% endif %}
         </div>
     </div>
 
-    <!-- General Display Settings -->
+    <!-- Spotify -->
     <div class="card">
         <div class="card-header">
-            <h2 class="card-title">General Display Settings</h2>
-            <p class="card-subtitle">Adjust refresh rates and peripheral panels.</p>
+            <h2 class="card-title">Spotify</h2>
         </div>
-        <div class="form-grid">
-            <div class="form-group">
-                <label for="interval">Refresh Interval (Seconds)</label>
-                <input type="number" id="interval" name="interval" value="{{ config.interval }}" min="5" max="300" required>
-            </div>
-
-            <div class="form-group">
-                <label for="weather_location">Weather Location</label>
-                <input type="text" id="weather_location" name="weather_location" value="{{ config.weather_location }}" placeholder="Town or city, e.g. London">
-            </div>
-
-            <div class="form-group checkbox-group">
+        <div class="status-row">
+            <div class="checkbox-group">
                 <input type="checkbox" id="spotify_enabled" name="spotify_enabled" {% if config.spotify_enabled %}checked{% endif %}>
-                <label for="spotify_enabled" style="margin: 0; cursor: pointer;">Enable Spotify Now Playing Panel</label>
+                <label for="spotify_enabled" style="margin: 0; cursor: pointer; font-size: 14px;">Enabled</label>
+            </div>
+            <div class="status-row">
+                {% if spotify_linked %}
+                    <span class="status-pill status-linked">Connected</span>
+                    <button type="submit" form="spotifyDisconnectForm" class="btn-action btn-delete">Disconnect</button>
+                {% else %}
+                    <span class="status-pill status-unlinked">Not connected</span>
+                    <a href="{{ url_for('spotify.login') }}" class="btn-action" style="text-decoration:none;">Connect</a>
+                {% endif %}
             </div>
         </div>
     </div>
 
-    <!-- Notice Board -->
+    <!-- Energy -->
     <div class="card">
         <div class="card-header">
-            <h2 class="card-title">Notice Board</h2>
-            <p class="card-subtitle">Local information shown on the display for your area.</p>
+            <h2 class="card-title">Energy</h2>
         </div>
         <div class="form-grid">
             <div class="form-group">
-                <label for="postcode">Postcode</label>
-                <input
-                    type="text"
-                    id="postcode"
-                    name="postcode"
-                    value="{{ config.postcode }}"
-                    placeholder="e.g. SW1A 1AA"
-                    pattern="\s*[A-Za-z]{1,2}[0-9][A-Za-z0-9]?\s*[0-9][A-Za-z]{2}\s*"
-                    title="A UK postcode, e.g. SW1A 1AA"
-                    autocapitalize="characters"
-                    autocomplete="postal-code"
-                    maxlength="10"
-                >
-            </div>
-        </div>
-    </div>
-
-    <!-- Glowmarkt -->
-    <div class="card">
-        <div class="card-header">
-            <h2 class="card-title">Glowmarkt (Energy Usage)</h2>
-            <p class="card-subtitle">Connect your Glowmarkt / Bright account to show energy usage on the display.</p>
-        </div>
-        <div class="form-grid">
-            <div class="form-group">
-                <label for="glowmarkt_username">Glowmarkt Username</label>
+                <label for="glowmarkt_username">Username</label>
                 <input type="text" id="glowmarkt_username" name="glowmarkt_username" value="{{ glowmarkt.username }}" autocomplete="off">
             </div>
 
             <div class="form-group">
-                <label for="glowmarkt_password">Glowmarkt Password</label>
+                <label for="glowmarkt_password">Password</label>
                 <input
                     type="password"
                     id="glowmarkt_password"
                     name="glowmarkt_password"
-                    placeholder="{{ 'Saved — leave blank to keep it' if glowmarkt.has_password else 'Enter password' }}"
+                    placeholder="{{ 'Saved — leave blank to keep it' if glowmarkt.has_password else '' }}"
                     autocomplete="new-password"
                 >
             </div>
         </div>
     </div>
 
-    <button type="submit" class="btn-save">Save & Apply Settings</button>
+    <button type="submit" class="btn-save">Save</button>
 </form>
 
 <script>
@@ -168,6 +149,11 @@
     const stopsOrderInput = document.getElementById('stopsOrderInput');
 
     let debounceTimeout = null;
+
+    // The search box now sits inside the settings form; don't let Enter submit it.
+    searchInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') e.preventDefault();
+    });
 
     searchInput.addEventListener('input', () => {
         clearTimeout(debounceTimeout);
@@ -231,7 +217,7 @@
 
         const emptyNotice = stopsList.querySelector('.empty-stops');
         if (cards.length === 0 && !emptyNotice) {
-            stopsList.innerHTML = '<div class="empty-stops">No stops configured. Search and add stops above to begin.</div>';
+            stopsList.innerHTML = '<div class="empty-stops">No stops yet.</div>';
         } else if (cards.length > 0 && emptyNotice) {
             emptyNotice.remove();
         }

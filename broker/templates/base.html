@@ -53,10 +53,10 @@
             background-color: var(--tfl-red);
             color: white;
             font-weight: 800;
-            font-size: 13px;
-            padding: 4px 10px;
+            font-size: 20px;
+            padding: 6px 16px;
             border-radius: 9999px;
-            letter-spacing: 0.5px;
+            letter-spacing: 1px;
         }
 
         h1 {
@@ -308,7 +308,6 @@
             display: flex;
             align-items: center;
             gap: 8px;
-            margin-top: 26px;
         }
 
         .btn-save, .btn-primary {
@@ -385,7 +384,7 @@
         <header>
             <div class="brand">
                 <span class="brand-badge">COUNTDOWN</span>
-                <h1>{% block heading %}Settings{% endblock %}</h1>
+                {% if self.heading() %}<h1>{% block heading %}{% endblock %}</h1>{% endif %}
             </div>
         </header>
         {% block content %}{% endblock %}
