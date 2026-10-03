@@ -1,9 +1,27 @@
 import functools
+import hmac
+import os
 
 from flask import current_app, jsonify, redirect, request, session, url_for
 from werkzeug.security import check_password_hash
 
 from .db import get_db
+
+
+def require_renderer_auth(view):
+    @functools.wraps(view)
+    def wrapper(*args, **kwargs):
+        auth_header = request.headers.get("Authorization", "")
+        if not auth_header.startswith("Bearer "):
+            return jsonify(error="unauthorized"), 401
+
+        secret = auth_header.removeprefix("Bearer ")
+        expected = os.environ["COUNTDOWN_RENDERER_TOKEN"]
+        if not secret or not hmac.compare_digest(secret, expected):
+            return jsonify(error="unauthorized"), 401
+        return view(*args, **kwargs)
+
+    return wrapper
 
 
 def require_device_auth(view):
