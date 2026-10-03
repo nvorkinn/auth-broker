@@ -40,6 +40,13 @@ CREATE TABLE IF NOT EXISTS glowmarkt_credentials (
     username TEXT NOT NULL DEFAULT '',
     password_encrypted TEXT
 );
+
+CREATE TABLE IF NOT EXISTS frames (
+    device_id       TEXT PRIMARY KEY REFERENCES devices(device_id),
+    frame           BLOB NOT NULL,
+    etag            TEXT NOT NULL,
+    rendered_at     TEXT NOT NULL
+);
 """
 
 

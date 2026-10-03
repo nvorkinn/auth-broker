@@ -9,6 +9,7 @@ def app(tmp_path, monkeypatch):
     monkeypatch.setenv("SPOTIFY_REDIRECT_URI", "https://auth.example.com/auth/spotify/callback")
     monkeypatch.setenv("TFL_APP_KEY", "test-tfl-key")
     monkeypatch.setenv("WEATHER_API_KEY", "test-weather-key")
+    monkeypatch.setenv("COUNTDOWN_RENDERER_TOKEN", "test-renderer-token")
     monkeypatch.setenv("BROKER_DB_PATH", str(tmp_path / "broker.db"))
 
     from cryptography.fernet import Fernet

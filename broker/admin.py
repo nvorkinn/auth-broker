@@ -12,7 +12,13 @@ from datetime import UTC, datetime
 
 from .db import _db_path
 
-DEVICE_TABLES = ["pairing_codes", "device_config", "spotify_tokens", "glowmarkt_credentials"]
+DEVICE_TABLES = [
+    "pairing_codes",
+    "device_config",
+    "spotify_tokens",
+    "glowmarkt_credentials",
+    "frames",
+]
 
 
 def _connect() -> sqlite3.Connection:
@@ -59,6 +65,7 @@ def unpair(conn, device_id: str, wipe_config: bool) -> None:
         )
         conn.execute("DELETE FROM spotify_tokens WHERE device_id = ?", (device_id,))
         conn.execute("DELETE FROM glowmarkt_credentials WHERE device_id = ?", (device_id,))
+        conn.execute("DELETE FROM frames WHERE device_id = ?", (device_id,))
     conn.commit()
 
 
