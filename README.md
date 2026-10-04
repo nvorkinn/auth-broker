@@ -22,8 +22,12 @@ a Spotify token.
    marks the device paired (`devices.paired_at`): from then on `pairing_code`
    is `null`. `setup_missing` in the same response lists what the device still
    needs before it's worth showing (a weather location, a postcode, a bus or tube stop),
-   so the Pi can tell the recipient. `POST /api/devices/<id>/pairing-code`
-   forces a new code, e.g. to link another browser to an already-paired device.
+   so the Pi can tell the recipient. To link another browser to an
+   already-paired device (or get back in after the 30-day session expires),
+   get a fresh code: "Link another browser" on `/device` from a browser that's
+   still paired, `flask devices code <device_id>` (below), or the Pi itself via
+   `POST /api/devices/<id>/pairing-code`. Any live code also appears on the
+   Pi's screen until it expires or is used.
 3. **Spotify:** from `/device`, "Connect Spotify" kicks off the OAuth flow.
    The server exchanges the code for tokens and keeps them — the Pi never
    sees a Spotify token, only its own device secret.
@@ -88,6 +92,7 @@ start, use the admin CLI inside the container; it has no network surface:
 
 ```bash
 docker compose exec auth-broker flask --app wsgi devices list
+docker compose exec auth-broker flask --app wsgi devices code <device_id>             # a fresh code, e.g. for a new browser
 docker compose exec auth-broker flask --app wsgi devices unpair <device_id>            # show a pairing code again
 docker compose exec auth-broker flask --app wsgi devices unpair <device_id> --config   # ...and reset its settings and linked accounts
 docker compose exec auth-broker flask --app wsgi devices forget <device_id>            # delete it; it must register again

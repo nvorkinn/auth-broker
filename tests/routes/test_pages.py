@@ -199,6 +199,7 @@ def test_unpairing_a_device_revokes_the_browser_that_paired_it(paired_client, cl
 
     assert _redirects_to_pair(client.get("/device"))
     assert _redirects_to_pair(client.post("/device/spotify/disconnect"))
+    assert _redirects_to_pair(client.post("/device/pairing-code"))
     assert _redirects_to_pair(client.get("/"))  # the stale session was cleared, not just refused
 
 
@@ -221,6 +222,30 @@ def test_pairing_again_after_an_unpair_restores_access(paired_client, cli):
     assert client.post("/pair", data={"code": code}).status_code == 302
 
     assert client.get("/device").status_code == 200
+
+
+def test_device_config_offers_to_link_another_browser_when_no_code_is_live(paired_client):
+    client, _, _ = paired_client
+    page = client.get("/device").data
+    assert b"Link another browser" in page
+
+
+def test_linking_another_browser_shows_a_code_it_can_pair_with(app, paired_client):
+    client, device_id, secret = paired_client
+
+    response = client.post("/device/pairing-code")
+
+    assert response.status_code == 302 and response.headers["Location"] == "/device"
+    code = client.get(f"/api/devices/{device_id}/config", headers={"Authorization": f"Bearer {secret}"}).get_json()[
+        "pairing_code"
+    ]
+    page = client.get("/device").data
+    assert code.encode() in page and b"Link another browser" not in page
+
+    new_browser = app.test_client()
+    assert new_browser.post("/pair", data={"code": code}).status_code == 302
+    assert new_browser.get("/device").status_code == 200
+    assert client.get("/device").status_code == 200  # the first browser keeps its access
 
 
 @pytest.mark.parametrize(
