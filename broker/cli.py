@@ -1,6 +1,7 @@
 """Manual admin for the broker's devices, for development. Run it inside the container:
 
 docker compose exec auth-broker flask --app wsgi devices list
+docker compose exec auth-broker flask --app wsgi devices code <device_id>
 docker compose exec auth-broker flask --app wsgi devices unpair <device_id> [--config]
 docker compose exec auth-broker flask --app wsgi devices forget <device_id>
 
@@ -8,14 +9,15 @@ Like any `flask` command it loads the app, so it needs the app's env vars (the c
 """
 
 import json
-from datetime import UTC, datetime
+from datetime import datetime
 
 import click
 from flask.cli import AppGroup
 from sqlalchemy import select
 
 from .db import db
-from .models import Device, DeviceConfig, PairingCode
+from .models import Device, DeviceConfig
+from .services import pairing
 
 devices = AppGroup("devices", help="Manual device admin for development.")
 
@@ -34,14 +36,11 @@ def _timestamp(value: datetime) -> str:
 @devices.command("list")
 def list_devices() -> None:
     """Show every device and whether it's paired."""
-    now = datetime.now(UTC)
     all_devices = db.session.scalars(select(Device).order_by(Device.created_at)).all()
     if not all_devices:
         click.echo("No devices.")
     for device in all_devices:
-        code = db.session.scalar(
-            select(PairingCode.code).where(PairingCode.device_id == device.device_id, PairingCode.expires_at > now)
-        )
+        code = pairing.live_code(device.device_id)
         config = device.config
         name = device.device_name or "unnamed"
         paired = f"paired {_timestamp(device.paired_at)}" if device.paired_at else "NOT paired"
@@ -51,6 +50,16 @@ def list_devices() -> None:
         created = f"created {_timestamp(device.created_at)}"
         fields = [f"{name} ({device.device_id})", created, paired, f"weather={weather}", f"stops={stops}"]
         click.echo("  ".join(fields) + code_field)
+
+
+@devices.command()
+@click.argument("device_id")
+def code(device_id: str) -> None:
+    """Issue a fresh pairing code, e.g. to link a new browser to an already-paired device."""
+    _get_device(device_id)
+    new_code = pairing.issue_code(device_id)
+    minutes = int(pairing.CODE_TTL.total_seconds() // 60)
+    click.echo(f"{new_code}: enter it at /pair within {minutes} minutes (the device shows it too).")
 
 
 @devices.command()

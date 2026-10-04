@@ -115,8 +115,17 @@ def _render_device_config(device_id: str, errors: list[str] | None = None):
         stops=tfl.resolve_stops(config.tfl_stop_ids),
         spotify_linked=db.session.get(SpotifyToken, device_id) is not None,
         glowmarkt=glowmarkt,
+        pairing_code=pairing.live_code(device_id),
         errors=errors or [],
     )
+
+
+@bp.post("/device/pairing-code")
+@require_paired_session
+def link_browser():
+    """A code for this device that another browser can enter at /pair; the device shows it too."""
+    pairing.issue_code(session["device_id"])
+    return redirect(url_for("pages.device_config"))
 
 
 @bp.post("/device/spotify/disconnect")

@@ -26,11 +26,16 @@ def issue_code(device_id: str) -> str:
     return code
 
 
-def current_code_for(device_id: str) -> str | None:
-    """A live code if there is one; otherwise a new one, unless the device is already paired."""
-    live = db.session.scalar(
+def live_code(device_id: str) -> str | None:
+    """The device's unexpired code, if it has one."""
+    return db.session.scalar(
         select(PairingCode.code).where(PairingCode.device_id == device_id, PairingCode.expires_at > datetime.now(UTC))
     )
+
+
+def current_code_for(device_id: str) -> str | None:
+    """A live code if there is one; otherwise a new one, unless the device is already paired."""
+    live = live_code(device_id)
     if live:
         return live
     paired_at = db.session.get(Device, device_id).paired_at

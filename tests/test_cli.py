@@ -104,8 +104,32 @@ def test_forget_leaves_other_devices_alone(app, client, register_device, cli):
     assert _config(client, kept, kept_secret)["pairing_code"] is not None
 
 
+def test_code_links_a_new_browser_to_an_already_paired_device(app, client, register_device, cli):
+    device_id, secret = _paired_device(client, register_device)
+
+    result = cli("code", device_id)
+
+    assert result.exit_code == 0
+    code = result.output.split(":")[0]
+    assert _config(client, device_id, secret)["pairing_code"] == code  # the device shows it too
+    new_browser = app.test_client()
+    new_browser.post("/pair", data={"code": code})
+    assert new_browser.get("/device").status_code == 200
+    assert client.get("/device").status_code == 200  # the first browser keeps its access
+
+
+def test_code_replaces_the_previous_code(app, client, register_device, cli):
+    device_id, _ = _paired_device(client, register_device)
+    first = cli("code", device_id).output.split(":")[0]
+    cli("code", device_id)
+
+    new_browser = app.test_client()
+    new_browser.post("/pair", data={"code": first})
+    assert new_browser.get("/device").status_code == 302
+
+
 def test_unknown_device_is_an_error(cli):
-    for command in ("unpair", "forget"):
+    for command in ("code", "unpair", "forget"):
         result = cli(command, "nope")
         assert result.exit_code == 1
         assert "No device nope." in result.stderr
