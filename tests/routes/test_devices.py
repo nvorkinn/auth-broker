@@ -1,4 +1,5 @@
 from datetime import UTC, datetime, timedelta
+from unittest.mock import patch
 
 from sqlalchemy import func, select, update
 
@@ -127,16 +128,58 @@ def test_get_config_replaces_an_expired_code_for_an_unpaired_device(app, client,
     ).get_json()["code"]
 
     with app.app_context():
-        db.session.execute(
-            update(PairingCode)
-            .where(PairingCode.device_id == device_id)
-            .values(expires_at=datetime.now(UTC) - timedelta(seconds=1))
-        )
-        db.session.commit()
+        _expire_codes(device_id)
 
     fresh = _get_pairing_code(client, device_id, secret)
     assert fresh is not None
     assert fresh != code
+
+
+def _expire_codes(device_id):
+    db.session.execute(
+        update(PairingCode)
+        .where(PairingCode.device_id == device_id)
+        .values(expires_at=datetime.now(UTC) - timedelta(seconds=1))
+    )
+    db.session.commit()
+
+
+def _codes_for(device_id):
+    return db.session.scalars(select(PairingCode.code).where(PairingCode.device_id == device_id)).all()
+
+
+def test_issuing_a_code_purges_other_devices_expired_codes(app, client, register_device):
+    abandoned_id, abandoned_secret = register_device()
+    waiting_id, waiting_secret = register_device("another-very-long-device-secret")
+    new_id, new_secret = register_device("a-third-very-long-device-secret")
+    _get_pairing_code(client, abandoned_id, abandoned_secret)
+    waiting_code = _get_pairing_code(client, waiting_id, waiting_secret)
+    with app.app_context():
+        _expire_codes(abandoned_id)
+
+    _get_pairing_code(client, new_id, new_secret)
+
+    with app.app_context():
+        assert _codes_for(abandoned_id) == []
+        assert _codes_for(waiting_id) == [waiting_code]  # a live code is left alone
+
+
+def test_purge_keeps_a_code_up_to_its_expiry(app, client, register_device):
+    """The purge uses redeem_code's cutoff, so a code that can still be redeemed is never deleted."""
+    device_id, secret = register_device()
+    other_id, other_secret = register_device("another-very-long-device-secret")
+    code = _get_pairing_code(client, device_id, secret)
+    expiry = datetime.now(UTC) + timedelta(minutes=1)
+    with app.app_context():
+        db.session.execute(update(PairingCode).where(PairingCode.code == code).values(expires_at=expiry))
+        db.session.commit()
+
+    with patch("broker.services.pairing.datetime") as mocked:
+        mocked.now.return_value = expiry
+        _get_pairing_code(client, other_id, other_secret)
+
+    with app.app_context():
+        assert _codes_for(device_id) == [code]
 
 
 def test_get_config_pairing_code_is_the_latest_one(client, register_device):
