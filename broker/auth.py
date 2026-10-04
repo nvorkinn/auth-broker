@@ -1,12 +1,17 @@
 import functools
 import hmac
 import os
+from datetime import UTC, datetime, timedelta
 
 from flask import current_app, jsonify, redirect, request, session, url_for
 from werkzeug.security import check_password_hash
 
 from .db import db
 from .models import Device
+
+# How stale devices.last_seen_at may get before a request updates it. Some device endpoints are
+# polled every few seconds; this keeps that from being a database write each time.
+LAST_SEEN_RESOLUTION = timedelta(minutes=1)
 
 
 def require_renderer_auth(view):
@@ -45,7 +50,34 @@ def require_device_auth(view):
         current_app.logger.info(
             "%s %s device=%s (%s)", request.method, request.path, device.device_name or "unnamed", device_id
         )
+        _mark_seen(device)
         return view(device_id, *args, **kwargs)
+
+    return wrapped
+
+
+def _mark_seen(device: Device) -> None:
+    now = datetime.now(UTC)
+    if device.last_seen_at is None or now - LAST_SEEN_RESOLUTION > device.last_seen_at:
+        device.last_seen_at = now
+        db.session.commit()
+
+
+def require_status_token(view):
+    """Protects the read-only status endpoint with STATUS_TOKEN from the environment. With no token
+    set the endpoint is off and answers 404, as if it didn't exist."""
+
+    @functools.wraps(view)
+    def wrapped(*args, **kwargs):
+        expected = current_app.config["STATUS_TOKEN"]
+        if not expected:
+            return jsonify(error="not found"), 404
+
+        auth_header = request.headers.get("Authorization", "")
+        secret = auth_header.removeprefix("Bearer ")
+        if not auth_header.startswith("Bearer ") or not hmac.compare_digest(secret, expected):
+            return jsonify(error="unauthorized"), 401
+        return view(*args, **kwargs)
 
     return wrapped
 

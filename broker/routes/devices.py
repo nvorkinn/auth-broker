@@ -11,6 +11,7 @@ from ..auth import require_device_auth
 from ..db import db
 from ..models import Device, DeviceConfig, GlowmarktCredentials
 from ..services import pairing
+from ..services.setup import setup_missing
 
 bp = Blueprint("devices", __name__, url_prefix="/api/devices")
 
@@ -35,17 +36,6 @@ def register():
     )
     db.session.commit()
     return jsonify(device_id=device_id), 201
-
-
-def _setup_missing(config: DeviceConfig) -> list[str]:
-    missing = []
-    if not config.weather_location.strip():
-        missing.append("a weather location")
-    if not config.postcode.strip():
-        missing.append("a postcode")
-    if not config.tfl_stop_ids:
-        missing.append("a bus or tube stop")
-    return missing
 
 
 @bp.post("/<device_id>/pairing-code")
@@ -92,5 +82,5 @@ def get_config(device_id):
         spotify={"enabled": config.spotify_enabled},
         glowmarkt=glowmarkt,
         pairing_code=pairing.current_code_for(device_id),
-        setup_missing=_setup_missing(config),
+        setup_missing=setup_missing(config),
     )

@@ -20,6 +20,8 @@ class Device(db.Model):
     created_at: Mapped[datetime] = mapped_column(UTCDateTime)
     paired_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
     device_name: Mapped[str | None] = mapped_column(String)
+    # Bumped on authenticated device requests, at most once a minute (see require_device_auth).
+    last_seen_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
 
     config: Mapped["DeviceConfig | None"] = relationship(back_populates="device", cascade="all, delete-orphan")
     pairing_codes: Mapped[list["PairingCode"]] = relationship(back_populates="device", cascade="all, delete-orphan")
