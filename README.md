@@ -39,6 +39,15 @@ Every device-facing endpoint is authenticated with `Authorization: Bearer
 <device_secret>`; every browser-facing page is gated on the signed session
 cookie set at pairing time.
 
+`/pair` itself needs no login, so wrong codes are throttled per client IP: ten
+in a minute lock that IP out of `/pair` for a minute (429 with `Retry-After`),
+and each further lockout doubles, up to an hour. Each wrong code is logged
+with its IP. The counts are kept in memory, so they reset on restart and
+assume a single gunicorn worker. The client IP comes from the
+`X-Forwarded-For` header Caddy adds; that's only trustworthy because Caddy is
+the only thing that can reach the app's port, so don't publish port 5000
+beyond `127.0.0.1` without changing the `ProxyFix` setup in `create_app`.
+
 ## Code layout
 
 ```

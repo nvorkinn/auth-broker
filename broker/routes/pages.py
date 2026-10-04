@@ -2,7 +2,7 @@
 
 import re
 
-from flask import Blueprint, redirect, render_template, request, session, url_for
+from flask import Blueprint, current_app, redirect, render_template, request, session, url_for
 
 from ..auth import require_paired_session
 from ..clients import tfl, weather
@@ -35,14 +35,34 @@ def pair():
     if request.method == "GET":
         return render_template("pair.html", error=None)
 
+    # Codes are guessable given enough tries, so wrong ones are throttled per IP; a locked-out IP is
+    # refused even with the right code, or the lockout wouldn't slow guessing down.
+    throttle = current_app.extensions["pair_throttle"]
+    ip = request.remote_addr or "unknown"
+    retry_after = throttle.retry_after(ip)
+    if retry_after is not None:
+        return _too_many_attempts(retry_after)
+
     device_id = pairing.redeem_code(request.form.get("code", "").strip().upper())
     if device_id is None:
+        lockout = throttle.record_failure(ip)
+        current_app.logger.warning("Wrong pairing code from %s", ip)
+        if lockout is not None:
+            current_app.logger.warning("Too many wrong pairing codes from %s; locked out for %ss", ip, lockout)
+            return _too_many_attempts(lockout)
         return render_template("pair.html", error="That code is invalid or has expired.")
 
     session.clear()
     session.permanent = True
     session["device_id"] = device_id
     return redirect(url_for("pages.device_config"))
+
+
+def _too_many_attempts(retry_after: int):
+    minutes = -(-retry_after // 60)
+    wait = "a minute" if minutes == 1 else f"{minutes} minutes"
+    error = f"Too many incorrect codes. Please wait {wait} and try again."
+    return render_template("pair.html", error=error), 429, {"Retry-After": str(retry_after)}
 
 
 @bp.route("/device", methods=["GET", "POST"])
