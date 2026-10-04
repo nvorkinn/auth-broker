@@ -5,7 +5,7 @@ import secrets
 import string
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, or_, select
 
 from ..db import db
 from ..models import Device, PairingCode
@@ -17,10 +17,13 @@ CODE_TTL = timedelta(minutes=10)
 
 
 def issue_code(device_id: str) -> str:
-    """A fresh code for the device, replacing any it already had."""
+    """A fresh code for the device, replacing any it already had. Also clears out every device's
+    expired codes, which would otherwise linger for devices that never ask for a new one."""
+    now = datetime.now(UTC)
     code = "".join(secrets.choice(CODE_ALPHABET) for _ in range(CODE_LENGTH))
-    expires_at = datetime.now(UTC) + CODE_TTL
-    db.session.execute(delete(PairingCode).where(PairingCode.device_id == device_id))
+    # Same cutoff as redeem_code: a code is usable up to and including its expires_at.
+    db.session.execute(delete(PairingCode).where(or_(PairingCode.device_id == device_id, PairingCode.expires_at < now)))
+    expires_at = now + CODE_TTL
     db.session.add(PairingCode(code=code, device_id=device_id, expires_at=expires_at))
     db.session.commit()
     return code
