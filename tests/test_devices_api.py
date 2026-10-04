@@ -1,7 +1,10 @@
 from datetime import UTC, datetime, timedelta
 from unittest.mock import patch
 
-from broker.db import get_db
+from sqlalchemy import func, select, update
+
+from broker.db import db
+from broker.models import Device, DeviceConfig, PairingCode
 
 
 def test_register_creates_device(client):
@@ -125,12 +128,12 @@ def test_get_config_replaces_an_expired_code_for_an_unpaired_device(app, client,
     ).get_json()["code"]
 
     with app.app_context():
-        db = get_db()
-        db.execute(
-            "UPDATE pairing_codes SET expires_at = ? WHERE device_id = ?",
-            ((datetime.now(UTC) - timedelta(seconds=1)).isoformat(), device_id),
+        db.session.execute(
+            update(PairingCode)
+            .where(PairingCode.device_id == device_id)
+            .values(expires_at=(datetime.now(UTC) - timedelta(seconds=1)).isoformat())
         )
-        db.commit()
+        db.session.commit()
 
     fresh = _get_pairing_code(client, device_id, secret)
     assert fresh is not None
@@ -162,8 +165,8 @@ def test_get_config_stores_device_name_from_header(app, client, register_device)
     )
 
     with app.app_context():
-        row = get_db().execute("SELECT device_name FROM devices WHERE device_id = ?", (device_id,)).fetchone()
-    assert row["device_name"] == "camilla"
+        device_name = db.session.get(Device, device_id).device_name
+    assert device_name == "camilla"
 
 
 def test_get_config_without_device_name_header_leaves_it_unset(app, client, register_device):
@@ -171,8 +174,8 @@ def test_get_config_without_device_name_header_leaves_it_unset(app, client, regi
     client.get(f"/api/devices/{device_id}/config", headers={"Authorization": f"Bearer {secret}"})
 
     with app.app_context():
-        row = get_db().execute("SELECT device_name FROM devices WHERE device_id = ?", (device_id,)).fetchone()
-    assert row["device_name"] is None
+        device_name = db.session.get(Device, device_id).device_name
+    assert device_name is None
 
 
 def test_get_config_device_name_self_heals_on_rename(app, client, register_device):
@@ -184,8 +187,8 @@ def test_get_config_device_name_self_heals_on_rename(app, client, register_devic
     client.get(f"/api/devices/{device_id}/config", headers={**headers, "X-Device-Name": "new-name"})
 
     with app.app_context():
-        row = get_db().execute("SELECT device_name FROM devices WHERE device_id = ?", (device_id,)).fetchone()
-    assert row["device_name"] == "new-name"
+        device_name = db.session.get(Device, device_id).device_name
+    assert device_name == "new-name"
 
 
 def test_get_config_blank_device_name_header_does_not_overwrite(app, client, register_device):
@@ -196,8 +199,8 @@ def test_get_config_blank_device_name_header_does_not_overwrite(app, client, reg
     client.get(f"/api/devices/{device_id}/config", headers={**headers, "X-Device-Name": "  "})
 
     with app.app_context():
-        row = get_db().execute("SELECT device_name FROM devices WHERE device_id = ?", (device_id,)).fetchone()
-    assert row["device_name"] == "camilla"
+        device_name = db.session.get(Device, device_id).device_name
+    assert device_name == "camilla"
 
 
 def test_get_config_returns_decrypted_glowmarkt_credentials(paired_client):
@@ -309,9 +312,8 @@ def test_spotify_disabled_check_runs_after_auth(client, register_device):
 def test_spotify_endpoints_return_404_when_device_has_no_config_row(app, client, register_device):
     device_id, secret = register_device()
     with app.app_context():
-        db = get_db()
-        db.execute("DELETE FROM device_config WHERE device_id = ?", (device_id,))
-        db.commit()
+        db.session.delete(db.session.get(DeviceConfig, device_id))
+        db.session.commit()
 
     for path in ("now-playing", "queue", "top/tracks"):
         response = client.get(f"/api/devices/{device_id}/{path}", headers={"Authorization": f"Bearer {secret}"})
@@ -370,9 +372,8 @@ def test_a_paired_device_gets_no_code_and_none_is_issued_again(app, client, regi
     assert _get_pairing_code(client, device_id, secret) is None
     assert _get_pairing_code(client, device_id, secret) is None
     with app.app_context():
-        db = get_db()
-        assert db.execute("SELECT paired_at FROM devices WHERE device_id = ?", (device_id,)).fetchone()["paired_at"]
-        assert db.execute("SELECT COUNT(*) FROM pairing_codes WHERE device_id = ?", (device_id,)).fetchone()[0] == 0
+        assert db.session.get(Device, device_id).paired_at
+        assert db.session.scalar(select(func.count()).where(PairingCode.device_id == device_id)) == 0
 
 
 def test_a_failed_pairing_attempt_does_not_mark_the_device_paired(app, client, register_device):
@@ -382,8 +383,7 @@ def test_a_failed_pairing_attempt_does_not_mark_the_device_paired(app, client, r
     client.post("/pair", data={"code": "WRONG1"})
 
     with app.app_context():
-        row = get_db().execute("SELECT paired_at FROM devices WHERE device_id = ?", (device_id,)).fetchone()
-        assert row["paired_at"] is None
+        assert db.session.get(Device, device_id).paired_at is None
 
 
 def test_a_forced_code_for_a_paired_device_is_shown_until_redeemed(client, register_device):
@@ -410,10 +410,10 @@ def test_setup_missing_lists_what_is_still_needed(app, client, register_device):
 
     def configure(**columns):
         with app.app_context():
-            db = get_db()
+            config = db.session.get(DeviceConfig, device_id)
             for column, value in columns.items():
-                db.execute(f"UPDATE device_config SET {column} = ? WHERE device_id = ?", (value, device_id))
-            db.commit()
+                setattr(config, column, value)
+            db.session.commit()
 
     configure(weather_location="London")
     assert _setup_missing(client, device_id, secret) == ["a postcode", "a bus or tube stop"]
@@ -434,9 +434,8 @@ def test_setup_missing_lists_what_is_still_needed(app, client, register_device):
 def test_get_config_returns_the_saved_postcode(app, client, register_device):
     device_id, secret = register_device()
     with app.app_context():
-        db = get_db()
-        db.execute("UPDATE device_config SET postcode = 'SW1A 1AA' WHERE device_id = ?", (device_id,))
-        db.commit()
+        db.session.get(DeviceConfig, device_id).postcode = "SW1A 1AA"
+        db.session.commit()
 
     response = client.get(f"/api/devices/{device_id}/config", headers={"Authorization": f"Bearer {secret}"})
     assert response.get_json()["notice_board"] == {"postcode": "SW1A 1AA"}
@@ -445,8 +444,7 @@ def test_get_config_returns_the_saved_postcode(app, client, register_device):
 def test_a_blank_weather_location_still_counts_as_missing(app, client, register_device):
     device_id, secret = register_device()
     with app.app_context():
-        db = get_db()
-        db.execute("UPDATE device_config SET weather_location = '   ' WHERE device_id = ?", (device_id,))
-        db.commit()
+        db.session.get(DeviceConfig, device_id).weather_location = "   "
+        db.session.commit()
 
     assert "a weather location" in _setup_missing(client, device_id, secret)

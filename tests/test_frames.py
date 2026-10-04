@@ -3,10 +3,11 @@ from hashlib import blake2b
 from unittest.mock import patch
 
 import pytest
+from sqlalchemy import inspect, select
 
-from broker import admin
-from broker.db import get_db
+from broker.db import db
 from broker.frames import FRAME_BYTES
+from broker.models import Device, Frame
 
 RENDERER_HEADERS = {"Authorization": "Bearer test-renderer-token"}
 
@@ -33,7 +34,7 @@ def _get(client, device_id, secret, **headers):
 
 def _stored_rows(app, device_id):
     with app.app_context():
-        return get_db().execute("SELECT * FROM frames WHERE device_id = ?", (device_id,)).fetchall()
+        return db.session.scalars(select(Frame).where(Frame.device_id == device_id)).all()
 
 
 def test_frame_size_is_one_bit_packed_800x480():
@@ -105,10 +106,10 @@ def test_put_stores_frame_with_etag_and_timestamp(app, client, register_device):
     assert response.status_code == 204
     assert response.data == b""
     [row] = _stored_rows(app, device_id)
-    assert row["frame"] == frame
-    assert row["etag"] == _etag(frame)
-    assert re.fullmatch(r"[0-9a-f]{16}", row["etag"])
-    assert re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z", row["rendered_at"])
+    assert row.frame == frame
+    assert row.etag == _etag(frame)
+    assert re.fullmatch(r"[0-9a-f]{16}", row.etag)
+    assert re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z", row.rendered_at)
 
 
 def test_put_ignores_request_content_type(app, client, register_device):
@@ -118,7 +119,7 @@ def test_put_ignores_request_content_type(app, client, register_device):
     response = client.put(_url(device_id), data=frame, headers={**RENDERER_HEADERS, "Content-Type": "application/json"})
 
     assert response.status_code == 204
-    assert _stored_rows(app, device_id)[0]["frame"] == frame
+    assert _stored_rows(app, device_id)[0].frame == frame
 
 
 def test_put_preserves_arbitrary_bytes(app, client, register_device):
@@ -127,7 +128,7 @@ def test_put_preserves_arbitrary_bytes(app, client, register_device):
 
     assert _put(client, device_id, frame).status_code == 204
 
-    assert _stored_rows(app, device_id)[0]["frame"] == frame
+    assert _stored_rows(app, device_id)[0].frame == frame
 
 
 @pytest.mark.parametrize("size", [0, 1, FRAME_BYTES - 1, FRAME_BYTES + 1, FRAME_BYTES * 2])
@@ -147,7 +148,7 @@ def test_put_with_wrong_size_keeps_the_previous_frame(app, client, register_devi
 
     assert _put(client, device_id, b"\x00" * 10).status_code == 400
 
-    assert _stored_rows(app, device_id)[0]["frame"] == frame
+    assert _stored_rows(app, device_id)[0].frame == frame
 
 
 def test_put_replaces_existing_frame(app, client, register_device):
@@ -159,29 +160,29 @@ def test_put_replaces_existing_frame(app, client, register_device):
 
     assert response.status_code == 204
     [row] = _stored_rows(app, device_id)
-    assert row["frame"] == _frame(0xFF)
-    assert row["etag"] == _etag(_frame(0xFF))
-    assert row["rendered_at"] == "2026-01-01T00:05:00Z"
+    assert row.frame == _frame(0xFF)
+    assert row.etag == _etag(_frame(0xFF))
+    assert row.rendered_at == "2026-01-01T00:05:00Z"
 
 
 def test_put_same_frame_twice_keeps_the_same_etag(app, client, register_device):
     device_id, _ = register_device()
     _put(client, device_id, _frame())
-    first = _stored_rows(app, device_id)[0]["etag"]
+    first = _stored_rows(app, device_id)[0].etag
 
     _put(client, device_id, _frame())
 
-    assert _stored_rows(app, device_id)[0]["etag"] == first
+    assert _stored_rows(app, device_id)[0].etag == first
 
 
 def test_different_frames_get_different_etags(app, client, register_device):
     device_id, _ = register_device()
     _put(client, device_id, _frame(0x00))
-    first = _stored_rows(app, device_id)[0]["etag"]
+    first = _stored_rows(app, device_id)[0].etag
 
     _put(client, device_id, _frame(0x01))
 
-    assert _stored_rows(app, device_id)[0]["etag"] != first
+    assert _stored_rows(app, device_id)[0].etag != first
 
 
 def test_put_only_touches_the_target_device(app, client, register_device):
@@ -192,8 +193,8 @@ def test_put_only_touches_the_target_device(app, client, register_device):
 
     _put(client, device_a, _frame(0x33))
 
-    assert _stored_rows(app, device_a)[0]["frame"] == _frame(0x33)
-    assert _stored_rows(app, device_b)[0]["frame"] == _frame(0x22)
+    assert _stored_rows(app, device_a)[0].frame == _frame(0x33)
+    assert _stored_rows(app, device_b)[0].frame == _frame(0x22)
 
 
 def test_put_for_unknown_device_returns_404_and_stores_nothing(app, client):
@@ -203,9 +204,9 @@ def test_put_for_unknown_device_returns_404_and_stores_nothing(app, client):
     assert _stored_rows(app, "does-not-exist") == []
 
 
-def test_put_for_forgotten_device_returns_404(app, client, register_device):
+def test_put_for_forgotten_device_returns_404(app, client, register_device, cli):
     device_id, _ = register_device()
-    admin.main(["forget", device_id])
+    cli("forget", device_id)
 
     assert _put(client, device_id, _frame()).status_code == 404
     assert _stored_rows(app, device_id) == []
@@ -384,54 +385,56 @@ def test_conditional_get_before_any_frame_is_404(client, register_device):
 
 def test_schema_creates_frames_table(app):
     with app.app_context():
-        columns = {row["name"]: row for row in get_db().execute("PRAGMA table_info(frames)")}
+        inspector = inspect(db.engine)
+        columns = {column["name"]: column for column in inspector.get_columns("frames")}
+        primary_key = inspector.get_pk_constraint("frames")["constrained_columns"]
     assert set(columns) == {"device_id", "frame", "etag", "rendered_at"}
-    assert columns["device_id"]["pk"] == 1
-    assert columns["frame"]["type"] == "BLOB"
-    assert all(columns[name]["notnull"] for name in ("frame", "etag", "rendered_at"))
+    assert primary_key == ["device_id"]
+    assert str(columns["frame"]["type"]) == "BLOB"
+    assert not any(columns[name]["nullable"] for name in ("frame", "etag", "rendered_at"))
 
 
-def test_admin_forget_deletes_the_devices_frame(app, client, register_device):
+def test_cli_forget_deletes_the_devices_frame(app, client, register_device, cli):
     device_id, _ = register_device()
     other_id, _ = register_device("another-very-long-device-secret")
     _put(client, device_id, _frame())
     _put(client, other_id, _frame())
 
-    assert admin.main(["forget", device_id]) == 0
+    assert cli("forget", device_id).exit_code == 0
 
     assert _stored_rows(app, device_id) == []
     assert len(_stored_rows(app, other_id)) == 1
     with app.app_context():
-        assert get_db().execute("SELECT 1 FROM devices WHERE device_id = ?", (device_id,)).fetchone() is None
+        assert db.session.get(Device, device_id) is None
 
 
-def test_admin_unpair_keeps_the_devices_frame(app, client, register_device):
+def test_cli_unpair_keeps_the_devices_frame(app, client, register_device, cli):
     device_id, secret = register_device()
     _put(client, device_id, _frame())
 
-    assert admin.main(["unpair", device_id]) == 0
+    assert cli("unpair", device_id).exit_code == 0
 
-    assert _stored_rows(app, device_id)[0]["frame"] == _frame()
+    assert _stored_rows(app, device_id)[0].frame == _frame()
     assert _get(client, device_id, secret).data == _frame()
 
 
-def test_admin_unpair_with_config_deletes_the_devices_frame(app, client, register_device):
+def test_cli_unpair_with_config_deletes_the_devices_frame(app, client, register_device, cli):
     device_id, secret = register_device()
     other_id, _ = register_device("another-very-long-device-secret")
     _put(client, device_id, _frame())
     _put(client, other_id, _frame())
 
-    assert admin.main(["unpair", device_id, "--config"]) == 0
+    assert cli("unpair", device_id, "--config").exit_code == 0
 
     assert _stored_rows(app, device_id) == []
     assert _get(client, device_id, secret).status_code == 404
     assert len(_stored_rows(app, other_id)) == 1
 
 
-def test_renderer_can_upload_again_after_unpair_with_config(client, register_device):
+def test_renderer_can_upload_again_after_unpair_with_config(client, register_device, cli):
     device_id, secret = register_device()
     _put(client, device_id, _frame(0x00))
-    admin.main(["unpair", device_id, "--config"])
+    cli("unpair", device_id, "--config")
 
     assert _put(client, device_id, _frame(0xFF)).status_code == 204
     assert _get(client, device_id, secret).data == _frame(0xFF)

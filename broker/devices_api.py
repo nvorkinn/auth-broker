@@ -1,16 +1,17 @@
 import functools
-import json
 import secrets
 import string
 from datetime import UTC, datetime, timedelta
 
 from flask import Blueprint, current_app, jsonify, request
+from sqlalchemy import delete, select
 from werkzeug.security import generate_password_hash
 
 from . import spotify as spotify_module
 from .auth import require_device_auth
 from .crypto import decrypt
-from .db import get_db
+from .db import db
+from .models import Device, DeviceConfig, GlowmarktCredentials, PairingCode
 
 bp = Blueprint("devices_api", __name__, url_prefix="/api/devices")
 
@@ -30,47 +31,47 @@ def register():
         return jsonify(error="device_secret must be a random string of at least 16 characters"), 400
 
     device_id = secrets.token_hex(6)
-    db = get_db()
-    db.execute(
-        "INSERT INTO devices (device_id, device_secret_hash, created_at) VALUES (?, ?, ?)",
-        (device_id, generate_password_hash(device_secret), datetime.now(UTC).isoformat()),
+    db.session.add(
+        Device(
+            device_id=device_id,
+            device_secret_hash=generate_password_hash(device_secret),
+            created_at=datetime.now(UTC).isoformat(),
+            config=DeviceConfig(),
+        )
     )
-    db.execute("INSERT INTO device_config (device_id) VALUES (?)", (device_id,))
-    db.commit()
+    db.session.commit()
     return jsonify(device_id=device_id), 201
 
 
-def _issue_pairing_code(db, device_id: str) -> str:
+def _issue_pairing_code(device_id: str) -> str:
     code = "".join(secrets.choice(PAIRING_CODE_ALPHABET) for _ in range(PAIRING_CODE_LENGTH))
     expires_at = datetime.now(UTC) + PAIRING_CODE_TTL
-    db.execute("DELETE FROM pairing_codes WHERE device_id = ?", (device_id,))
-    db.execute(
-        "INSERT INTO pairing_codes (code, device_id, expires_at) VALUES (?, ?, ?)",
-        (code, device_id, expires_at.isoformat()),
-    )
-    db.commit()
+    db.session.execute(delete(PairingCode).where(PairingCode.device_id == device_id))
+    db.session.add(PairingCode(code=code, device_id=device_id, expires_at=expires_at.isoformat()))
+    db.session.commit()
     return code
 
 
-def _pairing_code_for(db, device_id: str) -> str | None:
+def _pairing_code_for(device_id: str) -> str | None:
     """A live code if there is one; otherwise a new one, unless the device is already paired."""
-    live = db.execute(
-        "SELECT code FROM pairing_codes WHERE device_id = ? AND expires_at > ?",
-        (device_id, datetime.now(UTC).isoformat()),
-    ).fetchone()
+    live = db.session.scalar(
+        select(PairingCode.code).where(
+            PairingCode.device_id == device_id, PairingCode.expires_at > datetime.now(UTC).isoformat()
+        )
+    )
     if live:
-        return live["code"]
-    paired_at = db.execute("SELECT paired_at FROM devices WHERE device_id = ?", (device_id,)).fetchone()["paired_at"]
-    return None if paired_at else _issue_pairing_code(db, device_id)
+        return live
+    paired_at = db.session.get(Device, device_id).paired_at
+    return None if paired_at else _issue_pairing_code(device_id)
 
 
-def _setup_missing(config_row) -> list[str]:
+def _setup_missing(config: DeviceConfig) -> list[str]:
     missing = []
-    if not config_row["weather_location"].strip():
+    if not config.weather_location.strip():
         missing.append("a weather location")
-    if not config_row["postcode"].strip():
+    if not config.postcode.strip():
         missing.append("a postcode")
-    if not json.loads(config_row["tfl_stop_ids"]):
+    if not config.tfl_stop_ids:
         missing.append("a bus or tube stop")
     return missing
 
@@ -83,14 +84,10 @@ def require_spotify_enabled(default):
     def decorator(view):
         @functools.wraps(view)
         def wrapped(device_id, *args, **kwargs):
-            row = (
-                get_db()
-                .execute("SELECT spotify_enabled FROM device_config WHERE device_id = ?", (device_id,))
-                .fetchone()
-            )
-            if row is None:
+            config = db.session.get(DeviceConfig, device_id)
+            if config is None:
                 return jsonify(error="not found"), 404
-            if not row["spotify_enabled"]:
+            if not config.spotify_enabled:
                 return jsonify(default)
             return view(device_id, *args, **kwargs)
 
@@ -103,19 +100,19 @@ def require_spotify_enabled(default):
 @require_device_auth
 def create_pairing_code(device_id):
     """Forces a fresh code, e.g. to link a new browser to an already-paired device."""
-    code = _issue_pairing_code(get_db(), device_id)
+    code = _issue_pairing_code(device_id)
     return jsonify(code=code, expires_in_seconds=int(PAIRING_CODE_TTL.total_seconds()))
 
 
-def _update_device_name(db, device_id: str) -> None:
+def _update_device_name(device_id: str) -> None:
     """Opportunistically keeps devices.device_name in sync with the Pi's own
     DEVICE_ID (sent as X-Device-Name on every config poll) -- a purely cosmetic
     label for logs/admin output, never the device's real identity, so a rename
     on the Pi just needs its next poll to take effect here, no re-pairing."""
     name = request.headers.get("X-Device-Name", "").strip()
     if name:
-        db.execute("UPDATE devices SET device_name = ? WHERE device_id = ?", (name, device_id))
-        db.commit()
+        db.session.get(Device, device_id).device_name = name
+        db.session.commit()
 
 
 @bp.get("/<device_id>/config")
@@ -124,31 +121,26 @@ def get_config(device_id):
     """Polled by the Pi. Bundles the device's own settings together with the
     shared app-level API keys, so a key rotation doesn't require re-flashing
     every gifted device."""
-    db = get_db()
-    _update_device_name(db, device_id)
-    row = db.execute("SELECT * FROM device_config WHERE device_id = ?", (device_id,)).fetchone()
-    if row is None:
+    _update_device_name(device_id)
+    config = db.session.get(DeviceConfig, device_id)
+    if config is None:
         return jsonify(error="not found"), 404
 
-    glowmarkt_row = db.execute(
-        "SELECT username, password_encrypted FROM glowmarkt_credentials WHERE device_id = ?", (device_id,)
-    ).fetchone()
+    creds = db.session.get(GlowmarktCredentials, device_id)
     glowmarkt = {
-        "username": glowmarkt_row["username"] if glowmarkt_row and glowmarkt_row["username"] else None,
-        "password": decrypt(glowmarkt_row["password_encrypted"])
-        if glowmarkt_row and glowmarkt_row["password_encrypted"]
-        else None,
+        "username": creds.username if creds and creds.username else None,
+        "password": decrypt(creds.password_encrypted) if creds and creds.password_encrypted else None,
     }
 
     return jsonify(
-        interval=row["interval"],
-        weather={"api_key": current_app.config["WEATHER_API_KEY"], "location": row["weather_location"]},
-        notice_board={"postcode": row["postcode"] or None},
-        tfl={"app_key": current_app.config["TFL_APP_KEY"], "stop_ids": json.loads(row["tfl_stop_ids"])},
-        spotify={"enabled": bool(row["spotify_enabled"])},
+        interval=config.interval,
+        weather={"api_key": current_app.config["WEATHER_API_KEY"], "location": config.weather_location},
+        notice_board={"postcode": config.postcode or None},
+        tfl={"app_key": current_app.config["TFL_APP_KEY"], "stop_ids": config.tfl_stop_ids},
+        spotify={"enabled": config.spotify_enabled},
         glowmarkt=glowmarkt,
-        pairing_code=_pairing_code_for(db, device_id),
-        setup_missing=_setup_missing(row),
+        pairing_code=_pairing_code_for(device_id),
+        setup_missing=_setup_missing(config),
     )
 
 

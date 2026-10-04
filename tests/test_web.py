@@ -3,8 +3,8 @@ from unittest.mock import Mock, patch
 import pytest
 import requests
 
-from broker import admin
-from broker.db import get_db
+from broker.db import db
+from broker.models import DeviceConfig, GlowmarktCredentials, SpotifyToken
 from broker.web import normalize_postcode, weather_location_found
 
 
@@ -97,11 +97,11 @@ def test_device_config_post_persists_settings(app, paired_client):
     assert response.status_code == 302
 
     with app.app_context():
-        row = get_db().execute("SELECT * FROM device_config WHERE device_id = ?", (device_id,)).fetchone()
-        assert row["interval"] == 20
-        assert row["weather_location"] == "London"
-        assert row["spotify_enabled"] == 1
-        assert row["tfl_stop_ids"] == '["940GZZLUEUS", "490000173F"]'
+        config = db.session.get(DeviceConfig, device_id)
+        assert config.interval == 20
+        assert config.weather_location == "London"
+        assert config.spotify_enabled is True
+        assert config.tfl_stop_ids == ["940GZZLUEUS", "490000173F"]
 
 
 def test_device_config_post_falls_back_to_default_interval_for_garbage_input(app, paired_client):
@@ -109,8 +109,7 @@ def test_device_config_post_falls_back_to_default_interval_for_garbage_input(app
     client.post("/device", data={"interval": "not-a-number"})
 
     with app.app_context():
-        row = get_db().execute("SELECT interval FROM device_config WHERE device_id = ?", (device_id,)).fetchone()
-        assert row["interval"] == 15
+        assert db.session.get(DeviceConfig, device_id).interval == 15
 
 
 def test_device_config_shows_resolved_stop_names(paired_client):
@@ -134,16 +133,14 @@ def test_device_config_shows_resolved_stop_names(paired_client):
 def test_disconnect_removes_stored_token(app, paired_client):
     client, device_id, _ = paired_client
     with app.app_context():
-        db = get_db()
-        db.execute("INSERT INTO spotify_tokens (device_id, refresh_token) VALUES (?, ?)", (device_id, "refresh"))
-        db.commit()
+        db.session.add(SpotifyToken(device_id=device_id, refresh_token="refresh"))
+        db.session.commit()
 
     response = client.post("/device/spotify/disconnect")
     assert response.status_code == 302
 
     with app.app_context():
-        row = get_db().execute("SELECT 1 FROM spotify_tokens WHERE device_id = ?", (device_id,)).fetchone()
-        assert row is None
+        assert db.session.get(SpotifyToken, device_id) is None
 
 
 def test_disconnect_requires_pairing(client):
@@ -161,13 +158,9 @@ def test_device_config_post_stores_encrypted_glowmarkt_password(app, paired_clie
     assert response.status_code == 302
 
     with app.app_context():
-        row = (
-            get_db()
-            .execute("SELECT username, password_encrypted FROM glowmarkt_credentials WHERE device_id = ?", (device_id,))
-            .fetchone()
-        )
-        assert row["username"] == "someone@example.com"
-        assert row["password_encrypted"] not in (None, "hunter2")
+        creds = db.session.get(GlowmarktCredentials, device_id)
+        assert creds.username == "someone@example.com"
+        assert creds.password_encrypted not in (None, "hunter2")
 
 
 def test_device_config_get_never_shows_saved_password(paired_client):
@@ -190,13 +183,9 @@ def test_device_config_post_blank_password_keeps_existing_one(app, paired_client
     client.post("/device", data={"interval": "15", "glowmarkt_username": "someone-else@example.com"})
 
     with app.app_context():
-        row = (
-            get_db()
-            .execute("SELECT username, password_encrypted FROM glowmarkt_credentials WHERE device_id = ?", (device_id,))
-            .fetchone()
-        )
-        assert row["username"] == "someone-else@example.com"
-        assert row["password_encrypted"] is not None
+        creds = db.session.get(GlowmarktCredentials, device_id)
+        assert creds.username == "someone-else@example.com"
+        assert creds.password_encrypted is not None
 
 
 def test_search_stops_empty_query_returns_empty_list(client):
@@ -235,29 +224,29 @@ def _redirects_to_pair(response):
     return response.status_code == 302 and response.headers["Location"] == "/pair"
 
 
-def test_unpairing_a_device_revokes_the_browser_that_paired_it(paired_client):
+def test_unpairing_a_device_revokes_the_browser_that_paired_it(paired_client, cli):
     client, device_id, _ = paired_client
     assert client.get("/device").status_code == 200
 
-    admin.main(["unpair", device_id])
+    cli("unpair", device_id)
 
     assert _redirects_to_pair(client.get("/device"))
     assert _redirects_to_pair(client.post("/device/spotify/disconnect"))
     assert _redirects_to_pair(client.get("/"))  # the stale session was cleared, not just refused
 
 
-def test_a_forgotten_device_sends_the_browser_to_pair_instead_of_erroring(paired_client):
+def test_a_forgotten_device_sends_the_browser_to_pair_instead_of_erroring(paired_client, cli):
     client, device_id, _ = paired_client
 
-    admin.main(["forget", device_id])
+    cli("forget", device_id)
 
     assert _redirects_to_pair(client.get("/device"))
     assert _redirects_to_pair(client.get("/"))
 
 
-def test_pairing_again_after_an_unpair_restores_access(paired_client):
+def test_pairing_again_after_an_unpair_restores_access(paired_client, cli):
     client, device_id, secret = paired_client
-    admin.main(["unpair", device_id])
+    cli("unpair", device_id)
     code = client.get(f"/api/devices/{device_id}/config", headers={"Authorization": f"Bearer {secret}"}).get_json()[
         "pairing_code"
     ]
@@ -294,8 +283,7 @@ def test_device_config_post_saves_normalized_postcode(app, paired_client):
     assert response.status_code == 302
 
     with app.app_context():
-        row = get_db().execute("SELECT postcode FROM device_config WHERE device_id = ?", (device_id,)).fetchone()
-        assert row["postcode"] == "SW1A 1AA"
+        assert db.session.get(DeviceConfig, device_id).postcode == "SW1A 1AA"
 
 
 def test_device_config_post_rejects_invalid_postcode_and_saves_nothing(app, paired_client):
@@ -309,8 +297,8 @@ def test_device_config_post_rejects_invalid_postcode_and_saves_nothing(app, pair
     assert b"valid UK postcode" in response.data
 
     with app.app_context():
-        row = get_db().execute("SELECT * FROM device_config WHERE device_id = ?", (device_id,)).fetchone()
-        assert (row["interval"], row["postcode"], row["weather_location"]) == (15, "SW1A 1AA", "London")
+        config = db.session.get(DeviceConfig, device_id)
+        assert (config.interval, config.postcode, config.weather_location) == (15, "SW1A 1AA", "London")
 
 
 def test_device_config_post_rejects_weather_location_open_meteo_cant_find(app, paired_client, weather_location_lookup):
@@ -325,8 +313,8 @@ def test_device_config_post_rejects_weather_location_open_meteo_cant_find(app, p
     assert b"Nothing was saved" in response.data
     weather_location_lookup.assert_called_with("SE17 2PX")
     with app.app_context():
-        row = get_db().execute("SELECT * FROM device_config WHERE device_id = ?", (device_id,)).fetchone()
-        assert (row["interval"], row["weather_location"]) == (15, "London")
+        config = db.session.get(DeviceConfig, device_id)
+        assert (config.interval, config.weather_location) == (15, "London")
 
 
 def test_device_config_post_refuses_an_unverified_weather_location_when_open_meteo_is_unreachable(
@@ -340,10 +328,7 @@ def test_device_config_post_refuses_an_unverified_weather_location_when_open_met
     assert response.status_code == 400
     assert b"try again in a minute" in response.data
     with app.app_context():
-        row = (
-            get_db().execute("SELECT weather_location FROM device_config WHERE device_id = ?", (device_id,)).fetchone()
-        )
-        assert row["weather_location"] == ""
+        assert db.session.get(DeviceConfig, device_id).weather_location == ""
 
 
 def test_device_config_post_blank_weather_location_skips_the_lookup(paired_client, weather_location_lookup):
