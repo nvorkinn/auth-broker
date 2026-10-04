@@ -1,25 +1,21 @@
-import secrets
+"""Talks to Spotify on a device's behalf: the OAuth token exchange, keeping each device's tokens
+fresh, and the Web API calls the device-facing endpoints proxy."""
+
 import urllib.parse
 from datetime import UTC, datetime
 
 import requests
-from flask import Blueprint, current_app, redirect, request, session, url_for
+from flask import current_app
 
-from .auth import require_paired_session
-from .db import db
-from .models import SpotifyToken
-
-bp = Blueprint("spotify", __name__, url_prefix="/auth/spotify")
+from ..db import db
+from ..models import SpotifyToken
 
 SCOPE = "user-read-currently-playing user-read-playback-state user-top-read"
+AUTHORIZE_URL = "https://accounts.spotify.com/authorize"
 TOKEN_URL = "https://accounts.spotify.com/api/token"
 
 
-@bp.get("/login")
-@require_paired_session
-def login():
-    state = secrets.token_urlsafe(16)
-    session["spotify_oauth_state"] = state
+def authorize_url(state: str) -> str:
     params = {
         "client_id": current_app.config["SPOTIFY_CLIENT_ID"],
         "response_type": "code",
@@ -27,36 +23,27 @@ def login():
         "scope": SCOPE,
         "state": state,
     }
-    return redirect(f"https://accounts.spotify.com/authorize?{urllib.parse.urlencode(params)}")
+    return f"{AUTHORIZE_URL}?{urllib.parse.urlencode(params)}"
 
 
-@bp.get("/callback")
-def callback():
-    error = request.args.get("error")
-    if error:
-        return f"Spotify authorization failed: {error}", 400
-
-    if request.args.get("state") != session.pop("spotify_oauth_state", None):
-        return "Invalid or expired login attempt, please try connecting again.", 400
-
-    device_id: str | None = session.get("device_id")
-    if not device_id:
-        return redirect(url_for("web.pair"))
-
+def exchange_code(device_id: str, code: str | None) -> None:
+    """Swaps the code from Spotify's OAuth callback for tokens and stores them against the device."""
     response = requests.post(
         TOKEN_URL,
         data={
             "grant_type": "authorization_code",
-            "code": request.args.get("code"),
+            "code": code,
             "redirect_uri": current_app.config["SPOTIFY_REDIRECT_URI"],
         },
-        auth=(current_app.config["SPOTIFY_CLIENT_ID"], current_app.config["SPOTIFY_CLIENT_SECRET"]),
+        auth=_client_credentials(),
         timeout=10,
     )
     response.raise_for_status()
     _store_tokens(device_id, response.json())
 
-    return redirect(url_for("web.device_config"))
+
+def _client_credentials() -> tuple[str, str]:
+    return current_app.config["SPOTIFY_CLIENT_ID"], current_app.config["SPOTIFY_CLIENT_SECRET"]
 
 
 def _store_tokens(device_id: str, payload: dict) -> None:
@@ -80,7 +67,7 @@ def _refresh_access_token(device_id: str, refresh_token: str) -> str:
     response = requests.post(
         TOKEN_URL,
         data={"grant_type": "refresh_token", "refresh_token": refresh_token},
-        auth=(current_app.config["SPOTIFY_CLIENT_ID"], current_app.config["SPOTIFY_CLIENT_SECRET"]),
+        auth=_client_credentials(),
         timeout=10,
     )
     response.raise_for_status()

@@ -11,7 +11,7 @@
 {% endif %}
 
 <!-- Lives outside the settings form because forms can't nest; the Disconnect button points at it. -->
-<form id="spotifyDisconnectForm" method="POST" action="{{ url_for('web.spotify_disconnect') }}"></form>
+<form id="spotifyDisconnectForm" method="POST" action="{{ url_for('pages.spotify_disconnect') }}"></form>
 
 <form method="POST">
     <!-- General -->
@@ -108,7 +108,7 @@
                     <button type="submit" form="spotifyDisconnectForm" class="btn-action btn-delete">Disconnect</button>
                 {% else %}
                     <span class="status-pill status-unlinked">Not connected</span>
-                    <a href="{{ url_for('spotify.login') }}" class="btn-action" style="text-decoration:none;">Connect</a>
+                    <a href="{{ url_for('spotify_oauth.login') }}" class="btn-action" style="text-decoration:none;">Connect</a>
                 {% endif %}
             </div>
         </div>

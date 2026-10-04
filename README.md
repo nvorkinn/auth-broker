@@ -39,6 +39,21 @@ Every device-facing endpoint is authenticated with `Authorization: Bearer
 <device_secret>`; every browser-facing page is gated on the signed session
 cookie set at pairing time.
 
+## Code layout
+
+```
+broker/
+  routes/     Flask blueprints: read the request, call a service or client, return a response
+  services/   the broker's own logic that more than one route needs (pairing)
+  clients/    everything that talks to an outside API (Spotify, TfL, Open-Meteo)
+  models.py   the schema; db.py and migrations/ manage it
+  auth.py     the decorators that guard routes
+  config.py   environment variables → app.config
+  cli.py      `flask devices ...` admin commands
+```
+
+`tests/` mirrors this layout.
+
 ## Running locally
 
 ```bash

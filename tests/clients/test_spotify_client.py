@@ -1,7 +1,7 @@
 import time
 from unittest.mock import Mock, patch
 
-from broker import spotify as spotify_module
+from broker.clients import spotify as spotify_module
 from broker.db import db
 from broker.models import SpotifyToken
 
@@ -13,57 +13,6 @@ def _mock_response(json_data=None, status_code=200, content=b"{}"):
     response.json.return_value = json_data or {}
     response.raise_for_status = Mock()
     return response
-
-
-def test_login_requires_paired_session(client):
-    response = client.get("/auth/spotify/login")
-    assert response.status_code == 302
-    assert response.headers["Location"] == "/pair"
-
-
-def test_login_redirects_to_spotify_with_state(paired_client):
-    client, device_id, _ = paired_client
-    response = client.get("/auth/spotify/login")
-    assert response.status_code == 302
-    location = response.headers["Location"]
-    assert location.startswith("https://accounts.spotify.com/authorize?")
-    assert "client_id=test-client-id" in location
-    assert "state=" in location
-
-
-def test_callback_rejects_state_mismatch(paired_client):
-    client, device_id, _ = paired_client
-    response = client.get("/auth/spotify/callback?code=abc&state=wrong")
-    assert response.status_code == 400
-
-
-def test_callback_surfaces_spotify_error(paired_client):
-    client, device_id, _ = paired_client
-    response = client.get("/auth/spotify/callback?error=access_denied")
-    assert response.status_code == 400
-
-
-def test_callback_exchanges_code_and_stores_tokens(app, paired_client):
-    client, device_id, _ = paired_client
-
-    login_response = client.get("/auth/spotify/login")
-    state = login_response.headers["Location"].split("state=")[1]
-
-    token_payload = {
-        "access_token": "access-123",
-        "refresh_token": "refresh-123",
-        "expires_in": 3600,
-    }
-    with patch("broker.spotify.requests.post", return_value=_mock_response(token_payload)):
-        response = client.get(f"/auth/spotify/callback?code=abc123&state={state}")
-
-    assert response.status_code == 302
-    assert response.headers["Location"] == "/device"
-
-    with app.app_context():
-        token = db.session.get(SpotifyToken, device_id)
-        assert token.refresh_token == "refresh-123"
-        assert token.access_token == "access-123"
 
 
 def test_get_current_track_returns_none_when_not_linked(app, paired_client):
@@ -106,8 +55,8 @@ def test_get_current_track_refreshes_expired_token(app, paired_client):
             return _mock_response(refresh_payload)
 
         with (
-            patch("broker.spotify.requests.post", side_effect=fake_post),
-            patch("broker.spotify.requests.get", return_value=_mock_response(now_playing_payload)),
+            patch("broker.clients.spotify.requests.post", side_effect=fake_post),
+            patch("broker.clients.spotify.requests.get", return_value=_mock_response(now_playing_payload)),
         ):
             track = spotify_module.get_current_track(device_id)
 
@@ -130,7 +79,7 @@ def test_get_current_track_returns_none_on_204(app, paired_client):
         )
         db.session.commit()
 
-        with patch("broker.spotify.requests.get", return_value=_mock_response(status_code=204, content=b"")):
+        with patch("broker.clients.spotify.requests.get", return_value=_mock_response(status_code=204, content=b"")):
             assert spotify_module.get_current_track(device_id) is None
 
 
@@ -146,7 +95,7 @@ def test_get_current_track_passes_through_when_nothing_playing(app, paired_clien
         )
         db.session.commit()
 
-        with patch("broker.spotify.requests.get", return_value=_mock_response(payload)):
+        with patch("broker.clients.spotify.requests.get", return_value=_mock_response(payload)):
             assert spotify_module.get_current_track(device_id) == payload
 
 
@@ -190,7 +139,7 @@ def test_get_queue_passes_through_spotify_response(app, paired_client):
 
     with app.app_context():
         _link_spotify(device_id)
-        with patch("broker.spotify.requests.get", return_value=_mock_response(payload)) as mocked:
+        with patch("broker.clients.spotify.requests.get", return_value=_mock_response(payload)) as mocked:
             queue = spotify_module.get_queue(device_id)
 
     assert mocked.call_args.args[0] == "https://api.spotify.com/v1/me/player/queue"
@@ -203,7 +152,7 @@ def test_get_queue_returns_empty_on_204(app, paired_client):
 
     with app.app_context():
         _link_spotify(device_id)
-        with patch("broker.spotify.requests.get", return_value=_mock_response(status_code=204, content=b"")):
+        with patch("broker.clients.spotify.requests.get", return_value=_mock_response(status_code=204, content=b"")):
             assert spotify_module.get_queue(device_id) == []
 
 
@@ -223,10 +172,10 @@ def test_get_queue_refreshes_expired_token(app, paired_client):
 
         with (
             patch(
-                "broker.spotify.requests.post",
+                "broker.clients.spotify.requests.post",
                 return_value=_mock_response({"access_token": "new-access", "expires_in": 3600}),
             ),
-            patch("broker.spotify.requests.get", return_value=_mock_response({"queue": []})) as mocked,
+            patch("broker.clients.spotify.requests.get", return_value=_mock_response({"queue": []})) as mocked,
         ):
             assert spotify_module.get_queue(device_id) == {"queue": []}
 
@@ -245,7 +194,7 @@ def test_get_users_top_items_passes_type_and_params_and_returns_raw_response(app
 
     with app.app_context():
         _link_spotify(device_id)
-        with patch("broker.spotify.requests.get", return_value=_mock_response(payload)) as mocked:
+        with patch("broker.clients.spotify.requests.get", return_value=_mock_response(payload)) as mocked:
             result = spotify_module.get_users_top_items(device_id, "tracks", {"limit": "5"})
 
     assert mocked.call_args.args[0] == "https://api.spotify.com/v1/me/top/tracks"
@@ -259,5 +208,5 @@ def test_get_users_top_items_returns_empty_on_204(app, paired_client):
 
     with app.app_context():
         _link_spotify(device_id)
-        with patch("broker.spotify.requests.get", return_value=_mock_response(status_code=204, content=b"")):
+        with patch("broker.clients.spotify.requests.get", return_value=_mock_response(status_code=204, content=b"")):
             assert spotify_module.get_users_top_items(device_id, "artists", {}) == []

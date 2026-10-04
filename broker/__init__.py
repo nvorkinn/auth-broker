@@ -1,9 +1,8 @@
 import logging
-import os
-from datetime import timedelta
 
 from flask import Flask
 
+from . import config
 from . import db as db_module
 
 
@@ -15,23 +14,16 @@ def create_app() -> Flask:
         app.logger.handlers = gunicorn_logger.handlers
         app.logger.setLevel(gunicorn_logger.level)
 
-    app.secret_key = os.environ["FLASK_SECRET_KEY"]
-    app.permanent_session_lifetime = timedelta(days=30)
-
-    app.config["SPOTIFY_CLIENT_ID"] = os.environ["SPOTIFY_CLIENT_ID"]
-    app.config["SPOTIFY_CLIENT_SECRET"] = os.environ["SPOTIFY_CLIENT_SECRET"]
-    app.config["SPOTIFY_REDIRECT_URI"] = os.environ["SPOTIFY_REDIRECT_URI"]
-    app.config["TFL_APP_KEY"] = os.environ.get("TFL_APP_KEY", "")
-    app.config["WEATHER_API_KEY"] = os.environ.get("WEATHER_API_KEY", "")
-    app.config["CREDENTIAL_ENCRYPTION_KEY"] = os.environ["CREDENTIAL_ENCRYPTION_KEY"]
-
+    config.load(app)
     db_module.init_app(app)
 
-    from . import devices_api, frames, spotify, web
+    from .routes import devices, frames, pages, spotify_oauth, spotify_proxy, tfl_search
 
-    app.register_blueprint(devices_api.bp)
-    app.register_blueprint(spotify.bp)
-    app.register_blueprint(web.bp)
+    app.register_blueprint(devices.bp)
+    app.register_blueprint(spotify_proxy.bp)
+    app.register_blueprint(spotify_oauth.bp)
+    app.register_blueprint(pages.bp)
+    app.register_blueprint(tfl_search.bp)
     app.register_blueprint(frames.bp)
 
     from . import cli

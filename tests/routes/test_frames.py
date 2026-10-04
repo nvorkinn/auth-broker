@@ -6,8 +6,8 @@ import pytest
 from sqlalchemy import inspect, select
 
 from broker.db import db
-from broker.frames import FRAME_BYTES
 from broker.models import Device, Frame
+from broker.routes.frames import FRAME_BYTES
 
 RENDERER_HEADERS = {"Authorization": "Bearer test-renderer-token"}
 
@@ -153,9 +153,9 @@ def test_put_with_wrong_size_keeps_the_previous_frame(app, client, register_devi
 
 def test_put_replaces_existing_frame(app, client, register_device):
     device_id, _ = register_device()
-    with patch("broker.frames.now_iso", return_value="2026-01-01T00:00:00Z"):
+    with patch("broker.routes.frames.now_iso", return_value="2026-01-01T00:00:00Z"):
         _put(client, device_id, _frame(0x00))
-    with patch("broker.frames.now_iso", return_value="2026-01-01T00:05:00Z"):
+    with patch("broker.routes.frames.now_iso", return_value="2026-01-01T00:05:00Z"):
         response = _put(client, device_id, _frame(0xFF))
 
     assert response.status_code == 204
