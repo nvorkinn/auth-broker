@@ -4,3 +4,7 @@ gunicorn
 cryptography
 flask-sqlalchemy
 flask-migrate
+sqlalchemy
+alembic
+werkzeug
+click
