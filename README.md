@@ -130,10 +130,10 @@ ruff format .         # use --check to verify without changing files
 ```
 
 External calls (Spotify, TfL) are mocked in tests — nothing hits the network.
-`.github/workflows/tests.yml` runs this on every push/PR to `main`. (GitHub's
-native code-coverage-on-PRs feature would be nicer than a log to scroll
-through, but it's gated behind a paid Code Quality plan we tried and
-confirmed 404s on this account — worth revisiting if that ever changes.)
+`.github/workflows/tests.yml` runs this on every push/PR to `main` and uploads
+`coverage.xml` to [Codecov](https://app.codecov.io/gh/nvorkinn/auth-broker),
+which posts a coverage comment and status check on each PR (config in
+`codecov.yml`). The upload needs a `CODECOV_TOKEN` repository secret.
 
 ## Deploying
 
