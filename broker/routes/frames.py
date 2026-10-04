@@ -3,9 +3,9 @@ from hashlib import blake2b
 
 from flask import Blueprint, Response, abort, request
 
-from .auth import require_device_auth, require_renderer_auth
-from .db import db
-from .models import Device, Frame
+from ..auth import require_device_auth, require_renderer_auth
+from ..db import db
+from ..models import Device, Frame
 
 bp = Blueprint("frames", __name__, url_prefix="/api/frames")
 

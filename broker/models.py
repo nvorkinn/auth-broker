@@ -6,6 +6,7 @@ Timestamps are ISO-8601 strings, as they were before the move to SQLAlchemy."""
 from sqlalchemy import JSON, Boolean, ForeignKey, Integer, LargeBinary, String, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
+from .crypto import decrypt, encrypt
 from .db import db
 
 
@@ -64,6 +65,15 @@ class GlowmarktCredentials(db.Model):
     device_id: Mapped[str] = mapped_column(ForeignKey("devices.device_id"), primary_key=True)
     username: Mapped[str] = mapped_column(String, default="", server_default=text("''"))
     password_encrypted: Mapped[str | None] = mapped_column(String)
+
+    @property
+    def password(self) -> str | None:
+        """The saved password, decrypted; None if there isn't one."""
+        return decrypt(self.password_encrypted) if self.password_encrypted else None
+
+    @password.setter
+    def password(self, plaintext: str) -> None:
+        self.password_encrypted = encrypt(plaintext)
 
 
 class Frame(db.Model):

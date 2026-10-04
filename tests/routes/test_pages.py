@@ -1,17 +1,16 @@
 from unittest.mock import Mock, patch
 
 import pytest
-import requests
 
 from broker.db import db
 from broker.models import DeviceConfig, GlowmarktCredentials, SpotifyToken
-from broker.web import normalize_postcode, weather_location_found
+from broker.routes.pages import normalize_postcode
 
 
 @pytest.fixture(autouse=True)
 def weather_location_lookup():
     """Stands in for the Open-Meteo check on save so no test hits the network; finds every location by default."""
-    with patch("broker.web.weather_location_found", return_value=True) as lookup:
+    with patch("broker.clients.weather.location_found", return_value=True) as lookup:
         yield lookup
 
 
@@ -123,7 +122,7 @@ def test_device_config_shows_resolved_stop_names(paired_client):
         "modes": ["tube"],
         "lines": [{"name": "Victoria"}],
     }
-    with patch("broker.web.requests.Session.get", return_value=_mock_get(stop_detail)):
+    with patch("broker.clients.tfl.requests.Session.get", return_value=_mock_get(stop_detail)):
         response = client.get("/device")
 
     assert b"Euston" in response.data
@@ -186,38 +185,6 @@ def test_device_config_post_blank_password_keeps_existing_one(app, paired_client
         creds = db.session.get(GlowmarktCredentials, device_id)
         assert creds.username == "someone-else@example.com"
         assert creds.password_encrypted is not None
-
-
-def test_search_stops_empty_query_returns_empty_list(client):
-    response = client.get("/api/tfl/search?q=a")
-    assert response.status_code == 200
-    assert response.get_json() == []
-
-
-def test_search_stops_finds_tube_and_bus_matches(client):
-    search_result = {"matches": [{"id": "1", "commonName": "Kings Cross"}]}
-    stop_detail = {
-        "id": "1",
-        "naptanId": "1",
-        "commonName": "Kings Cross Underground Station",
-        "stopType": "NaptanMetroStation",
-        "lines": [{"name": "Piccadilly"}],
-        "children": [],
-    }
-
-    def fake_get(self, url, params=None, timeout=None):
-        if "Search" in url:
-            return _mock_get(search_result)
-        return _mock_get(stop_detail)
-
-    with patch("broker.web.requests.Session.get", fake_get):
-        response = client.get("/api/tfl/search?q=kings")
-
-    assert response.status_code == 200
-    results = response.get_json()
-    assert len(results) == 1
-    assert results[0]["mode"] == "tube"
-    assert results[0]["name"] == "Kings Cross"
 
 
 def _redirects_to_pair(response):
@@ -346,33 +313,3 @@ def test_device_config_post_reports_every_invalid_field_at_once(paired_client, w
     assert response.status_code == 400
     assert b"find &#34;Nowhere&#34;" in response.data
     assert b"valid UK postcode" in response.data
-
-
-def _geocoding_response(json_data):
-    response = Mock()
-    response.json.return_value = json_data
-    response.raise_for_status = Mock()
-    return response
-
-
-def test_weather_location_found_asks_open_meteo_the_same_way_the_device_does(app):
-    found = {"results": [{"name": "London", "latitude": 51.5, "longitude": -0.13}]}
-    with app.app_context(), patch("broker.web.requests.get", return_value=_geocoding_response(found)) as get:
-        assert weather_location_found("London") is True
-
-    get.assert_called_once_with(
-        "https://geocoding-api.open-meteo.com/v1/search",
-        params={"name": "London", "count": 1, "format": "json"},
-        timeout=5,
-    )
-
-
-def test_weather_location_found_is_false_when_open_meteo_has_no_results(app):
-    not_found = {"generationtime_ms": 0.4}  # Open-Meteo leaves "results" out entirely when nothing matches
-    with app.app_context(), patch("broker.web.requests.get", return_value=_geocoding_response(not_found)):
-        assert weather_location_found("SE17 2PX") is False
-
-
-def test_weather_location_found_is_none_when_open_meteo_is_unreachable(app):
-    with app.app_context(), patch("broker.web.requests.get", side_effect=requests.ConnectionError):
-        assert weather_location_found("London") is None

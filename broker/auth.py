@@ -62,7 +62,7 @@ def require_paired_session(view):
             device = db.session.get(Device, session["device_id"])
         if device is None or device.paired_at is None:
             session.clear()
-            return redirect(url_for("web.pair"))
+            return redirect(url_for("pages.pair"))
         return view(*args, **kwargs)
 
     return wrapped

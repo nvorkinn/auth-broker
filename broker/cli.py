@@ -15,7 +15,7 @@ from flask.cli import AppGroup
 from sqlalchemy import select
 
 from .db import db
-from .models import Device, PairingCode
+from .models import Device, DeviceConfig, PairingCode
 
 devices = AppGroup("devices", help="Manual device admin for development.")
 
@@ -57,10 +57,11 @@ def unpair(device_id: str, wipe_config: bool) -> None:
     device.paired_at = None
     device.pairing_codes.clear()
     if wipe_config:
-        config = device.config
-        if config is not None:
-            config.interval, config.weather_location, config.postcode = 15, "", ""
-            config.spotify_enabled, config.tfl_stop_ids = False, []
+        # Reset to the model's defaults by replacing the row. The flush matters: without it SQLAlchemy
+        # turns the delete + insert of the same key into one UPDATE, which leaves the old values in place.
+        device.config = None
+        db.session.flush()
+        device.config = DeviceConfig()
         device.spotify_token = None
         device.glowmarkt_credentials = None
         device.frame = None
