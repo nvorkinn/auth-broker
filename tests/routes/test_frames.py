@@ -1,6 +1,6 @@
 import re
+from datetime import UTC, datetime, timedelta
 from hashlib import blake2b
-from unittest.mock import patch
 
 import pytest
 from sqlalchemy import inspect, select
@@ -109,7 +109,8 @@ def test_put_stores_frame_with_etag_and_timestamp(app, client, register_device):
     assert row.frame == frame
     assert row.etag == _etag(frame)
     assert re.fullmatch(r"[0-9a-f]{16}", row.etag)
-    assert re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z", row.rendered_at)
+    assert row.rendered_at.tzinfo == UTC
+    assert timedelta(0) <= datetime.now(UTC) - row.rendered_at < timedelta(seconds=5)
 
 
 def test_put_ignores_request_content_type(app, client, register_device):
@@ -153,16 +154,15 @@ def test_put_with_wrong_size_keeps_the_previous_frame(app, client, register_devi
 
 def test_put_replaces_existing_frame(app, client, register_device):
     device_id, _ = register_device()
-    with patch("broker.routes.frames.now_iso", return_value="2026-01-01T00:00:00Z"):
-        _put(client, device_id, _frame(0x00))
-    with patch("broker.routes.frames.now_iso", return_value="2026-01-01T00:05:00Z"):
-        response = _put(client, device_id, _frame(0xFF))
+    _put(client, device_id, _frame(0x00))
+    [first] = _stored_rows(app, device_id)
+    response = _put(client, device_id, _frame(0xFF))
 
     assert response.status_code == 204
     [row] = _stored_rows(app, device_id)
     assert row.frame == _frame(0xFF)
     assert row.etag == _etag(_frame(0xFF))
-    assert row.rendered_at == "2026-01-01T00:05:00Z"
+    assert row.rendered_at > first.rendered_at
 
 
 def test_put_same_frame_twice_keeps_the_same_etag(app, client, register_device):
