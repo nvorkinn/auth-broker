@@ -1,14 +1,15 @@
 import sqlite3
+from datetime import UTC, datetime
 
 import pytest
 from alembic.autogenerate import compare_metadata
 from alembic.migration import MigrationContext
 from alembic.script import ScriptDirectory
 from flask_migrate import downgrade, upgrade
-from sqlalchemy import inspect
+from sqlalchemy import inspect, select
 
 from broker.db import db
-from broker.models import Device, DeviceConfig, Frame, PairingCode
+from broker.models import Device, DeviceConfig, Frame, PairingCode, SpotifyToken
 
 
 def _current_revision(app):
@@ -59,7 +60,9 @@ def test_migrations_downgrade_and_upgrade_again(app):
 
 def test_foreign_keys_are_enforced_after_migrating(app):
     with app.app_context():
-        db.session.add(PairingCode(code="ABC234", device_id="no-such-device", expires_at="2026-01-01"))
+        db.session.add(
+            PairingCode(code="ABC234", device_id="no-such-device", expires_at=datetime(2026, 1, 1, tzinfo=UTC))
+        )
         with pytest.raises(Exception, match="FOREIGN KEY"):
             db.session.commit()
 
@@ -135,10 +138,15 @@ def test_a_legacy_db_keeps_its_data(adopt):
 
     with legacy_app.app_context():
         device = db.session.get(Device, "d")
-        assert (device.created_at, device.paired_at, device.device_name) == ("2026-01-01", "2026-01-02", "kitchen")
+        assert (device.created_at, device.paired_at, device.device_name) == (
+            datetime(2026, 1, 1, tzinfo=UTC),
+            datetime(2026, 1, 2, tzinfo=UTC),
+            "kitchen",
+        )
         config = db.session.get(DeviceConfig, "d")
         assert (config.tfl_stop_ids, config.spotify_enabled, config.interval) == (["S1"], True, 15)
-        assert db.session.get(Frame, "d").frame == b"\xaa\x55"
+        frame = db.session.get(Frame, "d")
+        assert (frame.frame, frame.rendered_at) == (b"\xaa\x55", datetime(2026, 1, 3, tzinfo=UTC))
 
 
 def test_a_legacy_db_ends_up_with_the_same_schema_as_a_fresh_one(app, adopt):
@@ -165,7 +173,7 @@ def test_adopting_an_early_legacy_db_marks_existing_devices_paired(adopt):
     )
 
     with legacy_app.app_context():
-        assert db.session.get(Device, "paired").paired_at == "2026-01-01T00:00:00"
+        assert db.session.get(Device, "paired").paired_at == datetime(2026, 1, 1, tzinfo=UTC)
         assert db.session.get(Device, "mid-pairing").paired_at is None
         assert db.session.get(Device, "paired").device_name is None
 
@@ -202,3 +210,102 @@ def test_starting_twice_leaves_an_adopted_db_alone(adopt, monkeypatch):
         assert db.session.get(Device, "d").paired_at is None
         db.session.remove()
         db.engine.dispose()
+
+
+# --- 0002: string timestamps to datetimes -------------------------------------------------------
+
+
+def _at_0001_with(app, statements: str) -> None:
+    """Takes the DB back to 0001, where timestamps were strings, and inserts rows there."""
+    with app.app_context():
+        downgrade(revision="0001")
+        with db.engine.begin() as conn:
+            for statement in filter(str.strip, statements.split(";")):
+                conn.exec_driver_sql(statement)
+
+
+def test_0002_converts_every_string_timestamp_shape_to_utc(app):
+    _at_0001_with(
+        app,
+        """
+        INSERT INTO devices VALUES
+            ('offset', 'h', '2026-03-01T12:00:00.123456+00:00', '2026-03-01T13:30:00+01:00', NULL);
+        INSERT INTO devices VALUES ('zulu', 'h', '2026-03-02T08:00:00Z', NULL, NULL);
+        INSERT INTO devices VALUES ('date-only', 'h', '2026-01-01', '2026-01-01T09:15:00', NULL);
+        INSERT INTO pairing_codes VALUES ('ABC234', 'zulu', '2026-03-02T08:10:00+00:00');
+        INSERT INTO frames VALUES ('zulu', x'00', 'etag', '2026-03-02T08:05:00Z');
+        INSERT INTO spotify_tokens VALUES ('offset', 'refresh', 'access', '1793865600.5');
+        INSERT INTO spotify_tokens VALUES ('zulu', 'refresh', NULL, NULL);
+        """,
+    )
+
+    with app.app_context():
+        upgrade()
+
+        offset = db.session.get(Device, "offset")
+        assert offset.created_at == datetime(2026, 3, 1, 12, 0, 0, 123456, tzinfo=UTC)
+        assert offset.paired_at == datetime(2026, 3, 1, 12, 30, tzinfo=UTC)  # +01:00 moved to UTC
+        zulu = db.session.get(Device, "zulu")
+        assert (zulu.created_at, zulu.paired_at) == (datetime(2026, 3, 2, 8, tzinfo=UTC), None)
+        date_only = db.session.get(Device, "date-only")
+        assert date_only.created_at == datetime(2026, 1, 1, tzinfo=UTC)
+        assert date_only.paired_at == datetime(2026, 1, 1, 9, 15, tzinfo=UTC)  # no zone: taken as UTC
+
+        assert db.session.get(PairingCode, "ABC234").expires_at == datetime(2026, 3, 2, 8, 10, tzinfo=UTC)
+        assert db.session.get(Frame, "zulu").rendered_at == datetime(2026, 3, 2, 8, 5, tzinfo=UTC)
+        assert db.session.get(SpotifyToken, "offset").expires_at == 1793865600.5
+        assert db.session.get(SpotifyToken, "zulu").expires_at is None
+
+
+def test_0002_converted_timestamps_compare_correctly_in_queries(app):
+    """Expiry is checked in SQL, so stored values must compare as times, not as their old strings."""
+    _at_0001_with(
+        app,
+        """
+        INSERT INTO devices VALUES ('d', 'h', '2026-01-01', NULL, NULL);
+        INSERT INTO pairing_codes VALUES ('EARLY2', 'd', '2026-03-02T09:30:00+01:00');
+        INSERT INTO pairing_codes VALUES ('LATER3', 'd', '2026-03-02T08:45:00Z');
+        """,
+    )
+
+    with app.app_context():
+        upgrade()
+        cutoff = datetime(2026, 3, 2, 8, 40, tzinfo=UTC)
+        # As strings, '...09:30:00+01:00' sorts after '...08:45:00Z'; as times it is 08:30 UTC, before the cutoff.
+        live = db.session.scalars(select(PairingCode.code).where(PairingCode.expires_at > cutoff)).all()
+        assert live == ["LATER3"]
+
+
+def test_0002_downgrade_gives_back_iso_strings(app):
+    with app.app_context():
+        db.session.add(Device(device_id="d", device_secret_hash="h", created_at=datetime(2026, 3, 1, 12, tzinfo=UTC)))
+        db.session.add(SpotifyToken(device_id="d", refresh_token="r", expires_at=1793865600.5))
+        db.session.commit()
+        db.session.remove()
+
+        downgrade(revision="0001")
+        with db.engine.connect() as conn:
+            assert conn.exec_driver_sql("SELECT created_at, paired_at FROM devices").one() == (
+                "2026-03-01T12:00:00+00:00",
+                None,
+            )
+            assert conn.exec_driver_sql("SELECT expires_at FROM spotify_tokens").scalar() == "1793865600.5"
+        upgrade()
+
+
+def test_0002_fails_on_a_timestamp_it_cannot_read_and_changes_nothing(app):
+    _at_0001_with(app, "INSERT INTO devices VALUES ('d', 'h', 'last tuesday', NULL, NULL)")
+
+    with app.app_context():
+        with pytest.raises(ValueError, match="last tuesday"):
+            upgrade()
+        assert _current_revision(app) == "0001"
+        with db.engine.connect() as conn:
+            assert conn.exec_driver_sql("SELECT created_at FROM devices").scalar() == "last tuesday"
+
+
+def test_utc_datetime_refuses_a_naive_datetime(app):
+    with app.app_context():
+        db.session.add(Device(device_id="d", device_secret_hash="h", created_at=datetime(2026, 1, 1)))
+        with pytest.raises(Exception, match="naive datetime"):
+            db.session.commit()

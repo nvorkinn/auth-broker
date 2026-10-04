@@ -29,7 +29,7 @@ def register():
         Device(
             device_id=device_id,
             device_secret_hash=generate_password_hash(device_secret),
-            created_at=datetime.now(UTC).isoformat(),
+            created_at=datetime.now(UTC),
             config=DeviceConfig(),
         )
     )

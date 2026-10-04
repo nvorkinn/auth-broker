@@ -130,7 +130,7 @@ def test_get_config_replaces_an_expired_code_for_an_unpaired_device(app, client,
         db.session.execute(
             update(PairingCode)
             .where(PairingCode.device_id == device_id)
-            .values(expires_at=(datetime.now(UTC) - timedelta(seconds=1)).isoformat())
+            .values(expires_at=datetime.now(UTC) - timedelta(seconds=1))
         )
         db.session.commit()
 

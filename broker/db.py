@@ -1,16 +1,36 @@
 import os
+from datetime import UTC, datetime
 from pathlib import Path
 
 from alembic import command
 from flask import current_app
 from flask_migrate import Migrate
 from flask_sqlalchemy import SQLAlchemy
-from sqlalchemy import event
+from sqlalchemy import DateTime, event
 from sqlalchemy.orm import DeclarativeBase
+from sqlalchemy.types import TypeDecorator
 
 
 class Base(DeclarativeBase):
     pass
+
+
+class UTCDateTime(TypeDecorator):
+    """A timezone-aware UTC datetime column. SQLite keeps no time zone, so a value is stored as
+    naive UTC and comes back with tzinfo=UTC; a naive datetime is refused rather than guessed at."""
+
+    impl = DateTime
+    cache_ok = True
+
+    def process_bind_param(self, value: datetime | None, dialect) -> datetime | None:
+        if value is None:
+            return None
+        if value.tzinfo is None:
+            raise ValueError(f"naive datetime {value!r}: pass a timezone-aware one, e.g. datetime.now(UTC)")
+        return value.astimezone(UTC).replace(tzinfo=None)
+
+    def process_result_value(self, value: datetime | None, dialect) -> datetime | None:
+        return value.replace(tzinfo=UTC) if value is not None else None
 
 
 db = SQLAlchemy(model_class=Base)

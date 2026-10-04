@@ -30,7 +30,7 @@ def test_get_current_track_refreshes_expired_token(app, paired_client):
                 device_id=device_id,
                 refresh_token="old-refresh",
                 access_token="old-access",
-                expires_at=str(time.time() - 100),
+                expires_at=time.time() - 100,
             )
         )
         db.session.commit()
@@ -74,7 +74,7 @@ def test_get_current_track_returns_none_on_204(app, paired_client):
     with app.app_context():
         db.session.add(
             SpotifyToken(
-                device_id=device_id, refresh_token="refresh", access_token="access", expires_at=str(time.time() + 3600)
+                device_id=device_id, refresh_token="refresh", access_token="access", expires_at=time.time() + 3600
             )
         )
         db.session.commit()
@@ -90,7 +90,7 @@ def test_get_current_track_passes_through_when_nothing_playing(app, paired_clien
     with app.app_context():
         db.session.add(
             SpotifyToken(
-                device_id=device_id, refresh_token="refresh", access_token="access", expires_at=str(time.time() + 3600)
+                device_id=device_id, refresh_token="refresh", access_token="access", expires_at=time.time() + 3600
             )
         )
         db.session.commit()
@@ -101,9 +101,7 @@ def test_get_current_track_passes_through_when_nothing_playing(app, paired_clien
 
 def _link_spotify(device_id):
     db.session.add(
-        SpotifyToken(
-            device_id=device_id, refresh_token="refresh", access_token="access", expires_at=str(time.time() + 3600)
-        )
+        SpotifyToken(device_id=device_id, refresh_token="refresh", access_token="access", expires_at=time.time() + 3600)
     )
     db.session.commit()
 
@@ -165,7 +163,7 @@ def test_get_queue_refreshes_expired_token(app, paired_client):
                 device_id=device_id,
                 refresh_token="old-refresh",
                 access_token="old-access",
-                expires_at=str(time.time() - 100),
+                expires_at=time.time() - 100,
             )
         )
         db.session.commit()

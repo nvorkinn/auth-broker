@@ -12,10 +12,6 @@ bp = Blueprint("frames", __name__, url_prefix="/api/frames")
 FRAME_BYTES = 800 * 480 // 8  # 1-bit packed; better to share this via the protocol package
 
 
-def now_iso() -> str:
-    return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
-
-
 @bp.put("/<device_id>/frame")
 @require_renderer_auth
 def update_frame(device_id):
@@ -26,7 +22,7 @@ def update_frame(device_id):
     if db.session.get(Device, device_id) is None:
         abort(404)
     row = db.session.get(Frame, device_id) or Frame(device_id=device_id)
-    row.frame, row.etag, row.rendered_at = frame, etag, now_iso()
+    row.frame, row.etag, row.rendered_at = frame, etag, datetime.now(UTC)
     db.session.add(row)
     db.session.commit()
     return "", 204

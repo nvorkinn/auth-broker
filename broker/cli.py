@@ -27,10 +27,14 @@ def _get_device(device_id: str) -> Device:
     return device
 
 
+def _timestamp(value: datetime) -> str:
+    return value.isoformat(timespec="seconds")
+
+
 @devices.command("list")
 def list_devices() -> None:
     """Show every device and whether it's paired."""
-    now = datetime.now(UTC).isoformat()
+    now = datetime.now(UTC)
     all_devices = db.session.scalars(select(Device).order_by(Device.created_at)).all()
     if not all_devices:
         click.echo("No devices.")
@@ -40,12 +44,13 @@ def list_devices() -> None:
         )
         config = device.config
         name = device.device_name or "unnamed"
-        paired = f"paired {device.paired_at}" if device.paired_at else "NOT paired"
+        paired = f"paired {_timestamp(device.paired_at)}" if device.paired_at else "NOT paired"
         code_field = f"  code {code}" if code else ""
         weather = (config.weather_location if config else "") or "-"
         stops = json.dumps(config.tfl_stop_ids) if config else None
-        fields = [f"{name} ({device.device_id})", f"created {device.created_at}", paired, f"weather={weather}"]
-        click.echo("  ".join([*fields, f"stops={stops}"]) + code_field)
+        created = f"created {_timestamp(device.created_at)}"
+        fields = [f"{name} ({device.device_id})", created, paired, f"weather={weather}", f"stops={stops}"]
+        click.echo("  ".join(fields) + code_field)
 
 
 @devices.command()

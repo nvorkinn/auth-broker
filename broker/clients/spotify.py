@@ -53,7 +53,7 @@ def _store_tokens(device_id: str, payload: dict) -> None:
     token = db.session.get(SpotifyToken, device_id) or SpotifyToken(device_id=device_id)
     token.refresh_token = refresh_token
     token.access_token = payload["access_token"]
-    token.expires_at = str(expires_at)
+    token.expires_at = expires_at
     db.session.add(token)
     db.session.commit()
 
@@ -83,7 +83,7 @@ def _get_access_token(device_id: str) -> str | None:
     if token is None:
         return None
 
-    if token.expires_at is None or float(token.expires_at) - 30 < datetime.now(UTC).timestamp():
+    if token.expires_at is None or token.expires_at - 30 < datetime.now(UTC).timestamp():
         return _refresh_access_token(device_id, token.refresh_token)
     return token.access_token
 
