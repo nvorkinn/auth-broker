@@ -1,5 +1,7 @@
 from unittest.mock import patch
 
+import pytest
+
 from broker.db import db
 from broker.models import DeviceConfig
 
@@ -153,6 +155,54 @@ def test_top_only_proxies_artists_or_tracks(paired_client):
 
     with patch("broker.clients.spotify.get_users_top_items") as mocked:
         response = client.get(f"/api/devices/{device_id}/top/albums", headers={"Authorization": f"Bearer {secret}"})
+
+    assert response.status_code == 404
+    mocked.assert_not_called()
+
+
+# The same routes are also served under /api/spotify while the Pis move over to it.
+NEW_PATHS = [
+    ("now-playing", "get_current_track", ()),
+    ("queue", "get_queue", ()),
+    ("top/tracks", "get_users_top_items", ("tracks", {})),
+]
+
+
+@pytest.mark.parametrize(("path", "function", "extra_args"), NEW_PATHS)
+def test_new_api_spotify_paths_proxy_spotify_module(paired_client, path, function, extra_args):
+    client, device_id, secret = paired_client
+    client.post("/device", data={"interval": "15", "spotify_enabled": "on"})
+
+    with patch(f"broker.clients.spotify.{function}", return_value={"from": function}) as mocked:
+        response = client.get(f"/api/spotify/{device_id}/{path}", headers={"Authorization": f"Bearer {secret}"})
+
+    mocked.assert_called_once_with(device_id, *extra_args)
+    assert response.status_code == 200
+    assert response.get_json() == {"from": function}
+
+
+@pytest.mark.parametrize(("path", "default"), [("now-playing", None), ("queue", []), ("top/tracks", None)])
+def test_new_api_spotify_paths_return_default_when_spotify_disabled(client, register_device, path, default):
+    device_id, secret = register_device()
+    response = client.get(f"/api/spotify/{device_id}/{path}", headers={"Authorization": f"Bearer {secret}"})
+    assert response.status_code == 200
+    assert response.get_json() == default
+
+
+@pytest.mark.parametrize("path", ["now-playing", "queue", "top/tracks"])
+def test_new_api_spotify_paths_require_device_auth(client, register_device, path):
+    device_id, _ = register_device()
+    assert client.get(f"/api/spotify/{device_id}/{path}").status_code == 401
+    wrong = client.get(f"/api/spotify/{device_id}/{path}", headers={"Authorization": "Bearer wrong-secret"})
+    assert wrong.status_code == 401
+
+
+def test_new_api_spotify_top_only_proxies_artists_or_tracks(paired_client):
+    client, device_id, secret = paired_client
+    client.post("/device", data={"interval": "15", "spotify_enabled": "on"})
+
+    with patch("broker.clients.spotify.get_users_top_items") as mocked:
+        response = client.get(f"/api/spotify/{device_id}/top/albums", headers={"Authorization": f"Bearer {secret}"})
 
     assert response.status_code == 404
     mocked.assert_not_called()
