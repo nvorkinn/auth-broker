@@ -31,6 +31,8 @@ def create_app() -> Flask:
 
     app.register_blueprint(devices.bp)
     app.register_blueprint(spotify_proxy.bp)
+    # The same routes under /api/spotify, where they're moving; /api/devices/... stays until the Pis have switched.
+    app.register_blueprint(spotify_proxy.bp, name="spotify", url_prefix="/api/spotify")
     app.register_blueprint(spotify_oauth.bp)
     app.register_blueprint(pages.bp)
     app.register_blueprint(tfl_search.bp)

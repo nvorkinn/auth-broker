@@ -38,6 +38,9 @@ a Spotify token.
    `SpotifyClient.get_current_track()` in `countdown` so the Pi-side swap is a
    drop-in). `GET /api/devices/<id>/queue` works the same way and returns the
    upcoming Spotify queue as a JSON list of the same track shape.
+   These Spotify routes (and `top/<artists|tracks>`) are also served under
+   `/api/spotify/<id>/...`, where they're moving; the `/api/devices/` paths
+   stay until the Pis have switched.
 
 Every device-facing endpoint is authenticated with `Authorization: Bearer
 <device_secret>`; every browser-facing page is gated on the signed session
