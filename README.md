@@ -91,14 +91,16 @@ python scripts/simulate_device.py
 ## Resetting a device while developing
 
 The database is a SQLite file (`data/broker.db`). To replay pairing from the
-start, use the admin CLI inside the container; it has no network surface:
+start, use the admin CLI inside the container; it has no network surface.
+These use plain `docker exec` (the container is always named `auth-broker`), so
+they work wherever the container runs, Compose or not:
 
 ```bash
-docker compose exec auth-broker flask --app wsgi devices list
-docker compose exec auth-broker flask --app wsgi devices code <device_id>             # a fresh code, e.g. for a new browser
-docker compose exec auth-broker flask --app wsgi devices unpair <device_id>            # show a pairing code again
-docker compose exec auth-broker flask --app wsgi devices unpair <device_id> --config   # ...and reset its settings and linked accounts
-docker compose exec auth-broker flask --app wsgi devices forget <device_id>            # delete it; it must register again
+docker exec auth-broker flask --app wsgi devices list
+docker exec auth-broker flask --app wsgi devices code <device_id>              # a fresh code, e.g. for a new browser
+docker exec auth-broker flask --app wsgi devices unpair <device_id>            # show a pairing code again
+docker exec auth-broker flask --app wsgi devices unpair <device_id> --config   # ...and reset its settings and linked accounts
+docker exec auth-broker flask --app wsgi devices forget <device_id>            # delete it; it must register again
 ```
 
 `unpair` keeps the device's identity, so the Pi just shows a new code on its
@@ -158,21 +160,41 @@ Tagging a release (`git tag v0.1.0 && git push --tags`) triggers
 `.github/workflows/release.yml`, which builds this into a Docker image and
 pushes it to `ghcr.io/nvorkinn/auth-broker:<tag>` (and `:latest`).
 
+Deploying needs Docker Compose v2 (the `docker compose` subcommand). Ubuntu's
+`docker.io` package doesn't include it; install it with
+`sudo apt install docker-compose-v2`.
+
 On the Oracle Cloud instance, copy `docker-compose.yml` into
-`/opt/auth-broker/` next to the `.env` file and `data/` directory, then:
+`/opt/auth-broker/` next to the `.env` file and `data/` directory. Pin the
+version in that `.env` (compose reads it from there) rather than tracking
+`:latest`, so a restart never picks up a release you didn't choose:
+
+```bash
+AUTH_BROKER_VERSION=v1.8.0
+```
+
+Then:
 
 ```bash
 cd /opt/auth-broker
-docker compose up -d                              # deploy/upgrade to :latest
-AUTH_BROKER_VERSION=v1.2.0 docker compose up -d   # ...or pin a specific tag
+docker compose up -d
 ```
 
-`up -d` always pulls the image first and recreates the container only if the
-image or config changed, so the same command handles first deploy, upgrades,
-and picking up `.env` changes. To pin a version permanently, add
-`AUTH_BROKER_VERSION=v1.2.0` to that `.env` (compose reads it from there too).
-If a container was previously started by hand with `docker run`, remove it
-once (`docker rm -f auth-broker`) before the first `docker compose up`.
+`up -d` pulls the image and recreates the container only if the image or
+config changed, so the same command handles first deploy, upgrades, and picking
+up `.env` changes. Without `AUTH_BROKER_VERSION` it runs `:latest`.
+
+To upgrade:
+
+```bash
+cd /opt/auth-broker
+cp data/broker.db data/broker.db.bak-$(date +%F)   # 1. back up the database
+# 2. set AUTH_BROKER_VERSION in .env to the new tag
+docker compose pull                                # 3. fetch the new image
+docker rm -f auth-broker                           # 4. only if it was started by hand with `docker run`
+docker compose up -d                               # 5. start the new version
+docker exec auth-broker flask --app wsgi devices list   # 6. check every device is still there
+```
 
 The `./data` volume mount is what makes device/token data (SQLite at `data/broker.db`,
 override with `BROKER_DB_PATH`) survive a container restart or image update —

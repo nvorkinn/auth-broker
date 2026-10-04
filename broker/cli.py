@@ -1,9 +1,9 @@
 """Manual admin for the broker's devices, for development. Run it inside the container:
 
-docker compose exec auth-broker flask --app wsgi devices list
-docker compose exec auth-broker flask --app wsgi devices code <device_id>
-docker compose exec auth-broker flask --app wsgi devices unpair <device_id> [--config]
-docker compose exec auth-broker flask --app wsgi devices forget <device_id>
+docker exec auth-broker flask --app wsgi devices list
+docker exec auth-broker flask --app wsgi devices code <device_id>
+docker exec auth-broker flask --app wsgi devices unpair <device_id> [--config]
+docker exec auth-broker flask --app wsgi devices forget <device_id>
 
 Like any `flask` command it loads the app, so it needs the app's env vars (the container has them).
 """
@@ -40,11 +40,11 @@ def list_devices() -> None:
     if not all_devices:
         click.echo("No devices.")
     for device in all_devices:
-        code = pairing.live_code(device.device_id)
+        pairing_code = pairing.live_code(device.device_id)
         config = device.config
         name = device.device_name or "unnamed"
         paired = f"paired {_timestamp(device.paired_at)}" if device.paired_at else "NOT paired"
-        code_field = f"  code {code}" if code else ""
+        code_field = f"  code {pairing_code}" if pairing_code else ""
         weather = (config.weather_location if config else "") or "-"
         stops = json.dumps(config.tfl_stop_ids) if config else None
         created = f"created {_timestamp(device.created_at)}"
