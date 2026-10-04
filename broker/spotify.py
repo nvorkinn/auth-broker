@@ -6,7 +6,8 @@ import requests
 from flask import Blueprint, current_app, redirect, request, session, url_for
 
 from .auth import require_paired_session
-from .db import get_db
+from .db import db
+from .models import SpotifyToken
 
 bp = Blueprint("spotify", __name__, url_prefix="/auth/spotify")
 
@@ -62,24 +63,17 @@ def _store_tokens(device_id: str, payload: dict) -> None:
     expires_at = datetime.now(UTC).timestamp() + payload["expires_in"]
     refresh_token = payload.get("refresh_token") or _existing_refresh_token(device_id)
 
-    db = get_db()
-    db.execute(
-        """
-        INSERT INTO spotify_tokens (device_id, refresh_token, access_token, expires_at)
-        VALUES (?, ?, ?, ?)
-        ON CONFLICT(device_id) DO UPDATE SET
-            refresh_token = excluded.refresh_token,
-            access_token = excluded.access_token,
-            expires_at = excluded.expires_at
-        """,
-        (device_id, refresh_token, payload["access_token"], expires_at),
-    )
-    db.commit()
+    token = db.session.get(SpotifyToken, device_id) or SpotifyToken(device_id=device_id)
+    token.refresh_token = refresh_token
+    token.access_token = payload["access_token"]
+    token.expires_at = str(expires_at)
+    db.session.add(token)
+    db.session.commit()
 
 
 def _existing_refresh_token(device_id: str) -> str | None:
-    row = get_db().execute("SELECT refresh_token FROM spotify_tokens WHERE device_id = ?", (device_id,)).fetchone()
-    return row["refresh_token"] if row else None
+    token = db.session.get(SpotifyToken, device_id)
+    return token.refresh_token if token else None
 
 
 def _refresh_access_token(device_id: str, refresh_token: str) -> str:
@@ -98,13 +92,13 @@ def _refresh_access_token(device_id: str, refresh_token: str) -> str:
 def _get_access_token(device_id: str) -> str | None:
     """Returns a valid access token for the device, refreshing it if needed, or
     None when the device hasn't linked Spotify."""
-    row = get_db().execute("SELECT * FROM spotify_tokens WHERE device_id = ?", (device_id,)).fetchone()
-    if row is None:
+    token = db.session.get(SpotifyToken, device_id)
+    if token is None:
         return None
 
-    if row["expires_at"] is None or float(row["expires_at"]) - 30 < datetime.now(UTC).timestamp():
-        return _refresh_access_token(device_id, row["refresh_token"])
-    return row["access_token"]
+    if token.expires_at is None or float(token.expires_at) - 30 < datetime.now(UTC).timestamp():
+        return _refresh_access_token(device_id, token.refresh_token)
+    return token.access_token
 
 
 def get_current_track(device_id: str) -> dict[str, object] | None:

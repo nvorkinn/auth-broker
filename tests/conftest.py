@@ -22,10 +22,26 @@ def app(tmp_path, monkeypatch):
     application.config.update(TESTING=True)
     yield application
 
+    from broker.db import db
+
+    with application.app_context():
+        db.engine.dispose()
+
 
 @pytest.fixture
 def client(app):
     return app.test_client()
+
+
+@pytest.fixture
+def cli(app):
+    """Runs a `flask devices ...` command against the test app: cli("list"), cli("unpair", device_id)."""
+    runner = app.test_cli_runner()
+
+    def _invoke(*args: str):
+        return runner.invoke(args=["devices", *args])
+
+    return _invoke
 
 
 @pytest.fixture

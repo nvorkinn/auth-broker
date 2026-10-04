@@ -2,7 +2,8 @@ import time
 from unittest.mock import Mock, patch
 
 from broker import spotify as spotify_module
-from broker.db import get_db
+from broker.db import db
+from broker.models import SpotifyToken
 
 
 def _mock_response(json_data=None, status_code=200, content=b"{}"):
@@ -60,9 +61,9 @@ def test_callback_exchanges_code_and_stores_tokens(app, paired_client):
     assert response.headers["Location"] == "/device"
 
     with app.app_context():
-        row = get_db().execute("SELECT * FROM spotify_tokens WHERE device_id = ?", (device_id,)).fetchone()
-        assert row["refresh_token"] == "refresh-123"
-        assert row["access_token"] == "access-123"
+        token = db.session.get(SpotifyToken, device_id)
+        assert token.refresh_token == "refresh-123"
+        assert token.access_token == "access-123"
 
 
 def test_get_current_track_returns_none_when_not_linked(app, paired_client):
@@ -75,12 +76,15 @@ def test_get_current_track_refreshes_expired_token(app, paired_client):
     _, device_id, _ = paired_client
 
     with app.app_context():
-        db = get_db()
-        db.execute(
-            "INSERT INTO spotify_tokens (device_id, refresh_token, access_token, expires_at) VALUES (?, ?, ?, ?)",
-            (device_id, "old-refresh", "old-access", time.time() - 100),
+        db.session.add(
+            SpotifyToken(
+                device_id=device_id,
+                refresh_token="old-refresh",
+                access_token="old-access",
+                expires_at=str(time.time() - 100),
+            )
         )
-        db.commit()
+        db.session.commit()
 
         refresh_payload = {"access_token": "new-access", "expires_in": 3600}
         now_playing_payload = {
@@ -109,22 +113,22 @@ def test_get_current_track_refreshes_expired_token(app, paired_client):
 
         assert track == now_playing_payload
 
-        row = db.execute("SELECT * FROM spotify_tokens WHERE device_id = ?", (device_id,)).fetchone()
-        assert row["access_token"] == "new-access"
+        row = db.session.get(SpotifyToken, device_id)
+        assert row.access_token == "new-access"
         # Spotify didn't rotate the refresh token in this response - the old one must survive.
-        assert row["refresh_token"] == "old-refresh"
+        assert row.refresh_token == "old-refresh"
 
 
 def test_get_current_track_returns_none_on_204(app, paired_client):
     _, device_id, _ = paired_client
 
     with app.app_context():
-        db = get_db()
-        db.execute(
-            "INSERT INTO spotify_tokens (device_id, refresh_token, access_token, expires_at) VALUES (?, ?, ?, ?)",
-            (device_id, "refresh", "access", time.time() + 3600),
+        db.session.add(
+            SpotifyToken(
+                device_id=device_id, refresh_token="refresh", access_token="access", expires_at=str(time.time() + 3600)
+            )
         )
-        db.commit()
+        db.session.commit()
 
         with patch("broker.spotify.requests.get", return_value=_mock_response(status_code=204, content=b"")):
             assert spotify_module.get_current_track(device_id) is None
@@ -135,23 +139,24 @@ def test_get_current_track_passes_through_when_nothing_playing(app, paired_clien
     payload = {"is_playing": False, "item": None}
 
     with app.app_context():
-        db = get_db()
-        db.execute(
-            "INSERT INTO spotify_tokens (device_id, refresh_token, access_token, expires_at) VALUES (?, ?, ?, ?)",
-            (device_id, "refresh", "access", time.time() + 3600),
+        db.session.add(
+            SpotifyToken(
+                device_id=device_id, refresh_token="refresh", access_token="access", expires_at=str(time.time() + 3600)
+            )
         )
-        db.commit()
+        db.session.commit()
 
         with patch("broker.spotify.requests.get", return_value=_mock_response(payload)):
             assert spotify_module.get_current_track(device_id) == payload
 
 
-def _link_spotify(app_db, device_id):
-    app_db.execute(
-        "INSERT INTO spotify_tokens (device_id, refresh_token, access_token, expires_at) VALUES (?, ?, ?, ?)",
-        (device_id, "refresh", "access", time.time() + 3600),
+def _link_spotify(device_id):
+    db.session.add(
+        SpotifyToken(
+            device_id=device_id, refresh_token="refresh", access_token="access", expires_at=str(time.time() + 3600)
+        )
     )
-    app_db.commit()
+    db.session.commit()
 
 
 def test_get_queue_returns_empty_when_not_linked(app, paired_client):
@@ -184,7 +189,7 @@ def test_get_queue_passes_through_spotify_response(app, paired_client):
     }
 
     with app.app_context():
-        _link_spotify(get_db(), device_id)
+        _link_spotify(device_id)
         with patch("broker.spotify.requests.get", return_value=_mock_response(payload)) as mocked:
             queue = spotify_module.get_queue(device_id)
 
@@ -197,7 +202,7 @@ def test_get_queue_returns_empty_on_204(app, paired_client):
     _, device_id, _ = paired_client
 
     with app.app_context():
-        _link_spotify(get_db(), device_id)
+        _link_spotify(device_id)
         with patch("broker.spotify.requests.get", return_value=_mock_response(status_code=204, content=b"")):
             assert spotify_module.get_queue(device_id) == []
 
@@ -206,12 +211,15 @@ def test_get_queue_refreshes_expired_token(app, paired_client):
     _, device_id, _ = paired_client
 
     with app.app_context():
-        db = get_db()
-        db.execute(
-            "INSERT INTO spotify_tokens (device_id, refresh_token, access_token, expires_at) VALUES (?, ?, ?, ?)",
-            (device_id, "old-refresh", "old-access", time.time() - 100),
+        db.session.add(
+            SpotifyToken(
+                device_id=device_id,
+                refresh_token="old-refresh",
+                access_token="old-access",
+                expires_at=str(time.time() - 100),
+            )
         )
-        db.commit()
+        db.session.commit()
 
         with (
             patch(
@@ -236,7 +244,7 @@ def test_get_users_top_items_passes_type_and_params_and_returns_raw_response(app
     payload = {"items": [{"name": "Song", "popularity": 50}], "total": 1}
 
     with app.app_context():
-        _link_spotify(get_db(), device_id)
+        _link_spotify(device_id)
         with patch("broker.spotify.requests.get", return_value=_mock_response(payload)) as mocked:
             result = spotify_module.get_users_top_items(device_id, "tracks", {"limit": "5"})
 
@@ -250,6 +258,6 @@ def test_get_users_top_items_returns_empty_on_204(app, paired_client):
     _, device_id, _ = paired_client
 
     with app.app_context():
-        _link_spotify(get_db(), device_id)
+        _link_spotify(device_id)
         with patch("broker.spotify.requests.get", return_value=_mock_response(status_code=204, content=b"")):
             assert spotify_module.get_users_top_items(device_id, "artists", {}) == []

@@ -34,4 +34,8 @@ def create_app() -> Flask:
     app.register_blueprint(web.bp)
     app.register_blueprint(frames.bp)
 
+    from . import cli
+
+    app.cli.add_command(cli.devices)
+
     return app

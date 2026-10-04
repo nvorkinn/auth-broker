@@ -1,4 +1,3 @@
-import json
 import re
 from datetime import UTC, datetime
 from typing import Any
@@ -8,7 +7,8 @@ from flask import Blueprint, current_app, jsonify, redirect, render_template, re
 
 from .auth import require_paired_session
 from .crypto import encrypt
-from .db import get_db
+from .db import db
+from .models import Device, DeviceConfig, GlowmarktCredentials, PairingCode, SpotifyToken
 
 bp = Blueprint("web", __name__)
 
@@ -53,22 +53,21 @@ def pair():
         return render_template("pair.html", error=None)
 
     code = request.form.get("code", "").strip().upper()
-    db = get_db()
-    row = db.execute("SELECT device_id, expires_at FROM pairing_codes WHERE code = ?", (code,)).fetchone()
+    pairing_code = db.session.get(PairingCode, code)
 
-    if row is None or datetime.fromisoformat(row["expires_at"]) < datetime.now(UTC):
+    if pairing_code is None or datetime.fromisoformat(pairing_code.expires_at) < datetime.now(UTC):
         return render_template("pair.html", error="That code is invalid or has expired.")
 
-    db.execute("DELETE FROM pairing_codes WHERE code = ?", (code,))
-    db.execute(
-        "UPDATE devices SET paired_at = ? WHERE device_id = ? AND paired_at IS NULL",
-        (datetime.now(UTC).isoformat(), row["device_id"]),
-    )
-    db.commit()
+    device_id = pairing_code.device_id
+    db.session.delete(pairing_code)
+    device = db.session.get(Device, device_id)
+    if device.paired_at is None:
+        device.paired_at = datetime.now(UTC).isoformat()
+    db.session.commit()
 
     session.clear()
     session.permanent = True
-    session["device_id"] = row["device_id"]
+    session["device_id"] = device_id
     return redirect(url_for("web.device_config"))
 
 
@@ -76,7 +75,6 @@ def pair():
 @require_paired_session
 def device_config():
     device_id = session["device_id"]
-    db = get_db()
 
     if request.method == "POST":
         raw_stops = request.form.get("stops_order", "")
@@ -105,39 +103,32 @@ def device_config():
         if postcode is None:
             errors.append(f'"{raw_postcode.strip()}" isn\'t a valid UK postcode.')
         if errors:
-            return _render_device_config(db, device_id, errors=[*errors, "Nothing was saved."]), 400
+            return _render_device_config(device_id, errors=[*errors, "Nothing was saved."]), 400
 
-        db.execute(
-            """
-            UPDATE device_config
-            SET interval = ?, weather_location = ?, postcode = ?, spotify_enabled = ?, tfl_stop_ids = ?
-            WHERE device_id = ?
-            """,
-            (interval, weather_location, postcode, int(spotify_enabled), json.dumps(stop_ids), device_id),
-        )
+        config = db.session.get(DeviceConfig, device_id)
+        config.interval = interval
+        config.weather_location = weather_location
+        config.postcode = postcode
+        config.spotify_enabled = spotify_enabled
+        config.tfl_stop_ids = stop_ids
 
-        glowmarkt_username = request.form.get("glowmarkt_username", "").strip()
+        # A blank password field keeps the stored password.
         glowmarkt_password = request.form.get("glowmarkt_password", "")
-        db.execute(
-            """
-            INSERT INTO glowmarkt_credentials (device_id, username, password_encrypted)
-            VALUES (?, ?, ?)
-            ON CONFLICT(device_id) DO UPDATE SET
-                username = excluded.username,
-                password_encrypted = COALESCE(excluded.password_encrypted, glowmarkt_credentials.password_encrypted)
-            """,
-            (device_id, glowmarkt_username, encrypt(glowmarkt_password) if glowmarkt_password else None),
-        )
+        creds = db.session.get(GlowmarktCredentials, device_id) or GlowmarktCredentials(device_id=device_id)
+        creds.username = request.form.get("glowmarkt_username", "").strip()
+        if glowmarkt_password:
+            creds.password_encrypted = encrypt(glowmarkt_password)
+        db.session.add(creds)
 
-        db.commit()
+        db.session.commit()
         return redirect(url_for("web.device_config"))
 
-    return _render_device_config(db, device_id)
+    return _render_device_config(device_id)
 
 
-def _render_device_config(db, device_id: str, errors: list[str] | None = None):
-    config = db.execute("SELECT * FROM device_config WHERE device_id = ?", (device_id,)).fetchone()
-    stop_ids = json.loads(config["tfl_stop_ids"])
+def _render_device_config(device_id: str, errors: list[str] | None = None):
+    config = db.session.get(DeviceConfig, device_id)
+    stop_ids = config.tfl_stop_ids
 
     http = requests.Session()
     resolved_stops = [
@@ -146,14 +137,12 @@ def _render_device_config(db, device_id: str, errors: list[str] | None = None):
         for stop_id in stop_ids
     ]
 
-    spotify_linked = db.execute("SELECT 1 FROM spotify_tokens WHERE device_id = ?", (device_id,)).fetchone() is not None
+    spotify_linked = db.session.get(SpotifyToken, device_id) is not None
 
-    glowmarkt_row = db.execute(
-        "SELECT username, password_encrypted FROM glowmarkt_credentials WHERE device_id = ?", (device_id,)
-    ).fetchone()
+    creds = db.session.get(GlowmarktCredentials, device_id)
     glowmarkt = {
-        "username": glowmarkt_row["username"] if glowmarkt_row else "",
-        "has_password": bool(glowmarkt_row and glowmarkt_row["password_encrypted"]),
+        "username": creds.username if creds else "",
+        "has_password": bool(creds and creds.password_encrypted),
     }
 
     return render_template(
@@ -170,9 +159,10 @@ def _render_device_config(db, device_id: str, errors: list[str] | None = None):
 @bp.post("/device/spotify/disconnect")
 @require_paired_session
 def spotify_disconnect():
-    db = get_db()
-    db.execute("DELETE FROM spotify_tokens WHERE device_id = ?", (session["device_id"],))
-    db.commit()
+    token = db.session.get(SpotifyToken, session["device_id"])
+    if token is not None:
+        db.session.delete(token)
+        db.session.commit()
     return redirect(url_for("web.device_config"))
 
 

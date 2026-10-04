@@ -5,7 +5,8 @@ import os
 from flask import current_app, jsonify, redirect, request, session, url_for
 from werkzeug.security import check_password_hash
 
-from .db import get_db
+from .db import db
+from .models import Device
 
 
 def require_renderer_auth(view):
@@ -35,18 +36,14 @@ def require_device_auth(view):
             return jsonify(error="unauthorized"), 401
 
         secret = auth_header.removeprefix("Bearer ")
-        row = (
-            get_db()
-            .execute("SELECT device_secret_hash, device_name FROM devices WHERE device_id = ?", (device_id,))
-            .fetchone()
-        )
-        if row is None or not check_password_hash(row["device_secret_hash"], secret):
+        device = db.session.get(Device, device_id)
+        if device is None or not check_password_hash(device.device_secret_hash, secret):
             return jsonify(error="unauthorized"), 401
 
         # device_name is just the Pi's own DEVICE_ID, echoed back here purely so a log line
         # reads as a name instead of an opaque id -- never used for anything else.
         current_app.logger.info(
-            "%s %s device=%s (%s)", request.method, request.path, row["device_name"] or "unnamed", device_id
+            "%s %s device=%s (%s)", request.method, request.path, device.device_name or "unnamed", device_id
         )
         return view(device_id, *args, **kwargs)
 
@@ -62,12 +59,8 @@ def require_paired_session(view):
     def wrapped(*args, **kwargs):
         device = None
         if "device_id" in session:
-            device = (
-                get_db()
-                .execute("SELECT paired_at FROM devices WHERE device_id = ?", (session["device_id"],))
-                .fetchone()
-            )
-        if device is None or device["paired_at"] is None:
+            device = db.session.get(Device, session["device_id"])
+        if device is None or device.paired_at is None:
             session.clear()
             return redirect(url_for("web.pair"))
         return view(*args, **kwargs)

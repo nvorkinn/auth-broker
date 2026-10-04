@@ -4,7 +4,8 @@ from hashlib import blake2b
 from flask import Blueprint, Response, abort, request
 
 from .auth import require_device_auth, require_renderer_auth
-from .db import get_db
+from .db import db
+from .models import Device, Frame
 
 bp = Blueprint("frames", __name__, url_prefix="/api/frames")
 
@@ -22,31 +23,21 @@ def update_frame(device_id):
     if len(frame) != FRAME_BYTES:
         abort(400)
     etag = blake2b(frame, digest_size=8).hexdigest()
-    db = get_db()
-    if db.execute("SELECT 1 FROM devices WHERE device_id = ?", (device_id,)).fetchone() is None:
+    if db.session.get(Device, device_id) is None:
         abort(404)
-    db.execute(
-        """
-        INSERT INTO frames (device_id, frame, etag, rendered_at)
-        VALUES (?, ?, ?, ?)
-        ON CONFLICT(device_id) DO UPDATE SET
-            frame = excluded.frame,
-            etag = excluded.etag,
-            rendered_at = excluded.rendered_at
-        """,
-        (device_id, frame, etag, now_iso()),
-    )
-    db.commit()
+    row = db.session.get(Frame, device_id) or Frame(device_id=device_id)
+    row.frame, row.etag, row.rendered_at = frame, etag, now_iso()
+    db.session.add(row)
+    db.session.commit()
     return "", 204
 
 
 @bp.get("/<device_id>/frame")
 @require_device_auth
 def get_frame(device_id):
-    db = get_db()
-    row = db.execute("SELECT frame, etag FROM frames WHERE device_id = ?", (device_id,)).fetchone()
+    row = db.session.get(Frame, device_id)
     if not row:
         abort(404)
-    resp = Response(row["frame"], mimetype="application/octet-stream")
-    resp.set_etag(row["etag"])
+    resp = Response(row.frame, mimetype="application/octet-stream")
+    resp.set_etag(row.etag)
     return resp.make_conditional(request)

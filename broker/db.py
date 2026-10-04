@@ -1,96 +1,46 @@
 import os
-import sqlite3
 from pathlib import Path
 
-from flask import g
+from alembic import command
+from flask import current_app
+from flask_migrate import Migrate
+from flask_sqlalchemy import SQLAlchemy
+from sqlalchemy import event
+from sqlalchemy.orm import DeclarativeBase
 
-SCHEMA = """
-CREATE TABLE IF NOT EXISTS devices (
-    device_id TEXT PRIMARY KEY,
-    device_secret_hash TEXT NOT NULL,
-    created_at TEXT NOT NULL,
-    paired_at TEXT,
-    device_name TEXT
-);
 
-CREATE TABLE IF NOT EXISTS pairing_codes (
-    code TEXT PRIMARY KEY,
-    device_id TEXT NOT NULL REFERENCES devices(device_id),
-    expires_at TEXT NOT NULL
-);
+class Base(DeclarativeBase):
+    pass
 
-CREATE TABLE IF NOT EXISTS device_config (
-    device_id TEXT PRIMARY KEY REFERENCES devices(device_id),
-    interval INTEGER NOT NULL DEFAULT 15,
-    weather_location TEXT NOT NULL DEFAULT '',
-    postcode TEXT NOT NULL DEFAULT '',
-    spotify_enabled INTEGER NOT NULL DEFAULT 0,
-    tfl_stop_ids TEXT NOT NULL DEFAULT '[]'
-);
 
-CREATE TABLE IF NOT EXISTS spotify_tokens (
-    device_id TEXT PRIMARY KEY REFERENCES devices(device_id),
-    refresh_token TEXT NOT NULL,
-    access_token TEXT,
-    expires_at TEXT
-);
-
-CREATE TABLE IF NOT EXISTS glowmarkt_credentials (
-    device_id TEXT PRIMARY KEY REFERENCES devices(device_id),
-    username TEXT NOT NULL DEFAULT '',
-    password_encrypted TEXT
-);
-
-CREATE TABLE IF NOT EXISTS frames (
-    device_id       TEXT PRIMARY KEY REFERENCES devices(device_id),
-    frame           BLOB NOT NULL,
-    etag            TEXT NOT NULL,
-    rendered_at     TEXT NOT NULL
-);
-"""
+db = SQLAlchemy(model_class=Base)
+migrate = Migrate(directory=str(Path(__file__).resolve().parent / "migrations"), render_as_batch=True)
 
 
 def _db_path() -> Path:
     return Path(os.environ.get("BROKER_DB_PATH", Path(__file__).resolve().parent.parent / "data" / "broker.db"))
 
 
-def get_db() -> sqlite3.Connection:
-    if "db" not in g:
-        g.db = sqlite3.connect(_db_path())
-        g.db.row_factory = sqlite3.Row
-        g.db.execute("PRAGMA foreign_keys = ON")
-    return g.db
+def _enable_foreign_keys(dbapi_conn, _record) -> None:
+    dbapi_conn.execute("PRAGMA foreign_keys = ON")
 
 
-def close_db(_exc=None) -> None:
-    db = g.pop("db", None)
-    if db is not None:
-        db.close()
-
-
-def _migrate(conn: sqlite3.Connection) -> None:
-    columns = {row[1] for row in conn.execute("PRAGMA table_info(devices)")}
-    if "paired_at" not in columns:
-        conn.execute("ALTER TABLE devices ADD COLUMN paired_at TEXT")
-        # A device with an unredeemed code is mid-pairing; any other existing device is treated as paired.
-        conn.execute(
-            "UPDATE devices SET paired_at = created_at WHERE device_id NOT IN (SELECT device_id FROM pairing_codes)"
-        )
-    if "device_name" not in columns:
-        conn.execute("ALTER TABLE devices ADD COLUMN device_name TEXT")
-
-    config_columns = {row[1] for row in conn.execute("PRAGMA table_info(device_config)")}
-    if config_columns and "postcode" not in config_columns:
-        conn.execute("ALTER TABLE device_config ADD COLUMN postcode TEXT NOT NULL DEFAULT ''")
+def upgrade_db() -> None:
+    """Brings the DB to the latest revision; needs an app context. Same as `flask db upgrade`,
+    except it leaves logging alone: env.py's logging setup would silence the app's own logger."""
+    config = current_app.extensions["migrate"].migrate.get_config()
+    config.attributes["app_startup"] = True
+    command.upgrade(config, "head")
 
 
 def init_app(app) -> None:
-    path = _db_path()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(path)
-    conn.executescript(SCHEMA)
-    _migrate(conn)
-    conn.commit()
-    conn.close()
+    _db_path().parent.mkdir(parents=True, exist_ok=True)
+    app.config["SQLALCHEMY_DATABASE_URI"] = f"sqlite:///{_db_path()}"
+    db.init_app(app)
+    migrate.init_app(app, db)
 
-    app.teardown_appcontext(close_db)
+    from . import models  # noqa: F401 -- registers the models on db.metadata
+
+    with app.app_context():
+        event.listen(db.engine, "connect", _enable_foreign_keys)
+        upgrade_db()

@@ -63,10 +63,10 @@ The database is a SQLite file (`data/broker.db`). To replay pairing from the
 start, use the admin CLI inside the container; it has no network surface:
 
 ```bash
-docker compose exec auth-broker python -m broker.admin list
-docker compose exec auth-broker python -m broker.admin unpair <device_id>            # show a pairing code again
-docker compose exec auth-broker python -m broker.admin unpair <device_id> --config   # ...and reset its settings and linked accounts
-docker compose exec auth-broker python -m broker.admin forget <device_id>            # delete it; it must register again
+docker compose exec auth-broker flask --app wsgi devices list
+docker compose exec auth-broker flask --app wsgi devices unpair <device_id>            # show a pairing code again
+docker compose exec auth-broker flask --app wsgi devices unpair <device_id> --config   # ...and reset its settings and linked accounts
+docker compose exec auth-broker flask --app wsgi devices forget <device_id>            # delete it; it must register again
 ```
 
 `unpair` keeps the device's identity, so the Pi just shows a new code on its
@@ -78,6 +78,27 @@ sudo rm /opt/countdown/.auth_broker_device && sudo systemctl restart countdown
 
 When the `paired_at` column is first added to an existing database, devices
 with an unredeemed code stay unpaired and every other device is marked paired.
+
+## Changing the database schema
+
+Tables are SQLAlchemy models in `broker/models.py`; migrations live in
+`broker/migrations/versions/` and are managed with
+[Flask-Migrate](https://flask-migrate.readthedocs.io/) (Alembic). To change the schema:
+
+```bash
+# 1. edit broker/models.py
+# 2. generate a migration from the difference (needs your .env loaded, as it builds the app)
+flask --app wsgi db migrate -m "add nickname to devices"
+# 3. read the generated file in broker/migrations/versions/ -- autogenerate misses some
+#    things (renames look like drop + add) and never backfills data -- then commit it
+```
+
+The app runs any pending migrations itself on startup, so deploying the new
+image is all a migration needs. That assumes a single gunicorn worker (the
+current default): with several, move the upgrade into a step that runs once
+before gunicorn starts. A database from before migrations existed is adopted
+by the first migration on its first start, keeping its data.
+`test_migrations_match_the_models` fails if a model changes without a migration.
 
 ## Running tests
 
