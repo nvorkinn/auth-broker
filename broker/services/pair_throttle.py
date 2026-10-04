@@ -67,5 +67,6 @@ class PairThrottle:
         self._last_prune = now
         for ip, client in list(self._clients.items()):
             stale_failures = not client.failures or client.failures[-1] <= now - WINDOW_SECONDS
-            if stale_failures and now - client.locked_until > MAX_LOCKOUT_SECONDS:
+            lockouts_forgotten = not client.lockouts or now - client.locked_until > MAX_LOCKOUT_SECONDS
+            if stale_failures and lockouts_forgotten:
                 del self._clients[ip]

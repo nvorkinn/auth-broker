@@ -313,3 +313,67 @@ def test_device_config_post_reports_every_invalid_field_at_once(paired_client, w
     assert response.status_code == 400
     assert b"find &#34;Nowhere&#34;" in response.data
     assert b"valid UK postcode" in response.data
+
+
+def _wrong_codes(client, times, ip="203.0.113.7"):
+    """Posts `times` wrong codes as if from `ip` (as Caddy forwards it) and returns the last response."""
+    response = None
+    for _ in range(times):
+        response = client.post("/pair", data={"code": "NOPE12"}, headers={"X-Forwarded-For": ip})
+    return response
+
+
+def test_pair_locks_out_an_ip_after_ten_wrong_codes(client):
+    assert _wrong_codes(client, 9).status_code == 200
+
+    response = _wrong_codes(client, 1)
+
+    assert response.status_code == 429
+    assert response.headers["Retry-After"] == "60"
+    assert b"Too many incorrect codes" in response.data
+    assert b"wait a minute" in response.data
+
+
+def test_a_locked_out_ip_is_refused_even_with_the_right_code(client, register_device):
+    device_id, secret = register_device()
+    code = client.post(
+        f"/api/devices/{device_id}/pairing-code", headers={"Authorization": f"Bearer {secret}"}
+    ).get_json()["code"]
+    _wrong_codes(client, 10)
+
+    response = client.post("/pair", data={"code": code}, headers={"X-Forwarded-For": "203.0.113.7"})
+
+    assert response.status_code == 429
+    assert _redirects_to_pair(client.get("/device"))  # no session was set
+    # The code wasn't used up: the same browser can pair with it from a different IP.
+    assert client.post("/pair", data={"code": code}, headers={"X-Forwarded-For": "198.51.100.2"}).status_code == 302
+
+
+def test_pair_lockout_tells_the_visitor_how_many_minutes_to_wait(app, client):
+    clock = [0.0]
+    app.extensions["pair_throttle"]._clock = lambda: clock[0]
+    _wrong_codes(client, 10)
+    clock[0] += 60
+
+    response = _wrong_codes(client, 10)
+
+    assert response.status_code == 429
+    assert response.headers["Retry-After"] == "120"
+    assert b"wait 2 minutes" in response.data
+
+
+def test_pair_throttles_each_forwarded_ip_separately(client):
+    _wrong_codes(client, 10, ip="203.0.113.7")
+
+    assert _wrong_codes(client, 1, ip="198.51.100.2").status_code == 200
+    assert client.get("/pair").status_code == 200  # the form itself is never throttled
+
+
+def test_pair_logs_wrong_codes_and_lockouts(client, caplog):
+    with caplog.at_level("WARNING"):
+        _wrong_codes(client, 10)
+
+    messages = [r.getMessage() for r in caplog.records]
+    assert messages.count("Wrong pairing code from 203.0.113.7") == 10
+    assert "Too many wrong pairing codes from 203.0.113.7; locked out for 60s" in messages
+    assert not any("NOPE12" in m for m in messages)  # never log the guesses themselves

@@ -1,6 +1,7 @@
 import logging
 
 from flask import Flask
+from werkzeug.middleware.proxy_fix import ProxyFix
 
 from . import config
 from . import db as db_module
@@ -14,8 +15,17 @@ def create_app() -> Flask:
         app.logger.handlers = gunicorn_logger.handlers
         app.logger.setLevel(gunicorn_logger.level)
 
+    # Caddy, on the same host, is the only thing that reaches the app (the port is published on
+    # 127.0.0.1 only), so trust the one X-Forwarded-For hop it adds: request.remote_addr is then the
+    # visitor's IP rather than Caddy's, which the /pair throttle depends on.
+    app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1)
+
     config.load(app)
     db_module.init_app(app)
+
+    from .services.pair_throttle import PairThrottle
+
+    app.extensions["pair_throttle"] = PairThrottle()
 
     from .routes import devices, frames, pages, spotify_oauth, spotify_proxy, tfl_search
 
