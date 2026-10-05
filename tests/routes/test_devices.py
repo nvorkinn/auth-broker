@@ -75,6 +75,7 @@ def test_get_config_returns_defaults_and_shared_keys(client, register_device):
     assert response.status_code == 200
     body = response.get_json()
     assert body == {
+        "device_id": device_id,
         "interval": 15,
         "weather": {"api_key": "test-weather-key", "location": ""},
         "notice_board": {"postcode": None},

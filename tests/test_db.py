@@ -7,6 +7,7 @@ from alembic.migration import MigrationContext
 from alembic.script import ScriptDirectory
 from flask_migrate import downgrade, upgrade
 from sqlalchemy import inspect, select
+from werkzeug.security import check_password_hash, generate_password_hash
 
 from broker.db import db
 from broker.models import Device, DeviceConfig, Frame, PairingCode, SpotifyToken
@@ -167,7 +168,7 @@ def test_adopting_an_early_legacy_db_marks_existing_devices_paired(adopt):
     legacy_app = adopt(
         OLD_DEVICES_SCHEMA
         + """
-        INSERT INTO devices VALUES ('paired', 'hash', '2026-01-01T00:00:00'), ('mid-pairing', 'hash', '2026-02-01');
+        INSERT INTO devices VALUES ('paired', 'hash1', '2026-01-01T00:00:00'), ('mid-pairing', 'hash2', '2026-02-01');
         INSERT INTO pairing_codes VALUES ('ABC234', 'mid-pairing', '2026-02-01T00:10:00');
         """
     )
@@ -229,9 +230,9 @@ def test_0002_converts_every_string_timestamp_shape_to_utc(app):
         app,
         """
         INSERT INTO devices VALUES
-            ('offset', 'h', '2026-03-01T12:00:00.123456+00:00', '2026-03-01T13:30:00+01:00', NULL);
-        INSERT INTO devices VALUES ('zulu', 'h', '2026-03-02T08:00:00Z', NULL, NULL);
-        INSERT INTO devices VALUES ('date-only', 'h', '2026-01-01', '2026-01-01T09:15:00', NULL);
+            ('offset', 'h1', '2026-03-01T12:00:00.123456+00:00', '2026-03-01T13:30:00+01:00', NULL);
+        INSERT INTO devices VALUES ('zulu', 'h2', '2026-03-02T08:00:00Z', NULL, NULL);
+        INSERT INTO devices VALUES ('date-only', 'h3', '2026-01-01', '2026-01-01T09:15:00', NULL);
         INSERT INTO pairing_codes VALUES ('ABC234', 'zulu', '2026-03-02T08:10:00+00:00');
         INSERT INTO frames VALUES ('zulu', x'00', 'etag', '2026-03-02T08:05:00Z');
         INSERT INTO spotify_tokens VALUES ('offset', 'refresh', 'access', '1793865600.5');
@@ -278,7 +279,7 @@ def test_0002_converted_timestamps_compare_correctly_in_queries(app):
 
 def test_0002_downgrade_gives_back_iso_strings(app):
     with app.app_context():
-        db.session.add(Device(device_id="d", device_secret_hash="h", created_at=datetime(2026, 3, 1, 12, tzinfo=UTC)))
+        db.session.add(Device(device_id="d", renderer_secret_hash="h", created_at=datetime(2026, 3, 1, 12, tzinfo=UTC)))
         db.session.add(SpotifyToken(device_id="d", refresh_token="r", expires_at=1793865600.5))
         db.session.commit()
         db.session.remove()
@@ -306,6 +307,38 @@ def test_0002_fails_on_a_timestamp_it_cannot_read_and_changes_nothing(app):
 
 def test_utc_datetime_refuses_a_naive_datetime(app):
     with app.app_context():
-        db.session.add(Device(device_id="d", device_secret_hash="h", created_at=datetime(2026, 1, 1)))
+        db.session.add(Device(device_id="d", renderer_secret_hash="h", created_at=datetime(2026, 1, 1)))
         with pytest.raises(Exception, match="naive datetime"):
             db.session.commit()
+
+
+# --- 0004: a secret per role ----------------------------------------------------------------------
+
+
+def test_0004_keeps_existing_devices_and_their_secret_as_the_renderer(app, client):
+    secret = "a-pi-secret-from-before-roles"
+    with app.app_context():
+        downgrade(revision="0003")
+        with db.engine.begin() as conn:
+            conn.exec_driver_sql(
+                "INSERT INTO devices (device_id, device_secret_hash, created_at, paired_at) VALUES (?, ?, ?, ?)",
+                ("old-pi", generate_password_hash(secret), "2026-03-01 12:00:00", "2026-03-01 12:05:00"),
+            )
+            conn.exec_driver_sql("INSERT INTO device_config (device_id) VALUES ('old-pi')")
+        upgrade()
+
+        device = db.session.get(Device, "old-pi")
+        assert check_password_hash(device.renderer_secret_hash, secret)
+        assert device.display_secret_hash is None
+        assert device.paired_at == datetime(2026, 3, 1, 12, 5, tzinfo=UTC)
+
+    response = client.get("/api/devices/old-pi/config", headers={"Authorization": f"Bearer {secret}"})
+    assert response.status_code == 200
+
+
+def test_0004_downgrade_and_upgrade_keep_split_devices(app, split_device):
+    device_id, _, display_secret = split_device
+    with app.app_context():
+        downgrade(revision="0003")
+        upgrade()
+        assert db.session.get(Device, device_id).display_secret_hash is None  # the column went away and back

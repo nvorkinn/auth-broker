@@ -13,6 +13,7 @@
 <!-- Lives outside the settings form because forms can't nest; the Disconnect button points at it. -->
 <form id="spotifyDisconnectForm" method="POST" action="{{ url_for('pages.spotify_disconnect') }}"></form>
 <form id="linkBrowserForm" method="POST" action="{{ url_for('pages.link_browser') }}"></form>
+<form id="displayUnlinkForm" method="POST" action="{{ url_for('pages.display_unlink') }}"></form>
 
 <form method="POST">
     <!-- General -->
@@ -136,6 +137,19 @@
                     autocomplete="new-password"
                 >
             </div>
+        </div>
+    </div>
+
+    <!-- Screen -->
+    <div class="card">
+        <div class="card-header">
+            <h2 class="card-title">Screen</h2>
+        </div>
+        <div class="status-row">
+            <span class="card-subtitle">Screen: {{ 'attached' if display_attached else 'not attached' }}</span>
+            {% if display_attached %}
+                <button type="submit" form="displayUnlinkForm" class="btn-action btn-delete">Unlink screen</button>
+            {% endif %}
         </div>
     </div>
 

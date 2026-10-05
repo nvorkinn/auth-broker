@@ -9,7 +9,6 @@ def app(tmp_path, monkeypatch):
     monkeypatch.setenv("SPOTIFY_REDIRECT_URI", "https://auth.example.com/auth/spotify/callback")
     monkeypatch.setenv("TFL_APP_KEY", "test-tfl-key")
     monkeypatch.setenv("WEATHER_API_KEY", "test-weather-key")
-    monkeypatch.setenv("COUNTDOWN_RENDERER_TOKEN", "test-renderer-token")
     monkeypatch.setenv("BROKER_DB_PATH", str(tmp_path / "broker.db"))
 
     from cryptography.fernet import Fernet
@@ -20,6 +19,11 @@ def app(tmp_path, monkeypatch):
 
     application = create_app()
     application.config.update(TESTING=True)
+    # Tests register far more devices a minute than the real limit allows; the throttle's own
+    # tests put the real one back (see register_throttle).
+    from broker.services.pair_throttle import PairThrottle
+
+    application.extensions["register_throttle"] = PairThrottle(max_events=10_000)
     yield application
 
     from broker.db import db
@@ -46,14 +50,34 @@ def cli(app):
 
 @pytest.fixture
 def register_device(client):
-    """Registers a device and returns (device_id, device_secret)."""
+    """Registers a standalone device and returns (device_id, secret)."""
 
     def _register(secret: str = "a-very-long-device-secret-value"):
-        response = client.post("/api/devices/register", json={"device_secret": secret})
+        response = client.post("/api/devices/register", json={"role": "renderer", "standalone": True, "secret": secret})
         assert response.status_code == 201
         return response.get_json()["device_id"], secret
 
     return _register
+
+
+@pytest.fixture
+def register_pending(client):
+    """Registers a renderer or display through the pending pool and returns the response."""
+
+    def _register(role: str, secret: str):
+        return client.post("/api/devices/register", json={"role": role, "secret": secret})
+
+    return _register
+
+
+@pytest.fixture
+def split_device(register_pending):
+    """A device matched through the pool, screen first: returns (device_id, renderer_secret, display_secret)."""
+    renderer_secret, display_secret = "renderer-secret-0123456789", "display-secret-0123456789"
+    assert register_pending("display", display_secret).status_code == 202
+    response = register_pending("renderer", renderer_secret)
+    assert response.status_code == 201
+    return response.get_json()["device_id"], renderer_secret, display_secret
 
 
 @pytest.fixture

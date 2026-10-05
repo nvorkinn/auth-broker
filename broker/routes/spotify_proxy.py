@@ -34,7 +34,7 @@ def require_spotify_enabled(default):
 
 
 @bp.get("/<device_id>/now-playing")
-@require_device_auth
+@require_device_auth(roles={"renderer"})
 @require_spotify_enabled(default=None)
 def now_playing(device_id):
     """Polled by the Pi in place of talking to Spotify directly."""
@@ -42,7 +42,7 @@ def now_playing(device_id):
 
 
 @bp.get("/<device_id>/queue")
-@require_device_auth
+@require_device_auth(roles={"renderer"})
 @require_spotify_enabled(default=[])
 def queue(device_id):
     """Upcoming Spotify queue, same auth and token handling as now-playing.
@@ -51,7 +51,7 @@ def queue(device_id):
 
 
 @bp.get("/<device_id>/top/<any(artists, tracks):type_>")
-@require_device_auth
+@require_device_auth(roles={"renderer"})
 @require_spotify_enabled(default=None)
 def top(device_id: str, type_: str):
     """The user's top artists or tracks; any other type is a 404 rather than an arbitrary Spotify path."""

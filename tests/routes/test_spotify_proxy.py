@@ -206,3 +206,10 @@ def test_new_api_spotify_top_only_proxies_artists_or_tracks(paired_client):
 
     assert response.status_code == 404
     mocked.assert_not_called()
+
+
+@pytest.mark.parametrize("path", ["now-playing", "queue", "top/tracks"])
+def test_spotify_paths_are_forbidden_to_the_display(client, split_device, path):
+    device_id, _, display_secret = split_device
+    response = client.get(f"/api/devices/{device_id}/{path}", headers={"Authorization": f"Bearer {display_secret}"})
+    assert response.status_code == 403

@@ -3,7 +3,7 @@ from unittest.mock import Mock, patch
 import pytest
 
 from broker.db import db
-from broker.models import DeviceConfig, GlowmarktCredentials, SpotifyToken
+from broker.models import Device, DeviceConfig, GlowmarktCredentials, SpotifyToken
 from broker.routes.pages import normalize_postcode
 
 
@@ -402,3 +402,34 @@ def test_pair_logs_wrong_codes_and_lockouts(client, caplog):
     assert messages.count("Wrong pairing code from 203.0.113.7") == 10
     assert "Too many wrong pairing codes from 203.0.113.7; locked out for 60s" in messages
     assert not any("NOPE12" in m for m in messages)  # never log the guesses themselves
+
+
+# --- device ID and screen ----------------------------------------------------------------------------
+
+
+def test_device_page_has_no_unlink_button_without_a_screen(paired_client):
+    client, _, _ = paired_client
+    assert "Unlink screen" not in client.get("/device").get_data(as_text=True)
+
+
+def test_unlink_screen_clears_the_display_secret(app, client, split_device):
+    device_id, renderer_secret, display_secret = split_device
+    code = client.get("/api/config", headers={"Authorization": f"Bearer {renderer_secret}"}).get_json()["pairing_code"]
+    client.post("/pair", data={"code": code})
+    frame_headers = {"Authorization": f"Bearer {display_secret}"}
+    assert "Unlink screen" in client.get("/device").get_data(as_text=True)
+    assert client.get("/api/frame", headers=frame_headers).status_code == 404  # authenticated, no frame yet
+
+    response = client.post("/device/display/unlink")
+
+    assert response.status_code == 302
+    with app.app_context():
+        assert db.session.get(Device, device_id).display_secret_hash is None
+    assert client.get("/api/frame", headers=frame_headers).status_code == 401
+    assert "Unlink screen" not in client.get("/device").get_data(as_text=True)
+
+
+def test_unlink_screen_requires_pairing(client):
+    response = client.post("/device/display/unlink")
+    assert response.status_code == 302
+    assert response.headers["Location"] == "/pair"
