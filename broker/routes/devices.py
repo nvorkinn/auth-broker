@@ -4,7 +4,7 @@ checks in with. Everything but /register needs one of the device's secrets."""
 from flask import Blueprint, current_app, jsonify, request
 from sqlalchemy.exc import IntegrityError
 
-from ..auth import ROLES, hash_secret, require_device_auth
+from ..auth import ROLES, WAITING_RETRY_AFTER, hash_secret, require_device_auth
 from ..db import db
 from ..models import Device, DeviceConfig, GlowmarktCredentials
 from ..services import pairing, registration
@@ -70,7 +70,7 @@ def register():
     if found.role_conflict:
         return jsonify(error="that secret is already registered with another role"), 409
     if found.waiting:
-        return jsonify(status="waiting"), 202
+        return jsonify(status="waiting"), 202, {"Retry-After": str(WAITING_RETRY_AFTER)}
     return jsonify(device_id=found.device_id), 200
 
 

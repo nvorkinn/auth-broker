@@ -82,13 +82,26 @@ matched, or 202 while it's still waiting.
 A screen therefore needs no logic beyond:
 
 1. On boot: `POST /api/devices/register {"role": "display", "secret": ...}`.
-2. Loop on `GET /api/frame` with `If-None-Match`:
-   - 200: draw the frame.
-   - 304: unchanged.
-   - 202: not matched yet.
-   - 404: matched, but nothing rendered yet.
+2. Loop on `GET /api/frame` with `If-None-Match`, handling the status and then
+   sleeping for the response's `Retry-After` seconds:
+   - 200: draw the frame. `Retry-After` is the device's refresh interval
+     (set on `/device`).
+   - 304: unchanged. Same `Retry-After`.
+   - 202: not matched yet. `Retry-After: 30`.
+   - 404: matched, but nothing rendered yet. `Retry-After: 5`.
    - 401: unknown secret (it expired from the pool, or the screen was
      unlinked), so register again.
+
+`/register` answers:
+
+| Code | Meaning | Client should |
+|---|---|---|
+| 201 / 200 | `{device_id}`: a new device, or a repeat of a registered secret | start polling |
+| 202 | waiting in the pool (`Retry-After: 30`) | poll `/api/frame` or `/api/config`, not `/register` |
+| 400 | bad role or secret, or a standalone display | fix the request; a firmware bug |
+| 409 | secret already registered with the other role | generate a new secret |
+| 429 | over 5 calls a minute from this IP | wait `Retry-After` (lockouts double, up to 1h) |
+| 503 | pool full | wait `Retry-After` (60s) |
 
 A renderer polls `GET /api/config` the same way. Once matched, that response
 carries its `device_id` and a `pairing_code` to draw. From then on it can use
