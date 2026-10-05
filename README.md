@@ -49,45 +49,76 @@ non-local deployment (Caddy terminates TLS here).
 
 ## Renderer and display roles
 
-A device is one row with up to two independent secrets, one per role:
+A device has up to two secrets, one per role:
 
-- **renderer**: whatever draws the frames. On a standalone Pi, that's the Pi
-  itself. In a split deployment it's a renderer running on the server.
+- **renderer**: whatever draws the frames. On a standalone Pi that's the Pi
+  itself; in a split deployment it's a renderer process on the server.
 - **display**: a thin screen (e.g. an ESP32) that only fetches finished frames.
 
-A standalone Pi registers once as a renderer and nothing else changes. In the
-split setup, the screen registers as a display, shows its pairing code from
-`GET /api/devices/<id>/status`, and fetches frames. The renderer then attaches
-to the same device using the device ID shown on `/device`.
+**The secret is the device's identity.** Each client generates its own long
+random secret and sends it, never its hash, as `Authorization: Bearer
+<secret>` on every request. The broker stores only its SHA-256, which is
+unique per device, so the secret alone finds the device. The routes shaped
+`/api/devices/<id>/...` and `/api/frames/<id>/frame` keep working too, and
+then the secret must belong to that device. Secrets registered before this
+change are werkzeug hashes; each is rewritten as SHA-256 the first time its
+Pi authenticates on a path route.
 
-`POST /api/devices/register` takes `{"role": "renderer" | "display", "secret":
-"<client-generated>", "device_id": "<optional>"}`. Without `device_id` it
-creates a device (201). With one it attaches that role to an existing device
-(200), as long as that role's slot is empty; otherwise it answers 409. To free
-the display slot, use "Unlink screen" on `/device`. The old body,
-`{"device_secret": ...}` with no role, still registers a renderer.
+### Registering
+
+`POST /api/devices/register` is safe to call again with the same secret,
+e.g. on every boot. A repeat returns 200 `{device_id}` once the client is
+matched, or 202 while it's still waiting.
+
+- **Standalone Pi:** `{"role": "renderer", "standalone": true, "secret": ...}`
+  becomes a device at once (201 `{device_id}`). The old body,
+  `{"device_secret": ...}`, means the same.
+- **Split deployment:** a renderer and a screen each send
+  `{"role": "renderer" | "display", "secret": ...}`, in either order. Each
+  waits in a pending pool (202) until a client of the other role arrives.
+  The broker then matches the longest-waiting one into a new device (201
+  `{device_id}` to whoever completed the match).
+
+A screen therefore needs no logic beyond:
+
+1. On boot: `POST /api/devices/register {"role": "display", "secret": ...}`.
+2. Loop on `GET /api/frame` with `If-None-Match`:
+   - 200: draw the frame.
+   - 304: unchanged.
+   - 202: not matched yet.
+   - 404: matched, but nothing rendered yet.
+   - 401: unknown secret (it expired from the pool, or the screen was
+     unlinked), so register again.
+
+A renderer polls `GET /api/config` the same way. Once matched, that response
+carries its `device_id` and a `pairing_code` to draw, and the renderer then
+uses the path routes for Spotify and frame PUTs. Renderers are started by
+hand for now: `flask devices pending` (below) shows a screen waiting for one.
+
+The pool is open to anyone, so it's bounded:
+- `/register` allows 5 calls a minute per IP, every call counting (429 with
+  `Retry-After`, lockouts doubling like `/pair`).
+- At most 20 clients may wait at once (503).
+- A client unmatched after 24 hours is dropped.
+
+The matching runs in one transaction that starts with a write, so SQLite's
+single-writer lock makes it safe across threads, workers and the CLI.
+
+### Which role may call what
 
 | Route | Roles |
 |---|---|
-| `GET /api/devices/<id>/config`, Spotify routes | renderer |
-| `GET /api/devices/<id>/status` (`{paired, pairing_code?}`) | display |
-| `POST /api/devices/<id>/pairing-code` | renderer, display |
+| `GET /api/config`, `GET /api/devices/<id>/config` | renderer |
+| `POST /api/devices/<id>/pairing-code`, Spotify routes | renderer |
 | `PUT /api/frames/<id>/frame` (raw 800x480 1-bit, 48000 bytes) | renderer |
-| `GET /api/frames/<id>/frame` (ETag / `If-None-Match` → 304) | renderer, display |
+| `GET /api/frame`, `GET /api/frames/<id>/frame` (ETag / `If-None-Match` → 304) | renderer, display |
 
-A wrong or missing secret gets 401. A valid secret for the wrong role gets 403.
+A wrong or missing secret gets 401. A valid secret for the wrong role gets
+403. A secret still waiting in the pool gets 202 on the ID-less routes.
 
-Attaching currently trusts anyone who knows the device ID. Once the config
-site can mint a short-lived one-time link code, attach will require it.
-
-`/pair` itself needs no login, so wrong codes are throttled per client IP: ten
-in a minute lock that IP out of `/pair` for a minute (429 with `Retry-After`),
-and each further lockout doubles, up to an hour. Each wrong code is logged
-with its IP. The counts are kept in memory, so they reset on restart and
-assume a single gunicorn worker. The client IP comes from the
-`X-Forwarded-For` header Caddy adds; that's only trustworthy because Caddy is
-the only thing that can reach the app's port, so don't publish port 5000
-beyond `127.0.0.1` without changing the `ProxyFix` setup in `create_app`.
+"Unlink screen" on `/device` revokes the screen's secret. Bringing a
+replacement screen back to an existing device isn't built yet: registering
+it puts it in the pool as a new device.
 
 ## Monitoring devices
 
@@ -136,7 +167,7 @@ rest:
 ```
 broker/
   routes/     Flask blueprints: read the request, call a service or client, return a response
-  services/   the broker's own logic that more than one route needs (pairing, setup)
+  services/   the broker's own logic that more than one route needs (pairing, registration, setup)
   clients/    everything that talks to an outside API (Spotify, TfL, Open-Meteo)
   models.py   the schema; db.py and migrations/ manage it
   auth.py     the decorators that guard routes
@@ -177,6 +208,7 @@ docker exec auth-broker flask --app wsgi devices code <device_id>              #
 docker exec auth-broker flask --app wsgi devices unpair <device_id>            # show a pairing code again
 docker exec auth-broker flask --app wsgi devices unpair <device_id> --config   # ...and reset its settings and linked accounts
 docker exec auth-broker flask --app wsgi devices forget <device_id>            # delete it; it must register again
+docker exec auth-broker flask --app wsgi devices pending                       # renderers/screens waiting to be matched
 ```
 
 `unpair` keeps the device's identity, so the Pi just shows a new code on its
@@ -286,6 +318,11 @@ image tag.
   `spotipy` calls, and the local Flask config page, for calls to this
   service's device-facing API. Left for a follow-up so this could be stood
   up and tested on its own first.
+- Bringing a replacement screen back to an existing device: a short-lived
+  link code from `/device` that a registering screen sends to join that
+  device instead of the pool.
+- A supervisor that keeps an idle renderer waiting in the pool, instead of
+  starting each one by hand.
 - Any provider tokens beyond Spotify and Glowmarkt (a future per-user token
   would follow the same shape: its own table, proxied the same way through
   the device-facing API).

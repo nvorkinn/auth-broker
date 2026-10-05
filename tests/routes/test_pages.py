@@ -407,29 +407,26 @@ def test_pair_logs_wrong_codes_and_lockouts(client, caplog):
 # --- device ID and screen ----------------------------------------------------------------------------
 
 
-def test_device_page_shows_the_device_id(paired_client):
-    client, device_id, _ = paired_client
-    page = client.get("/device").get_data(as_text=True)
-    assert device_id in page
-    assert "Unlink screen" not in page
+def test_device_page_has_no_unlink_button_without_a_screen(paired_client):
+    client, _, _ = paired_client
+    assert "Unlink screen" not in client.get("/device").get_data(as_text=True)
 
 
-def test_unlink_screen_clears_the_display_secret(app, paired_client, register_device):
-    client, device_id, _ = paired_client
-    _, display_secret = register_device("display-secret-0123456789", role="display", device_id=device_id)
-    status_url = f"/api/devices/{device_id}/status"
-    headers = {"Authorization": f"Bearer {display_secret}"}
+def test_unlink_screen_clears_the_display_secret(app, client, split_device):
+    device_id, renderer_secret, display_secret = split_device
+    code = client.get("/api/config", headers={"Authorization": f"Bearer {renderer_secret}"}).get_json()["pairing_code"]
+    client.post("/pair", data={"code": code})
+    frame_headers = {"Authorization": f"Bearer {display_secret}"}
     assert "Unlink screen" in client.get("/device").get_data(as_text=True)
-    assert client.get(status_url, headers=headers).status_code == 200
+    assert client.get("/api/frame", headers=frame_headers).status_code == 404  # authenticated, no frame yet
 
     response = client.post("/device/display/unlink")
 
     assert response.status_code == 302
     with app.app_context():
         assert db.session.get(Device, device_id).display_secret_hash is None
-    assert client.get(status_url, headers=headers).status_code == 401
-    # The slot is free again for a replacement screen.
-    register_device("new-display-secret-0123456789", role="display", device_id=device_id)
+    assert client.get("/api/frame", headers=frame_headers).status_code == 401
+    assert "Unlink screen" not in client.get("/device").get_data(as_text=True)
 
 
 def test_unlink_screen_requires_pairing(client):

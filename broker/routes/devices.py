@@ -1,16 +1,13 @@
 """A device's own lifecycle: registering on first boot, pairing codes, and the config poll it
 checks in with. Everything but /register needs one of the device's secrets."""
 
-import secrets
-from datetime import UTC, datetime
-
 from flask import Blueprint, current_app, jsonify, request
-from werkzeug.security import generate_password_hash
+from sqlalchemy.exc import IntegrityError
 
-from ..auth import ROLES, require_device_auth
+from ..auth import ROLES, hash_secret, require_device_auth
 from ..db import db
 from ..models import Device, DeviceConfig, GlowmarktCredentials
-from ..services import pairing
+from ..services import pairing, registration
 from ..services.setup import setup_missing
 
 bp = Blueprint("devices", __name__, url_prefix="/api/devices")
@@ -18,44 +15,67 @@ bp = Blueprint("devices", __name__, url_prefix="/api/devices")
 
 @bp.post("/register")
 def register():
-    """Called once per role on first boot: by a Pi or server-side renderer as "renderer", by a
-    screen as "display". The client generates its own secret and keeps it locally forever after;
-    only its hash is ever stored here.
+    """How a device gets its identity. The client generates its own secret, keeps it locally forever
+    after, and sends it with every request; only its hash is stored here, and that hash alone
+    identifies the device. Safe to call again with the same secret, e.g. on every boot.
 
-    With no device_id it creates a new device. With one it attaches the role to that existing
-    device, as long as the role's slot is empty; re-attaching needs the slot cleared from the web UI
-    first. The old body, {"device_secret": ...} with no role, still registers a renderer."""
+    - {"role": "renderer", "standalone": true, "secret": ...}: a Pi that is its own screen. Becomes
+      a device at once (201). The old body, {"device_secret": ...} with no role, means the same.
+    - {"role": "renderer" | "display", "secret": ...}: one half of a split deployment. Joins the
+      pending pool and is matched with the longest-waiting client of the other role into one
+      device (201 {device_id}), or waits (202) until one arrives. A waiting client polls its usual
+      endpoint (/api/config, /api/frame), which also answers 202 until it's matched.
+
+    Throttled per IP, every call counting, as anyone can call it."""
+    throttle = current_app.extensions["register_throttle"]
+    ip = request.remote_addr or "unknown"
+    retry_after = throttle.retry_after(ip)
+    if retry_after is not None:
+        return jsonify(error="too many registrations"), 429, {"Retry-After": str(retry_after)}
+    # The call that reaches the limit still goes through; it's the next one that's refused.
+    lockout = throttle.record_failure(ip)
+    if lockout is not None:
+        current_app.logger.warning("Too many registrations from %s; locked out for %ss", ip, lockout)
+
     body = request.get_json(silent=True) or {}
+    legacy = "role" not in body and "device_secret" in body
     role = body.get("role", "renderer")
+    standalone = legacy or body.get("standalone") is True
     secret = body.get("secret", body.get("device_secret", ""))
     if role not in ROLES:
         return jsonify(error=f"role must be one of {', '.join(ROLES)}"), 400
+    if standalone and role != "renderer":
+        return jsonify(error="only a renderer can be standalone"), 400
     if not isinstance(secret, str) or len(secret) < 16:
         return jsonify(error="secret must be a random string of at least 16 characters"), 400
 
-    secret_hash = generate_password_hash(secret)
-    column = f"{role}_secret_hash"
-    device_id = body.get("device_id")
-    if device_id is not None:
-        # TODO: this trusts anyone who knows the device_id. Once the config website can mint a
-        # short-lived one-time link code, require it here.
-        device = db.session.get(Device, device_id) if isinstance(device_id, str) else None
-        if device is None or getattr(device, column) is not None:
-            return jsonify(error=f"no device {device_id} with a free {role} slot"), 409
-        setattr(device, column, secret_hash)
-        db.session.commit()
-        return jsonify(device_id=device_id), 200
+    secret_hash = hash_secret(secret)
+    found = registration.existing(role, secret_hash)
+    if found is None:
+        try:
+            if standalone:
+                return jsonify(device_id=registration.register_standalone(secret_hash)), 201
+            found = registration.register_pending(role, secret_hash)
+        except IntegrityError:
+            # The same secret registered by a simultaneous request (e.g. a quick retry) that got in
+            # first: answer as for any repeat.
+            db.session.rollback()
+            found = registration.existing(role, secret_hash)
+        else:
+            if found is None:
+                return jsonify(error="too many devices waiting to be matched"), 503, {"Retry-After": "60"}
+            if found.device_id:
+                return jsonify(device_id=found.device_id), 201
 
-    device_id = secrets.token_hex(6)
-    db.session.add(
-        Device(device_id=device_id, created_at=datetime.now(UTC), config=DeviceConfig(), **{column: secret_hash})
-    )
-    db.session.commit()
-    return jsonify(device_id=device_id), 201
+    if found.role_conflict:
+        return jsonify(error="that secret is already registered with another role"), 409
+    if found.waiting:
+        return jsonify(status="waiting"), 202
+    return jsonify(device_id=found.device_id), 200
 
 
 @bp.post("/<device_id>/pairing-code")
-@require_device_auth(roles={"renderer", "display"})
+@require_device_auth(roles={"renderer"})
 def create_pairing_code(device_id):
     """Forces a fresh code, e.g. to link a new browser to an already-paired device."""
     code = pairing.issue_code(device_id)
@@ -73,23 +93,13 @@ def _update_device_name(device_id: str) -> None:
         db.session.commit()
 
 
-@bp.get("/<device_id>/status")
-@require_device_auth(roles={"display"})
-def get_status(device_id):
-    """Polled by a screen, which has no config of its own, so it can draw its pairing code itself."""
-    status = {"paired": db.session.get(Device, device_id).paired_at is not None}
-    code = pairing.current_code_for(device_id)
-    if code:
-        status["pairing_code"] = code
-    return jsonify(status)
-
-
 @bp.get("/<device_id>/config")
 @require_device_auth(roles={"renderer"})
 def get_config(device_id):
-    """Polled by the Pi. Bundles the device's own settings together with the
-    shared app-level API keys, so a key rotation doesn't require re-flashing
-    every gifted device."""
+    """Polled by the renderer, here or as /api/config with no device_id. Bundles the device's own
+    settings together with the shared app-level API keys, so a key rotation doesn't require
+    re-flashing every gifted device. Carries the device_id, which is how a renderer matched through
+    the pending pool learns it."""
     _update_device_name(device_id)
     config = db.session.get(DeviceConfig, device_id)
     if config is None:
@@ -102,6 +112,7 @@ def get_config(device_id):
     }
 
     return jsonify(
+        device_id=device_id,
         interval=config.interval,
         weather={"api_key": current_app.config["WEATHER_API_KEY"], "location": config.weather_location},
         notice_board={"postcode": config.postcode or None},

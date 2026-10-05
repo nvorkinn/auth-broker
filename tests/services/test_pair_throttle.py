@@ -102,3 +102,15 @@ def test_forgets_ips_with_nothing_left_to_remember():
 
 def test_uses_the_monotonic_clock_by_default():
     assert PairThrottle()._clock is pair_throttle.time.monotonic
+
+
+def test_a_custom_limit_and_window_are_respected():
+    clock = FakeClock()
+    throttle = PairThrottle(clock=clock, max_events=3, window=10.0)
+
+    assert _fail(throttle, "1.2.3.4", 2) is None
+    assert _fail(throttle, "1.2.3.4", 1) == 10  # the first lockout lasts one window
+    assert throttle.retry_after("1.2.3.4") == 10
+
+    clock.advance(11)
+    assert throttle.retry_after("1.2.3.4") is None

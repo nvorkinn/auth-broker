@@ -1,7 +1,12 @@
+from datetime import UTC, datetime
+
 import pytest
 from flask import g, jsonify
+from werkzeug.security import generate_password_hash
 
-from broker.auth import require_device_auth
+from broker.auth import hash_secret, require_device_auth
+from broker.db import db
+from broker.models import Device, DeviceConfig
 
 
 def test_require_device_auth_rejects_missing_header(client, register_device):
@@ -64,4 +69,49 @@ def test_require_device_auth_sets_device_id_and_role(app, split_device, role):
         return jsonify(device_id=g.device_id, role=g.role)
 
     with app.test_request_context(headers={"Authorization": f"Bearer {secret}"}):
-        assert view(device_id).get_json() == {"device_id": device_id, "role": role}
+        assert view(device_id=device_id).get_json() == {"device_id": device_id, "role": role}
+
+
+# --- lazy rehash of werkzeug hashes ---------------------------------------------------------------
+
+
+def _legacy_device(app, secret):
+    """A device as registered before secrets were SHA-256: a salted werkzeug hash."""
+    with app.app_context():
+        db.session.add(
+            Device(
+                device_id="legacy",
+                renderer_secret_hash=generate_password_hash(secret),
+                created_at=datetime.now(UTC),
+                config=DeviceConfig(),
+            )
+        )
+        db.session.commit()
+
+
+def _stored_hash(app):
+    with app.app_context():
+        return db.session.get(Device, "legacy").renderer_secret_hash
+
+
+def test_a_legacy_hash_is_rewritten_as_sha256_when_it_verifies(app, client):
+    secret = "a-pi-secret-from-before-roles"
+    _legacy_device(app, secret)
+    assert client.get("/api/config", headers={"Authorization": f"Bearer {secret}"}).status_code == 401
+
+    response = client.get("/api/devices/legacy/config", headers={"Authorization": f"Bearer {secret}"})
+
+    assert response.status_code == 200
+    assert _stored_hash(app) == hash_secret(secret)
+    # Now the secret alone finds the device.
+    assert client.get("/api/config", headers={"Authorization": f"Bearer {secret}"}).get_json()["device_id"] == "legacy"
+
+
+def test_a_wrong_secret_leaves_a_legacy_hash_alone(app, client):
+    _legacy_device(app, "a-pi-secret-from-before-roles")
+    before = _stored_hash(app)
+
+    response = client.get("/api/devices/legacy/config", headers={"Authorization": "Bearer wrong-secret-value"})
+
+    assert response.status_code == 401
+    assert _stored_hash(app) == before

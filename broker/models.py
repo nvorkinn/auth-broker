@@ -16,9 +16,10 @@ class Device(db.Model):
     __tablename__ = "devices"
 
     device_id: Mapped[str] = mapped_column(String, primary_key=True)
-    # One secret per role (see auth.ROLES); either may be NULL until that role registers or attaches.
-    renderer_secret_hash: Mapped[str | None] = mapped_column(String)
-    display_secret_hash: Mapped[str | None] = mapped_column(String)
+    # One secret per role (see auth.ROLES), each identifying the device on its own. A standalone Pi has
+    # no display secret. SHA-256 hex, or a werkzeug hash not yet rewritten (see auth.hash_secret).
+    renderer_secret_hash: Mapped[str] = mapped_column(String, index=True, unique=True)
+    display_secret_hash: Mapped[str | None] = mapped_column(String, index=True, unique=True)
     created_at: Mapped[datetime] = mapped_column(UTCDateTime)
     paired_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
     device_name: Mapped[str | None] = mapped_column(String)
@@ -89,3 +90,14 @@ class Frame(db.Model):
     frame: Mapped[bytes] = mapped_column(LargeBinary)
     etag: Mapped[str] = mapped_column(String)
     rendered_at: Mapped[datetime] = mapped_column(UTCDateTime)
+
+
+class PendingRegistration(db.Model):
+    """A renderer or screen that registered and is waiting to be matched with the other role
+    (see services/registration.py). Deleted once matched."""
+
+    __tablename__ = "pending_registrations"
+
+    secret_hash: Mapped[str] = mapped_column(String, primary_key=True)
+    role: Mapped[str] = mapped_column(String)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime)

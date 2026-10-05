@@ -168,7 +168,7 @@ def test_adopting_an_early_legacy_db_marks_existing_devices_paired(adopt):
     legacy_app = adopt(
         OLD_DEVICES_SCHEMA
         + """
-        INSERT INTO devices VALUES ('paired', 'hash', '2026-01-01T00:00:00'), ('mid-pairing', 'hash', '2026-02-01');
+        INSERT INTO devices VALUES ('paired', 'hash1', '2026-01-01T00:00:00'), ('mid-pairing', 'hash2', '2026-02-01');
         INSERT INTO pairing_codes VALUES ('ABC234', 'mid-pairing', '2026-02-01T00:10:00');
         """
     )
@@ -230,9 +230,9 @@ def test_0002_converts_every_string_timestamp_shape_to_utc(app):
         app,
         """
         INSERT INTO devices VALUES
-            ('offset', 'h', '2026-03-01T12:00:00.123456+00:00', '2026-03-01T13:30:00+01:00', NULL);
-        INSERT INTO devices VALUES ('zulu', 'h', '2026-03-02T08:00:00Z', NULL, NULL);
-        INSERT INTO devices VALUES ('date-only', 'h', '2026-01-01', '2026-01-01T09:15:00', NULL);
+            ('offset', 'h1', '2026-03-01T12:00:00.123456+00:00', '2026-03-01T13:30:00+01:00', NULL);
+        INSERT INTO devices VALUES ('zulu', 'h2', '2026-03-02T08:00:00Z', NULL, NULL);
+        INSERT INTO devices VALUES ('date-only', 'h3', '2026-01-01', '2026-01-01T09:15:00', NULL);
         INSERT INTO pairing_codes VALUES ('ABC234', 'zulu', '2026-03-02T08:10:00+00:00');
         INSERT INTO frames VALUES ('zulu', x'00', 'etag', '2026-03-02T08:05:00Z');
         INSERT INTO spotify_tokens VALUES ('offset', 'refresh', 'access', '1793865600.5');
@@ -336,14 +336,9 @@ def test_0004_keeps_existing_devices_and_their_secret_as_the_renderer(app, clien
     assert response.status_code == 200
 
 
-def test_0004_downgrade_drops_devices_without_a_renderer(app, register_device):
-    renderer_id, _ = register_device()
-    display_only_id, _ = register_device("display-secret-0123456789", role="display")
+def test_0004_downgrade_and_upgrade_keep_split_devices(app, split_device):
+    device_id, _, display_secret = split_device
     with app.app_context():
         downgrade(revision="0003")
-        with db.engine.connect() as conn:
-            ids = {row[0] for row in conn.exec_driver_sql("SELECT device_id FROM devices")}
-            config_ids = {row[0] for row in conn.exec_driver_sql("SELECT device_id FROM device_config")}
         upgrade()
-    assert ids == config_ids == {renderer_id}
-    assert display_only_id not in ids
+        assert db.session.get(Device, device_id).display_secret_hash is None  # the column went away and back

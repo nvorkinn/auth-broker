@@ -132,7 +132,6 @@ def _render_device_config(device_id: str, errors: list[str] | None = None):
     return render_template(
         "device.html",
         device_id=device_id,
-        renderer_attached=device.renderer_secret_hash is not None,
         display_attached=device.display_secret_hash is not None,
         config=config,
         stops=tfl.resolve_stops(config.tfl_stop_ids),
@@ -164,8 +163,8 @@ def spotify_disconnect():
 @bp.post("/device/display/unlink")
 @require_paired_session
 def display_unlink():
-    """Forgets the screen's secret, so it gets a 401 and has to attach again. Frees the display slot
-    for a replacement screen."""
+    """Forgets the screen's secret, so it gets a 401 from then on: for a screen that's lost, stolen or
+    retired. Registering again puts it in the pending pool as a new device."""
     db.session.get(Device, session["device_id"]).display_secret_hash = None
     db.session.commit()
     return redirect(url_for("pages.device_config"))

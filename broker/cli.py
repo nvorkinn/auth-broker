@@ -4,12 +4,13 @@ docker exec auth-broker flask --app wsgi devices list
 docker exec auth-broker flask --app wsgi devices code <device_id>
 docker exec auth-broker flask --app wsgi devices unpair <device_id> [--config]
 docker exec auth-broker flask --app wsgi devices forget <device_id>
+docker exec auth-broker flask --app wsgi devices pending
 
 Like any `flask` command it loads the app, so it needs the app's env vars (the container has them).
 """
 
 import json
-from datetime import datetime
+from datetime import UTC, datetime
 
 import click
 from flask.cli import AppGroup
@@ -17,7 +18,7 @@ from sqlalchemy import select
 
 from .db import db
 from .models import Device, DeviceConfig
-from .services import pairing
+from .services import pairing, registration
 
 devices = AppGroup("devices", help="Manual device admin for development.")
 
@@ -91,3 +92,15 @@ def forget(device_id: str) -> None:
     db.session.delete(_get_device(device_id))
     db.session.commit()
     click.echo(f"{device_id} forgotten; delete its credentials file so it registers again.")
+
+
+@devices.command()
+def pending() -> None:
+    """Show renderers and screens waiting to be matched, e.g. a screen that needs a renderer started."""
+    waiting = registration.pending()
+    if not waiting:
+        click.echo("Nothing waiting.")
+    now = datetime.now(UTC)
+    for entry in waiting:
+        minutes = int((now - entry.created_at).total_seconds() // 60)
+        click.echo(f"{entry.role}  waiting {minutes} min  since {_timestamp(entry.created_at)}")

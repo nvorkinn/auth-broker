@@ -23,11 +23,12 @@ def create_app() -> Flask:
     config.load(app)
     db_module.init_app(app)
 
-    from .services.pair_throttle import PairThrottle
+    from .services.pair_throttle import REGISTRATIONS_PER_MINUTE, PairThrottle
 
     app.extensions["pair_throttle"] = PairThrottle()
+    app.extensions["register_throttle"] = PairThrottle(max_events=REGISTRATIONS_PER_MINUTE)
 
-    from .routes import devices, frames, pages, spotify_oauth, spotify_proxy, status, tfl_search
+    from .routes import device_api, devices, frames, pages, spotify_oauth, spotify_proxy, status, tfl_search
 
     app.register_blueprint(devices.bp)
     app.register_blueprint(spotify_proxy.bp)
@@ -37,6 +38,7 @@ def create_app() -> Flask:
     app.register_blueprint(pages.bp)
     app.register_blueprint(tfl_search.bp)
     app.register_blueprint(frames.bp)
+    app.register_blueprint(device_api.bp)
     app.register_blueprint(status.bp)
 
     from . import cli

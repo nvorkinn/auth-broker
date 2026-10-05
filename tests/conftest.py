@@ -19,6 +19,11 @@ def app(tmp_path, monkeypatch):
 
     application = create_app()
     application.config.update(TESTING=True)
+    # Tests register far more devices a minute than the real limit allows; the throttle's own
+    # tests put the real one back (see register_throttle).
+    from broker.services.pair_throttle import PairThrottle
+
+    application.extensions["register_throttle"] = PairThrottle(max_events=10_000)
     yield application
 
     from broker.db import db
@@ -45,28 +50,34 @@ def cli(app):
 
 @pytest.fixture
 def register_device(client):
-    """Registers a device and returns (device_id, secret). With device_id it attaches `role` to that
-    existing device instead of creating one."""
+    """Registers a standalone device and returns (device_id, secret)."""
 
-    def _register(
-        secret: str = "a-very-long-device-secret-value", role: str = "renderer", device_id: str | None = None
-    ):
-        body = {"role": role, "secret": secret}
-        if device_id is not None:
-            body["device_id"] = device_id
-        response = client.post("/api/devices/register", json=body)
-        assert response.status_code == (201 if device_id is None else 200)
+    def _register(secret: str = "a-very-long-device-secret-value"):
+        response = client.post("/api/devices/register", json={"role": "renderer", "standalone": True, "secret": secret})
+        assert response.status_code == 201
         return response.get_json()["device_id"], secret
 
     return _register
 
 
 @pytest.fixture
-def split_device(register_device):
-    """A device with both roles attached: returns (device_id, renderer_secret, display_secret)."""
-    device_id, renderer_secret = register_device("renderer-secret-0123456789")
-    _, display_secret = register_device("display-secret-0123456789", role="display", device_id=device_id)
-    return device_id, renderer_secret, display_secret
+def register_pending(client):
+    """Registers a renderer or display through the pending pool and returns the response."""
+
+    def _register(role: str, secret: str):
+        return client.post("/api/devices/register", json={"role": role, "secret": secret})
+
+    return _register
+
+
+@pytest.fixture
+def split_device(register_pending):
+    """A device matched through the pool, screen first: returns (device_id, renderer_secret, display_secret)."""
+    renderer_secret, display_secret = "renderer-secret-0123456789", "display-secret-0123456789"
+    assert register_pending("display", display_secret).status_code == 202
+    response = register_pending("renderer", renderer_secret)
+    assert response.status_code == 201
+    return response.get_json()["device_id"], renderer_secret, display_secret
 
 
 @pytest.fixture

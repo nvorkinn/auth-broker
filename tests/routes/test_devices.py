@@ -1,7 +1,6 @@
 from datetime import UTC, datetime, timedelta
 from unittest.mock import patch
 
-import pytest
 from sqlalchemy import func, select, update
 
 from broker.db import db
@@ -76,6 +75,7 @@ def test_get_config_returns_defaults_and_shared_keys(client, register_device):
     assert response.status_code == 200
     body = response.get_json()
     assert body == {
+        "device_id": device_id,
         "interval": 15,
         "weather": {"api_key": "test-weather-key", "location": ""},
         "notice_board": {"postcode": None},
@@ -348,131 +348,3 @@ def test_a_blank_weather_location_still_counts_as_missing(app, client, register_
         db.session.commit()
 
     assert "a weather location" in _setup_missing(client, device_id, secret)
-
-
-# --- roles: register and attach -------------------------------------------------------------------
-
-
-def _hashes(app, device_id):
-    with app.app_context():
-        device = db.session.get(Device, device_id)
-        return device.renderer_secret_hash, device.display_secret_hash
-
-
-@pytest.mark.parametrize("role", ["renderer", "display"])
-def test_register_stores_the_hash_in_the_roles_column(app, client, role):
-    response = client.post("/api/devices/register", json={"role": role, "secret": "a-very-long-device-secret-value"})
-
-    assert response.status_code == 201
-    renderer_hash, display_hash = _hashes(app, response.get_json()["device_id"])
-    assert (renderer_hash is not None, display_hash is not None) == (role == "renderer", role == "display")
-    assert "a-very-long-device-secret-value" not in (renderer_hash or "") + (display_hash or "")
-
-
-def test_register_without_a_role_registers_a_renderer(app, client):
-    response = client.post("/api/devices/register", json={"secret": "a-very-long-device-secret-value"})
-    renderer_hash, display_hash = _hashes(app, response.get_json()["device_id"])
-    assert renderer_hash is not None and display_hash is None
-
-
-def test_register_rejects_an_unknown_role(client):
-    response = client.post("/api/devices/register", json={"role": "admin", "secret": "a-very-long-device-secret-value"})
-    assert response.status_code == 400
-
-
-def test_attach_display_to_a_renderer_device(app, client, register_device):
-    device_id, _ = register_device()
-
-    attached_id, secret = register_device("display-secret-0123456789", role="display", device_id=device_id)
-
-    assert attached_id == device_id
-    assert all(h is not None for h in _hashes(app, device_id))
-    assert (
-        client.get(f"/api/devices/{device_id}/status", headers={"Authorization": f"Bearer {secret}"}).status_code == 200
-    )
-
-
-def test_attach_renderer_to_a_display_device(client, register_device):
-    device_id, _ = register_device("display-secret-0123456789", role="display")
-
-    _, secret = register_device("renderer-secret-0123456789", role="renderer", device_id=device_id)
-
-    assert (
-        client.get(f"/api/devices/{device_id}/config", headers={"Authorization": f"Bearer {secret}"}).status_code == 200
-    )
-
-
-def test_attach_to_a_taken_slot_is_a_conflict_and_keeps_the_old_secret(app, client, split_device):
-    device_id, _, display_secret = split_device
-    before = _hashes(app, device_id)
-
-    response = client.post(
-        "/api/devices/register",
-        json={"role": "display", "secret": "an-attackers-long-secret-value", "device_id": device_id},
-    )
-
-    assert response.status_code == 409
-    assert _hashes(app, device_id) == before
-    assert (
-        client.get(
-            f"/api/devices/{device_id}/status", headers={"Authorization": f"Bearer {display_secret}"}
-        ).status_code
-        == 200
-    )
-
-
-def test_attach_to_an_unknown_device_is_a_conflict(client):
-    response = client.post(
-        "/api/devices/register",
-        json={"role": "display", "secret": "a-very-long-device-secret-value", "device_id": "does-not-exist"},
-    )
-    assert response.status_code == 409
-
-
-# --- roles: status and config ---------------------------------------------------------------------
-
-
-def _status(client, device_id, secret):
-    return client.get(f"/api/devices/{device_id}/status", headers={"Authorization": f"Bearer {secret}"})
-
-
-def test_status_shows_a_pairing_code_to_an_unpaired_display(client, register_device):
-    device_id, secret = register_device(role="display")
-
-    body = _status(client, device_id, secret).get_json()
-
-    assert body["paired"] is False
-    assert len(body["pairing_code"]) == 6
-
-
-def test_status_of_a_paired_display_has_no_code(client, register_device):
-    device_id, secret = register_device(role="display")
-    code = _status(client, device_id, secret).get_json()["pairing_code"]
-    client.post("/pair", data={"code": code})
-
-    assert _status(client, device_id, secret).get_json() == {"paired": True}
-
-
-def test_status_is_forbidden_to_the_renderer(client, split_device):
-    device_id, renderer_secret, _ = split_device
-    assert _status(client, device_id, renderer_secret).status_code == 403
-
-
-def test_status_requires_auth(client, split_device):
-    device_id, _, _ = split_device
-    assert client.get(f"/api/devices/{device_id}/status").status_code == 401
-    assert _status(client, device_id, "wrong-secret").status_code == 401
-
-
-def test_config_is_forbidden_to_the_display(client, split_device):
-    device_id, _, display_secret = split_device
-    response = client.get(f"/api/devices/{device_id}/config", headers={"Authorization": f"Bearer {display_secret}"})
-    assert response.status_code == 403
-
-
-@pytest.mark.parametrize("role", ["renderer", "display"])
-def test_either_role_can_force_a_pairing_code(client, split_device, role):
-    device_id, renderer_secret, display_secret = split_device
-    secret = renderer_secret if role == "renderer" else display_secret
-    response = client.post(f"/api/devices/{device_id}/pairing-code", headers={"Authorization": f"Bearer {secret}"})
-    assert response.status_code == 200
