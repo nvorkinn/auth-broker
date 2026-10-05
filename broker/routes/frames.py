@@ -1,16 +1,18 @@
 from datetime import UTC, datetime
 from hashlib import blake2b
 
-from flask import Blueprint, Response, abort, request
+from flask import Blueprint, Response, abort, jsonify, request
 from sqlalchemy.dialects.sqlite import insert
 
 from ..auth import require_device_auth
 from ..db import db
-from ..models import Frame
+from ..models import DeviceConfig, Frame
 
 bp = Blueprint("frames", __name__, url_prefix="/api/frames")
 
 FRAME_BYTES = 800 * 480 // 8  # 1-bit packed; better to share this via the protocol package
+# Retry-After, in seconds, on a GET before the renderer's first frame: it's expected any moment.
+NO_FRAME_RETRY_AFTER = 5
 
 
 @bp.put("/<device_id>/frame")
@@ -34,9 +36,13 @@ def update_frame(device_id):
 @bp.get("/<device_id>/frame")
 @require_device_auth(roles={"display", "renderer"})
 def get_frame(device_id):
+    """Polled by the screen. Every answer it should keep polling after carries Retry-After, so its
+    loop is just "handle the status, sleep Retry-After": the device's refresh interval once there's
+    a frame (the renderer redraws no more often than that), a few seconds before the first one."""
     row = db.session.get(Frame, device_id)
     if not row:
-        abort(404)
+        return jsonify(error="no frame yet"), 404, {"Retry-After": str(NO_FRAME_RETRY_AFTER)}
     resp = Response(row.frame, mimetype="application/octet-stream")
     resp.set_etag(row.etag)
+    resp.headers["Retry-After"] = str(db.session.get(DeviceConfig, device_id).interval)
     return resp.make_conditional(request)

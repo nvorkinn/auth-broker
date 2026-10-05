@@ -19,6 +19,10 @@ LAST_SEEN_RESOLUTION = timedelta(minutes=1)
 # Each has its own column, devices.<role>_secret_hash.
 ROLES = ("renderer", "display")
 
+# Retry-After, in seconds, on a 202 to a client still waiting in the pending pool: how often it should
+# check back. Matching waits on a renderer being started, which can take a while.
+WAITING_RETRY_AFTER = 30
+
 # Werkzeug's password-hash formats, which every secret was stored as before secrets became the
 # device's identifier. They're salted, so can't be looked up; one is rewritten as hash_secret()'s
 # SHA-256 the first time it verifies.
@@ -49,7 +53,7 @@ def require_device_auth(roles=frozenset(ROLES)):
             if device_id is None:
                 device, role = _find_by_secret(secret)
                 if device is None and db.session.get(PendingRegistration, hash_secret(secret)) is not None:
-                    return jsonify(status="waiting"), 202
+                    return jsonify(status="waiting"), 202, {"Retry-After": str(WAITING_RETRY_AFTER)}
             else:
                 device = db.session.get(Device, device_id)
                 role = _matching_role(device, secret) if device is not None else None

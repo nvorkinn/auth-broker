@@ -8,10 +8,10 @@ from unittest.mock import patch
 import pytest
 from sqlalchemy import select
 
-from broker.auth import hash_secret
+from broker.auth import WAITING_RETRY_AFTER, hash_secret
 from broker.db import db
 from broker.models import Device, DeviceConfig, PendingRegistration
-from broker.routes.frames import FRAME_BYTES
+from broker.routes.frames import FRAME_BYTES, NO_FRAME_RETRY_AFTER
 from broker.services import registration
 from broker.services.pair_throttle import REGISTRATIONS_PER_MINUTE, PairThrottle
 
@@ -390,3 +390,45 @@ def test_id_less_requests_are_logged_with_the_device_id(client, split_device, ca
         getattr(client, method)(path, data=bytes(FRAME_BYTES), headers=_auth(renderer_secret))
 
     assert f"{method.upper()} {path} device=unnamed ({device_id}) role=renderer" in caplog.messages
+
+
+# --- Retry-After: how often to poll -----------------------------------------------------------------
+
+
+def test_register_tells_a_waiting_client_how_long_to_wait(register_pending):
+    for _ in range(2):  # the first registration and a repeat
+        response = register_pending("display", DISPLAY)
+        assert response.status_code == 202
+        assert response.headers["Retry-After"] == str(WAITING_RETRY_AFTER)
+
+
+@pytest.mark.parametrize(
+    ("role", "secret", "path"), [("display", DISPLAY, "/api/frame"), ("renderer", RENDERER, "/api/config")]
+)
+def test_a_waiting_poll_says_how_long_to_wait(client, register_pending, role, secret, path):
+    register_pending(role, secret)
+    assert client.get(path, headers=_auth(secret)).headers["Retry-After"] == str(WAITING_RETRY_AFTER)
+
+
+def test_no_frame_yet_is_a_json_404_with_a_short_retry(client, split_device):
+    _, _, display_secret = split_device
+
+    response = client.get("/api/frame", headers=_auth(display_secret))
+
+    assert response.status_code == 404
+    assert response.get_json() == {"error": "no frame yet"}
+    assert response.headers["Retry-After"] == str(NO_FRAME_RETRY_AFTER)
+
+
+def test_a_frame_says_to_poll_again_after_the_devices_refresh_interval(app, client, split_device):
+    device_id, renderer_secret, display_secret = split_device
+    with app.app_context():
+        db.session.get(DeviceConfig, device_id).interval = 42
+        db.session.commit()
+    client.put("/api/frame", data=bytes(FRAME_BYTES), headers=_auth(renderer_secret))
+
+    first = client.get("/api/frame", headers=_auth(display_secret))
+    unchanged = client.get("/api/frame", headers={**_auth(display_secret), "If-None-Match": first.headers["ETag"]})
+
+    assert (first.status_code, first.headers["Retry-After"]) == (200, "42")
+    assert (unchanged.status_code, unchanged.headers["Retry-After"]) == (304, "42")
