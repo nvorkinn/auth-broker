@@ -1,5 +1,5 @@
 """A device's own lifecycle: registering on first boot, pairing codes, and the config poll it
-checks in with. Everything but /register needs the device's secret."""
+checks in with. Everything but /register needs one of the device's secrets."""
 
 import secrets
 from datetime import UTC, datetime
@@ -7,7 +7,7 @@ from datetime import UTC, datetime
 from flask import Blueprint, current_app, jsonify, request
 from werkzeug.security import generate_password_hash
 
-from ..auth import require_device_auth
+from ..auth import ROLES, require_device_auth
 from ..db import db
 from ..models import Device, DeviceConfig, GlowmarktCredentials
 from ..services import pairing
@@ -18,28 +18,44 @@ bp = Blueprint("devices", __name__, url_prefix="/api/devices")
 
 @bp.post("/register")
 def register():
-    """Called once by a Pi on first boot. The Pi generates its own device_secret
-    and keeps it locally forever after; only its hash is ever stored here."""
+    """Called once per role on first boot: by a Pi or server-side renderer as "renderer", by a
+    screen as "display". The client generates its own secret and keeps it locally forever after;
+    only its hash is ever stored here.
+
+    With no device_id it creates a new device. With one it attaches the role to that existing
+    device, as long as the role's slot is empty; re-attaching needs the slot cleared from the web UI
+    first. The old body, {"device_secret": ...} with no role, still registers a renderer."""
     body = request.get_json(silent=True) or {}
-    device_secret = body.get("device_secret", "")
-    if len(device_secret) < 16:
-        return jsonify(error="device_secret must be a random string of at least 16 characters"), 400
+    role = body.get("role", "renderer")
+    secret = body.get("secret", body.get("device_secret", ""))
+    if role not in ROLES:
+        return jsonify(error=f"role must be one of {', '.join(ROLES)}"), 400
+    if not isinstance(secret, str) or len(secret) < 16:
+        return jsonify(error="secret must be a random string of at least 16 characters"), 400
+
+    secret_hash = generate_password_hash(secret)
+    column = f"{role}_secret_hash"
+    device_id = body.get("device_id")
+    if device_id is not None:
+        # TODO: this trusts anyone who knows the device_id. Once the config website can mint a
+        # short-lived one-time link code, require it here.
+        device = db.session.get(Device, device_id) if isinstance(device_id, str) else None
+        if device is None or getattr(device, column) is not None:
+            return jsonify(error=f"no device {device_id} with a free {role} slot"), 409
+        setattr(device, column, secret_hash)
+        db.session.commit()
+        return jsonify(device_id=device_id), 200
 
     device_id = secrets.token_hex(6)
     db.session.add(
-        Device(
-            device_id=device_id,
-            device_secret_hash=generate_password_hash(device_secret),
-            created_at=datetime.now(UTC),
-            config=DeviceConfig(),
-        )
+        Device(device_id=device_id, created_at=datetime.now(UTC), config=DeviceConfig(), **{column: secret_hash})
     )
     db.session.commit()
     return jsonify(device_id=device_id), 201
 
 
 @bp.post("/<device_id>/pairing-code")
-@require_device_auth
+@require_device_auth(roles={"renderer", "display"})
 def create_pairing_code(device_id):
     """Forces a fresh code, e.g. to link a new browser to an already-paired device."""
     code = pairing.issue_code(device_id)
@@ -57,8 +73,19 @@ def _update_device_name(device_id: str) -> None:
         db.session.commit()
 
 
+@bp.get("/<device_id>/status")
+@require_device_auth(roles={"display"})
+def get_status(device_id):
+    """Polled by a screen, which has no config of its own, so it can draw its pairing code itself."""
+    status = {"paired": db.session.get(Device, device_id).paired_at is not None}
+    code = pairing.current_code_for(device_id)
+    if code:
+        status["pairing_code"] = code
+    return jsonify(status)
+
+
 @bp.get("/<device_id>/config")
-@require_device_auth
+@require_device_auth(roles={"renderer"})
 def get_config(device_id):
     """Polled by the Pi. Bundles the device's own settings together with the
     shared app-level API keys, so a key rotation doesn't require re-flashing

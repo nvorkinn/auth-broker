@@ -16,7 +16,9 @@ class Device(db.Model):
     __tablename__ = "devices"
 
     device_id: Mapped[str] = mapped_column(String, primary_key=True)
-    device_secret_hash: Mapped[str] = mapped_column(String)
+    # One secret per role (see auth.ROLES); either may be NULL until that role registers or attaches.
+    renderer_secret_hash: Mapped[str | None] = mapped_column(String)
+    display_secret_hash: Mapped[str | None] = mapped_column(String)
     created_at: Mapped[datetime] = mapped_column(UTCDateTime)
     paired_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
     device_name: Mapped[str | None] = mapped_column(String)

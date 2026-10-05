@@ -7,7 +7,7 @@ from flask import Blueprint, current_app, redirect, render_template, request, se
 from ..auth import require_paired_session
 from ..clients import tfl, weather
 from ..db import db
-from ..models import DeviceConfig, GlowmarktCredentials, SpotifyToken
+from ..models import Device, DeviceConfig, GlowmarktCredentials, SpotifyToken
 from ..services import pairing
 
 bp = Blueprint("pages", __name__)
@@ -128,9 +128,12 @@ def _render_device_config(device_id: str, errors: list[str] | None = None):
         "has_password": bool(creds and creds.password_encrypted),
     }
 
+    device = db.session.get(Device, device_id)
     return render_template(
         "device.html",
         device_id=device_id,
+        renderer_attached=device.renderer_secret_hash is not None,
+        display_attached=device.display_secret_hash is not None,
         config=config,
         stops=tfl.resolve_stops(config.tfl_stop_ids),
         spotify_linked=db.session.get(SpotifyToken, device_id) is not None,
@@ -155,4 +158,14 @@ def spotify_disconnect():
     if token is not None:
         db.session.delete(token)
         db.session.commit()
+    return redirect(url_for("pages.device_config"))
+
+
+@bp.post("/device/display/unlink")
+@require_paired_session
+def display_unlink():
+    """Forgets the screen's secret, so it gets a 401 and has to attach again. Frees the display slot
+    for a replacement screen."""
+    db.session.get(Device, session["device_id"]).display_secret_hash = None
+    db.session.commit()
     return redirect(url_for("pages.device_config"))

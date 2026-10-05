@@ -3,7 +3,7 @@ from unittest.mock import Mock, patch
 import pytest
 
 from broker.db import db
-from broker.models import DeviceConfig, GlowmarktCredentials, SpotifyToken
+from broker.models import Device, DeviceConfig, GlowmarktCredentials, SpotifyToken
 from broker.routes.pages import normalize_postcode
 
 
@@ -402,3 +402,37 @@ def test_pair_logs_wrong_codes_and_lockouts(client, caplog):
     assert messages.count("Wrong pairing code from 203.0.113.7") == 10
     assert "Too many wrong pairing codes from 203.0.113.7; locked out for 60s" in messages
     assert not any("NOPE12" in m for m in messages)  # never log the guesses themselves
+
+
+# --- device ID and screen ----------------------------------------------------------------------------
+
+
+def test_device_page_shows_the_device_id(paired_client):
+    client, device_id, _ = paired_client
+    page = client.get("/device").get_data(as_text=True)
+    assert device_id in page
+    assert "Unlink screen" not in page
+
+
+def test_unlink_screen_clears_the_display_secret(app, paired_client, register_device):
+    client, device_id, _ = paired_client
+    _, display_secret = register_device("display-secret-0123456789", role="display", device_id=device_id)
+    status_url = f"/api/devices/{device_id}/status"
+    headers = {"Authorization": f"Bearer {display_secret}"}
+    assert "Unlink screen" in client.get("/device").get_data(as_text=True)
+    assert client.get(status_url, headers=headers).status_code == 200
+
+    response = client.post("/device/display/unlink")
+
+    assert response.status_code == 302
+    with app.app_context():
+        assert db.session.get(Device, device_id).display_secret_hash is None
+    assert client.get(status_url, headers=headers).status_code == 401
+    # The slot is free again for a replacement screen.
+    register_device("new-display-secret-0123456789", role="display", device_id=device_id)
+
+
+def test_unlink_screen_requires_pairing(client):
+    response = client.post("/device/display/unlink")
+    assert response.status_code == 302
+    assert response.headers["Location"] == "/pair"

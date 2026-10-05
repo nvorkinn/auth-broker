@@ -7,6 +7,7 @@ from alembic.migration import MigrationContext
 from alembic.script import ScriptDirectory
 from flask_migrate import downgrade, upgrade
 from sqlalchemy import inspect, select
+from werkzeug.security import check_password_hash, generate_password_hash
 
 from broker.db import db
 from broker.models import Device, DeviceConfig, Frame, PairingCode, SpotifyToken
@@ -278,7 +279,7 @@ def test_0002_converted_timestamps_compare_correctly_in_queries(app):
 
 def test_0002_downgrade_gives_back_iso_strings(app):
     with app.app_context():
-        db.session.add(Device(device_id="d", device_secret_hash="h", created_at=datetime(2026, 3, 1, 12, tzinfo=UTC)))
+        db.session.add(Device(device_id="d", renderer_secret_hash="h", created_at=datetime(2026, 3, 1, 12, tzinfo=UTC)))
         db.session.add(SpotifyToken(device_id="d", refresh_token="r", expires_at=1793865600.5))
         db.session.commit()
         db.session.remove()
@@ -306,6 +307,43 @@ def test_0002_fails_on_a_timestamp_it_cannot_read_and_changes_nothing(app):
 
 def test_utc_datetime_refuses_a_naive_datetime(app):
     with app.app_context():
-        db.session.add(Device(device_id="d", device_secret_hash="h", created_at=datetime(2026, 1, 1)))
+        db.session.add(Device(device_id="d", renderer_secret_hash="h", created_at=datetime(2026, 1, 1)))
         with pytest.raises(Exception, match="naive datetime"):
             db.session.commit()
+
+
+# --- 0004: a secret per role ----------------------------------------------------------------------
+
+
+def test_0004_keeps_existing_devices_and_their_secret_as_the_renderer(app, client):
+    secret = "a-pi-secret-from-before-roles"
+    with app.app_context():
+        downgrade(revision="0003")
+        with db.engine.begin() as conn:
+            conn.exec_driver_sql(
+                "INSERT INTO devices (device_id, device_secret_hash, created_at, paired_at) VALUES (?, ?, ?, ?)",
+                ("old-pi", generate_password_hash(secret), "2026-03-01 12:00:00", "2026-03-01 12:05:00"),
+            )
+            conn.exec_driver_sql("INSERT INTO device_config (device_id) VALUES ('old-pi')")
+        upgrade()
+
+        device = db.session.get(Device, "old-pi")
+        assert check_password_hash(device.renderer_secret_hash, secret)
+        assert device.display_secret_hash is None
+        assert device.paired_at == datetime(2026, 3, 1, 12, 5, tzinfo=UTC)
+
+    response = client.get("/api/devices/old-pi/config", headers={"Authorization": f"Bearer {secret}"})
+    assert response.status_code == 200
+
+
+def test_0004_downgrade_drops_devices_without_a_renderer(app, register_device):
+    renderer_id, _ = register_device()
+    display_only_id, _ = register_device("display-secret-0123456789", role="display")
+    with app.app_context():
+        downgrade(revision="0003")
+        with db.engine.connect() as conn:
+            ids = {row[0] for row in conn.exec_driver_sql("SELECT device_id FROM devices")}
+            config_ids = {row[0] for row in conn.exec_driver_sql("SELECT device_id FROM device_config")}
+        upgrade()
+    assert ids == config_ids == {renderer_id}
+    assert display_only_id not in ids

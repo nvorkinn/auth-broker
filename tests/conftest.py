@@ -9,7 +9,6 @@ def app(tmp_path, monkeypatch):
     monkeypatch.setenv("SPOTIFY_REDIRECT_URI", "https://auth.example.com/auth/spotify/callback")
     monkeypatch.setenv("TFL_APP_KEY", "test-tfl-key")
     monkeypatch.setenv("WEATHER_API_KEY", "test-weather-key")
-    monkeypatch.setenv("COUNTDOWN_RENDERER_TOKEN", "test-renderer-token")
     monkeypatch.setenv("BROKER_DB_PATH", str(tmp_path / "broker.db"))
 
     from cryptography.fernet import Fernet
@@ -46,14 +45,28 @@ def cli(app):
 
 @pytest.fixture
 def register_device(client):
-    """Registers a device and returns (device_id, device_secret)."""
+    """Registers a device and returns (device_id, secret). With device_id it attaches `role` to that
+    existing device instead of creating one."""
 
-    def _register(secret: str = "a-very-long-device-secret-value"):
-        response = client.post("/api/devices/register", json={"device_secret": secret})
-        assert response.status_code == 201
+    def _register(
+        secret: str = "a-very-long-device-secret-value", role: str = "renderer", device_id: str | None = None
+    ):
+        body = {"role": role, "secret": secret}
+        if device_id is not None:
+            body["device_id"] = device_id
+        response = client.post("/api/devices/register", json=body)
+        assert response.status_code == (201 if device_id is None else 200)
         return response.get_json()["device_id"], secret
 
     return _register
+
+
+@pytest.fixture
+def split_device(register_device):
+    """A device with both roles attached: returns (device_id, renderer_secret, display_secret)."""
+    device_id, renderer_secret = register_device("renderer-secret-0123456789")
+    _, display_secret = register_device("display-secret-0123456789", role="display", device_id=device_id)
+    return device_id, renderer_secret, display_secret
 
 
 @pytest.fixture

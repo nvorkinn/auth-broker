@@ -11,8 +11,8 @@ a Spotify token.
 
 ## How a device gets set up
 
-1. **First boot:** the Pi generates its own `device_id`/`device_secret` pair
-   and calls `POST /api/devices/register` once. The server only ever stores a
+1. **First boot:** the Pi generates its own secret and calls
+   `POST /api/devices/register` once, getting back its `device_id`. The server only ever stores a
    hash of the secret; the Pi is the only place the plaintext secret lives.
 2. **Pairing:** the Pi polls `GET /api/devices/<id>/config`. While the
    device is unpaired, the response carries a short-lived `pairing_code` (the
@@ -43,8 +43,42 @@ a Spotify token.
    stay until the Pis have switched.
 
 Every device-facing endpoint is authenticated with `Authorization: Bearer
-<device_secret>`; every browser-facing page is gated on the signed session
-cookie set at pairing time.
+<secret>`; every browser-facing page is gated on the signed session
+cookie set at pairing time. Bearer secrets mean HTTPS is required for any
+non-local deployment (Caddy terminates TLS here).
+
+## Renderer and display roles
+
+A device is one row with up to two independent secrets, one per role:
+
+- **renderer**: whatever draws the frames. On a standalone Pi, that's the Pi
+  itself. In a split deployment it's a renderer running on the server.
+- **display**: a thin screen (e.g. an ESP32) that only fetches finished frames.
+
+A standalone Pi registers once as a renderer and nothing else changes. In the
+split setup, the screen registers as a display, shows its pairing code from
+`GET /api/devices/<id>/status`, and fetches frames. The renderer then attaches
+to the same device using the device ID shown on `/device`.
+
+`POST /api/devices/register` takes `{"role": "renderer" | "display", "secret":
+"<client-generated>", "device_id": "<optional>"}`. Without `device_id` it
+creates a device (201). With one it attaches that role to an existing device
+(200), as long as that role's slot is empty; otherwise it answers 409. To free
+the display slot, use "Unlink screen" on `/device`. The old body,
+`{"device_secret": ...}` with no role, still registers a renderer.
+
+| Route | Roles |
+|---|---|
+| `GET /api/devices/<id>/config`, Spotify routes | renderer |
+| `GET /api/devices/<id>/status` (`{paired, pairing_code?}`) | display |
+| `POST /api/devices/<id>/pairing-code` | renderer, display |
+| `PUT /api/frames/<id>/frame` (raw 800x480 1-bit, 48000 bytes) | renderer |
+| `GET /api/frames/<id>/frame` (ETag / `If-None-Match` → 304) | renderer, display |
+
+A wrong or missing secret gets 401. A valid secret for the wrong role gets 403.
+
+Attaching currently trusts anyone who knows the device ID. Once the config
+site can mint a short-lived one-time link code, attach will require it.
 
 `/pair` itself needs no login, so wrong codes are throttled per client IP: ten
 in a minute lock that IP out of `/pair` for a minute (429 with `Retry-After`),
