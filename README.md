@@ -91,8 +91,10 @@ A screen therefore needs no logic beyond:
      unlinked), so register again.
 
 A renderer polls `GET /api/config` the same way. Once matched, that response
-carries its `device_id` and a `pairing_code` to draw, and the renderer then
-uses the path routes for Spotify and frame PUTs. Renderers are started by
+carries its `device_id` and a `pairing_code` to draw. From then on it can use
+the ID-less routes for everything (`PUT /api/frame`, `/api/spotify/...`), so it
+never has to handle its `device_id`. The broker still logs each request with
+the `device_id` it found from the secret. Renderers are started by
 hand for now: `flask devices pending` (below) shows a screen waiting for one.
 
 The pool is open to anyone, so it's bounded:
@@ -109,8 +111,9 @@ single-writer lock makes it safe across threads, workers and the CLI.
 | Route | Roles |
 |---|---|
 | `GET /api/config`, `GET /api/devices/<id>/config` | renderer |
-| `POST /api/devices/<id>/pairing-code`, Spotify routes | renderer |
-| `PUT /api/frames/<id>/frame` (raw 800x480 1-bit, 48000 bytes) | renderer |
+| `GET /api/spotify/<now-playing \| queue \| top/<artists\|tracks>>`, and the same under `/api/devices/<id>/` | renderer |
+| `POST /api/devices/<id>/pairing-code` | renderer |
+| `PUT /api/frame`, `PUT /api/frames/<id>/frame` (raw 800x480 1-bit, 48000 bytes) | renderer |
 | `GET /api/frame`, `GET /api/frames/<id>/frame` (ETag / `If-None-Match` → 304) | renderer, display |
 
 A wrong or missing secret gets 401. A valid secret for the wrong role gets
