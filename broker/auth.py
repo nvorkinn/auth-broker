@@ -58,7 +58,7 @@ def require_device_auth(view):
 
 def _mark_seen(device: Device) -> None:
     now = datetime.now(UTC)
-    if device.last_seen_at is None or now - LAST_SEEN_RESOLUTION > device.last_seen_at:
+    if device.last_seen_at is None or now - LAST_SEEN_RESOLUTION >= device.last_seen_at:
         device.last_seen_at = now
         db.session.commit()
 
