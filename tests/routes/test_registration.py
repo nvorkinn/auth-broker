@@ -3,6 +3,7 @@ screen, and the ID-less endpoints a matched client polls."""
 
 import threading
 from datetime import UTC, datetime, timedelta
+from unittest.mock import patch
 
 import pytest
 from sqlalchemy import select
@@ -314,3 +315,78 @@ def test_cli_pending_lists_waiting_clients_without_their_hashes(cli, register_pe
 
     assert output.startswith("display  waiting 0 min")
     assert hash_secret(DISPLAY) not in output
+
+
+# --- the renderer's ID-less routes ----------------------------------------------------------------
+
+
+def test_a_renderer_puts_frames_without_its_device_id(client, split_device):
+    device_id, renderer_secret, display_secret = split_device
+    frame = bytes([0x3C]) * FRAME_BYTES
+
+    assert client.put("/api/frame", data=frame, headers=_auth(renderer_secret)).status_code == 204
+
+    assert client.get("/api/frame", headers=_auth(display_secret)).data == frame
+    assert client.get(f"/api/frames/{device_id}/frame", headers=_auth(display_secret)).data == frame
+
+
+def test_an_id_less_put_is_forbidden_to_the_display(app, client, split_device):
+    device_id, _, display_secret = split_device
+
+    response = client.put("/api/frame", data=bytes(FRAME_BYTES), headers=_auth(display_secret))
+
+    assert response.status_code == 403
+    assert client.get("/api/frame", headers=_auth(display_secret)).status_code == 404
+
+
+def test_an_id_less_put_checks_the_frame_size(client, split_device):
+    _, renderer_secret, _ = split_device
+    assert client.put("/api/frame", data=b"short", headers=_auth(renderer_secret)).status_code == 400
+
+
+def test_an_id_less_put_from_a_waiting_renderer_is_told_to_wait(client, register_pending):
+    register_pending("renderer", RENDERER)
+    response = client.put("/api/frame", data=bytes(FRAME_BYTES), headers=_auth(RENDERER))
+    assert response.status_code == 202
+
+
+@pytest.mark.parametrize("path", ["/api/spotify/now-playing", "/api/spotify/queue", "/api/spotify/top/tracks"])
+def test_id_less_spotify_routes_answer_the_renderer(client, split_device, path):
+    _, renderer_secret, display_secret = split_device
+
+    response = client.get(path, headers=_auth(renderer_secret))
+
+    assert response.status_code == 200  # Spotify is off by default: the empty answer, not an error
+    assert client.get(path, headers=_auth(display_secret)).status_code == 403
+    assert client.get(path, headers=_auth("not-a-registered-secret")).status_code == 401
+
+
+def test_id_less_spotify_routes_proxy_for_the_secrets_device(app, client, split_device):
+    device_id, renderer_secret, _ = split_device
+    with app.app_context():
+        db.session.get(DeviceConfig, device_id).spotify_enabled = True
+        db.session.commit()
+
+    with patch("broker.clients.spotify.get_current_track", return_value={"song": "A Song"}) as mocked:
+        response = client.get("/api/spotify/now-playing", headers=_auth(renderer_secret))
+
+    mocked.assert_called_once_with(device_id)
+    assert response.get_json() == {"song": "A Song"}
+
+
+def test_an_unknown_spotify_top_type_is_not_found(client, split_device):
+    _, renderer_secret, _ = split_device
+    assert client.get("/api/spotify/top/albums", headers=_auth(renderer_secret)).status_code == 404
+
+
+@pytest.mark.parametrize(
+    ("method", "path"),
+    [("get", "/api/config"), ("put", "/api/frame"), ("get", "/api/spotify/now-playing")],
+)
+def test_id_less_requests_are_logged_with_the_device_id(client, split_device, caplog, method, path):
+    device_id, renderer_secret, _ = split_device
+
+    with caplog.at_level("INFO"):
+        getattr(client, method)(path, data=bytes(FRAME_BYTES), headers=_auth(renderer_secret))
+
+    assert f"{method.upper()} {path} device=unnamed ({device_id}) role=renderer" in caplog.messages
