@@ -55,12 +55,54 @@ assume a single gunicorn worker. The client IP comes from the
 the only thing that can reach the app's port, so don't publish port 5000
 beyond `127.0.0.1` without changing the `ProxyFix` setup in `create_app`.
 
+## Monitoring devices
+
+`GET /api/status/devices` is a read-only view of every device, meant for a
+Home Assistant RESTful sensor. HA polls it from the home network, so it also
+covers devices on other people's Wi-Fi, which MQTT can't reach. It's off
+(404) unless `STATUS_TOKEN` is set in `.env`, and then needs
+`Authorization: Bearer <STATUS_TOKEN>`. It only reads: resetting or deleting a
+device stays with the admin CLI.
+
+The response is keyed by device id:
+
+```json
+{
+  "c30dfc0f0f92": {
+    "device_name": "camilla",
+    "created_at": "2026-09-01T10:00:00+00:00",
+    "paired_at": "2026-09-01T10:05:00+00:00",
+    "last_seen_at": "2026-10-05T18:01:00+00:00",
+    "setup_missing": []
+  }
+}
+```
+
+`last_seen_at` is when the device last made any authenticated request (config,
+Spotify, frame). It's updated at most once a minute, and is `null` until the
+device's first request after this was added. `setup_missing` is the same list
+the config poll returns, or `null` if the device has no settings row.
+
+A sensor for one device's last check-in:
+
+```yaml
+rest:
+  - resource: https://auth.nikolaivorkinn.com/api/status/devices
+    headers:
+      Authorization: !secret auth_broker_status_token   # "Bearer <STATUS_TOKEN>"
+    scan_interval: 300
+    sensor:
+      - name: Countdown last seen
+        value_template: "{{ value_json['c30dfc0f0f92'].last_seen_at }}"
+        device_class: timestamp
+```
+
 ## Code layout
 
 ```
 broker/
   routes/     Flask blueprints: read the request, call a service or client, return a response
-  services/   the broker's own logic that more than one route needs (pairing)
+  services/   the broker's own logic that more than one route needs (pairing, setup)
   clients/    everything that talks to an outside API (Spotify, TfL, Open-Meteo)
   models.py   the schema; db.py and migrations/ manage it
   auth.py     the decorators that guard routes

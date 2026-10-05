@@ -27,7 +27,7 @@ def create_app() -> Flask:
 
     app.extensions["pair_throttle"] = PairThrottle()
 
-    from .routes import devices, frames, pages, spotify_oauth, spotify_proxy, tfl_search
+    from .routes import devices, frames, pages, spotify_oauth, spotify_proxy, status, tfl_search
 
     app.register_blueprint(devices.bp)
     app.register_blueprint(spotify_proxy.bp)
@@ -37,6 +37,7 @@ def create_app() -> Flask:
     app.register_blueprint(pages.bp)
     app.register_blueprint(tfl_search.bp)
     app.register_blueprint(frames.bp)
+    app.register_blueprint(status.bp)
 
     from . import cli
 

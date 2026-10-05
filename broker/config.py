@@ -15,3 +15,5 @@ def load(app: Flask) -> None:
     app.config["TFL_APP_KEY"] = os.environ.get("TFL_APP_KEY", "")
     app.config["WEATHER_API_KEY"] = os.environ.get("WEATHER_API_KEY", "")
     app.config["CREDENTIAL_ENCRYPTION_KEY"] = os.environ["CREDENTIAL_ENCRYPTION_KEY"]
+    # Unset (the default) turns GET /api/status/devices off.
+    app.config["STATUS_TOKEN"] = os.environ.get("STATUS_TOKEN", "")
