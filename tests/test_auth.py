@@ -115,3 +115,16 @@ def test_a_wrong_secret_leaves_a_legacy_hash_alone(app, client):
 
     assert response.status_code == 401
     assert _stored_hash(app) == before
+
+
+def test_session_cookie_is_host_only_by_default(paired_client):
+    client, _, _ = paired_client
+
+    assert client.get_cookie("session").domain is None or not client.get_cookie("session").domain.startswith(".")
+
+
+def test_session_cookie_domain_comes_from_the_environment(monkeypatch, app):
+    monkeypatch.setenv("SESSION_COOKIE_DOMAIN", ".example.com")
+    from broker import create_app
+
+    assert create_app().config["SESSION_COOKIE_DOMAIN"] == ".example.com"

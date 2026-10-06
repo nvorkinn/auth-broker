@@ -294,7 +294,10 @@ Deploying needs Docker Compose v2 (the `docker compose` subcommand). Ubuntu's
 `sudo apt install docker-compose-v2`.
 
 On the Oracle Cloud instance, copy `docker-compose.yml` into
-`/opt/auth-broker/` next to the `.env` file and `data/` directory. Pin both
+`/opt/auth-broker/` next to the `.env` file and `data/` directory. Caddy reads its
+own secrets from `caddy.env` in the same directory, kept apart from the broker's
+`.env`: create it from `caddy.env.example` first, or the `caddy` service won't
+start. Pin both
 versions in that `.env` (compose reads it from there) rather than tracking
 `:latest`, so a restart never picks up a release you didn't choose. They're
 released together, so they're normally the same tag:
@@ -412,6 +415,14 @@ Once happy, `sudo apt remove caddy` (its old data directory can stay as a backup
 If the GHCR package `auth-broker-caddy` comes up private after the first
 release, give it the same visibility as the `auth-broker` package in its package settings, or
 `docker login ghcr.io` on the host.
+
+### Logs
+
+The compose file also runs Fluent Bit (`fluent-bit/`), which tails every
+container's Docker log and ships it to VictoriaLogs on the host
+(`127.0.0.1:9428`). Copy the `fluent-bit/` directory to `/opt/auth-broker/`
+alongside `docker-compose.yml`, then `docker compose up -d`. Query in
+VictoriaLogs with e.g. `{container_id="abc123def456"}`; `docker ps` maps IDs to names.
 
 ## Not built yet
 
