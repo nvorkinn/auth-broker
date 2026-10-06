@@ -35,6 +35,12 @@ def hash_secret(secret: str) -> str:
     return hashlib.sha256(secret.encode()).hexdigest()
 
 
+def with_retry_after(response, seconds):
+    """Sets Retry-After on a response, so a view can return (response, status) on every path."""
+    response.headers["Retry-After"] = str(seconds)
+    return response
+
+
 def require_device_auth(roles=frozenset(ROLES)):
     """Protects device-facing endpoints with one of the device's own bearer secrets. On a route
     shaped /.../<device_id>/... the secret must belong to that device; on a route without one, the
@@ -53,7 +59,7 @@ def require_device_auth(roles=frozenset(ROLES)):
             if device_id is None:
                 device, role = _find_by_secret(secret)
                 if device is None and db.session.get(PendingRegistration, hash_secret(secret)) is not None:
-                    return jsonify(status="waiting"), 202, {"Retry-After": str(WAITING_RETRY_AFTER)}
+                    return with_retry_after(jsonify(status="waiting"), WAITING_RETRY_AFTER), 202
             else:
                 device = db.session.get(Device, device_id)
                 role = _matching_role(device, secret) if device is not None else None

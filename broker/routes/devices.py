@@ -4,7 +4,7 @@ checks in with. Everything but /register needs one of the device's secrets."""
 from flask import Blueprint, current_app, jsonify, request
 from sqlalchemy.exc import IntegrityError
 
-from ..auth import ROLES, WAITING_RETRY_AFTER, hash_secret, require_device_auth
+from ..auth import ROLES, WAITING_RETRY_AFTER, hash_secret, require_device_auth, with_retry_after
 from ..db import db
 from ..models import Device, DeviceConfig, GlowmarktCredentials
 from ..services import pairing, registration
@@ -31,7 +31,7 @@ def register():
     ip = request.remote_addr or "unknown"
     retry_after = throttle.retry_after(ip)
     if retry_after is not None:
-        return jsonify(error="too many registrations"), 429, {"Retry-After": str(retry_after)}
+        return with_retry_after(jsonify(error="too many registrations"), retry_after), 429
     # The call that reaches the limit still goes through; it's the next one that's refused.
     lockout = throttle.record_failure(ip)
     if lockout is not None:
@@ -63,14 +63,14 @@ def register():
             found = registration.existing(role, secret_hash)
         else:
             if found is None:
-                return jsonify(error="too many devices waiting to be matched"), 503, {"Retry-After": "60"}
+                return with_retry_after(jsonify(error="too many devices waiting to be matched"), 60), 503
             if found.device_id:
                 return jsonify(device_id=found.device_id), 201
 
     if found.role_conflict:
         return jsonify(error="that secret is already registered with another role"), 409
     if found.waiting:
-        return jsonify(status="waiting"), 202, {"Retry-After": str(WAITING_RETRY_AFTER)}
+        return with_retry_after(jsonify(status="waiting"), WAITING_RETRY_AFTER), 202
     return jsonify(device_id=found.device_id), 200
 
 

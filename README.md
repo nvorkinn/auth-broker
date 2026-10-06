@@ -200,14 +200,14 @@ python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 cp .env.example .env  # fill in Spotify app credentials + a random FLASK_SECRET_KEY
 export $(cat .env | xargs)
-python wsgi.py
+FLASK_DEBUG=1 python wsgi.py  # debug mode only when asked for; never on a reachable host
 ```
 
 Then, in another terminal, simulate a Pi and walk through pairing yourself:
 
 ```bash
 python scripts/simulate_device.py
-# prints a device_id, device_secret, and a pairing code
+# prints a device_id and a pairing code
 # -> open http://127.0.0.1:5000/pair and enter the code
 ```
 

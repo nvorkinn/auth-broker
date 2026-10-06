@@ -18,6 +18,9 @@ down_revision: str | Sequence[str] | None = ${repr(down_revision)}
 branch_labels: str | Sequence[str] | None = ${repr(branch_labels)}
 depends_on: str | Sequence[str] | None = ${repr(depends_on)}
 
+# Alembic looks these up by name, so export them rather than leave them looking unused.
+__all__ = ["revision", "down_revision", "branch_labels", "depends_on", "upgrade", "downgrade"]
+
 
 def upgrade() -> None:
     ${upgrades if upgrades else "pass"}

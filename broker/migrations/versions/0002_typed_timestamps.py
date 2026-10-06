@@ -28,6 +28,9 @@ down_revision: str | Sequence[str] | None = "0001"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
+# Alembic looks these up by name, so export them rather than leave them looking unused.
+__all__ = ["revision", "down_revision", "branch_labels", "depends_on", "upgrade", "downgrade"]
+
 # table -> (primary key, [(timestamp column, nullable)])
 TIMESTAMPS = {
     "devices": ("device_id", [("created_at", False), ("paired_at", True)]),
