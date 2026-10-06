@@ -281,13 +281,15 @@ which posts a coverage comment and status check on each PR (config in
 ## Deploying
 
 Tagging a release (`git tag v0.1.0 && git push --tags`) triggers
-`.github/workflows/release.yml`, which builds two Docker images and pushes
+`.github/workflows/release.yml`, which builds three Docker images and pushes
 each with the release tag (and `:latest`):
 
 - `ghcr.io/nvorkinn/auth-broker:<tag>`: the broker itself (`Dockerfile`).
 - `ghcr.io/nvorkinn/auth-broker-caddy:<tag>`: [Caddy](https://caddyserver.com/)
   with this repo's `caddy/Caddyfile` baked in. It terminates TLS for
   `auth.nikolaivorkinn.com` and reverse-proxies to the broker.
+- `ghcr.io/nvorkinn/auth-broker-fluent-bit:<tag>`: Fluent Bit with this repo's
+  `fluent-bit/` config baked in (see [Logs](#logs)).
 
 Deploying needs Docker Compose v2 (the `docker compose` subcommand). Ubuntu's
 `docker.io` package doesn't include it; install it with
@@ -297,7 +299,7 @@ On the Oracle Cloud instance, copy `docker-compose.yml` into
 `/opt/auth-broker/` next to the `.env` file and `data/` directory. Caddy reads its
 own secrets from `caddy.env` in the same directory, kept apart from the broker's
 `.env`: create it from `caddy.env.example` first, or the `caddy` service won't
-start. Pin both
+start. Pin all three
 versions in that `.env` (compose reads it from there) rather than tracking
 `:latest`, so a restart never picks up a release you didn't choose. They're
 released together, so they're normally the same tag:
@@ -305,6 +307,7 @@ released together, so they're normally the same tag:
 ```bash
 AUTH_BROKER_VERSION=v1.8.0
 CADDY_VERSION=v1.8.0
+FLUENT_BIT_VERSION=v1.8.0
 ```
 
 Then:
@@ -334,7 +337,7 @@ the host and runs `scripts/deploy.sh`, which:
    (`docker compose up -d --no-deps --force-recreate <service>`).
 
 `deploy-config` then lists the devices, as a check that the database came
-through. Re-running a job redeploys the same tag; to roll back, re-run the
+through, and deploys Fluent Bit the same way (`FLUENT_BIT_VERSION`). Re-running a job redeploys the same tag; to roll back, re-run the
 deploy jobs of the older release's workflow run.
 
 One-time setup in the repo's **Settings**:
@@ -419,10 +422,11 @@ release, give it the same visibility as the `auth-broker` package in its package
 
 ### Logs
 
-The compose file also runs Fluent Bit (`fluent-bit/`), which tails every
-container's Docker log and ships it to VictoriaLogs on the host
-(`127.0.0.1:9428`). Copy the `fluent-bit/` directory to `/opt/auth-broker/`
-alongside `docker-compose.yml`, then `docker compose up -d`. Query in
+The compose file also runs Fluent Bit, which tails every container's Docker
+log and ships it to VictoriaLogs on the host (`127.0.0.1:9428`). Its config
+(`fluent-bit/`) is baked into `ghcr.io/nvorkinn/auth-broker-fluent-bit:<tag>`,
+released alongside the other two images, so nothing needs copying to the host.
+The `deploy-config` job also deploys it, pinning `FLUENT_BIT_VERSION` in `.env`. Query in
 VictoriaLogs with e.g. `{container_id="abc123def456"}`; `docker ps` maps IDs to names.
 
 ## Not built yet
