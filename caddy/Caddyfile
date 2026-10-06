@@ -5,7 +5,7 @@ auth.nikolaivorkinn.com {
 logs.nikolaivorkinn.com {
 	@ingest {
         path /insert/*
-        header_regexp Authorization "^Bearer {$LOGS_INGEST_TOKEN}.+$"
+        header Authorization "Bearer {$LOGS_INGEST_TOKEN}"
     }
     handle @ingest {
         reverse_proxy 127.0.0.1:9428
