@@ -1,13 +1,16 @@
 """Looks up TfL stops (NaPTAN StopPoints) for the settings page: naming a device's saved stops,
 and searching for new ones."""
 
+import re
 from collections.abc import Iterator
 from typing import Any
+from urllib.parse import quote
 
 import requests
 from flask import current_app
 
 API_BASE = "https://api.tfl.gov.uk"
+_STOP_ID = re.compile(r"[A-Za-z0-9_-]+")
 
 
 def _params() -> dict[str, str]:
@@ -16,7 +19,10 @@ def _params() -> dict[str, str]:
 
 
 def _get_stop_point(stop_id: str, http: requests.Session) -> dict[str, Any] | None:
-    response = http.get(f"{API_BASE}/StopPoint/{stop_id}", params=_params(), timeout=5)
+    if not _STOP_ID.fullmatch(stop_id):
+        current_app.logger.warning("Ignoring invalid TfL stop ID %r", stop_id)
+        return None
+    response = http.get(f"{API_BASE}/StopPoint/{quote(stop_id, safe='')}", params=_params(), timeout=5)
     return response.json() if response.status_code == 200 else None
 
 
@@ -107,8 +113,8 @@ def search_stops(query: str) -> list[dict[str, Any]]:
     """Tube stations and bus stops matching the query. Raises if TfL's search itself fails;
     a match whose details can't be fetched is skipped."""
     http = requests.Session()
-    params = {"modes": "tube,bus", "maxResults": "15", **_params()}
-    response = http.get(f"{API_BASE}/StopPoint/Search/{query}", params=params, timeout=6)
+    params = {"query": query, "modes": "tube,bus", "maxResults": "15", **_params()}
+    response = http.get(f"{API_BASE}/StopPoint/Search", params=params, timeout=6)
     response.raise_for_status()
 
     results = []
