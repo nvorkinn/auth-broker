@@ -11,11 +11,18 @@ logs.nikolaivorkinn.com {
         reverse_proxy 127.0.0.1:9428
     }
 
-    handle /select/* {
+    @select_admin {
+        path /select/*
+        header X-Logs-Admin "{$LOGS_ADMIN_TOKEN}"
+    }
+    handle @select_admin {
         forward_auth 127.0.0.1:5000 {
             uri /api/logging_ui/verify
         }
         reverse_proxy 127.0.0.1:9428
+    }
+    handle /select/* {
+        respond 403
     }
 
     handle {
