@@ -5,8 +5,7 @@ from broker.models import Device
 def test_verify_sends_an_unpaired_browser_to_pair(client):
     response = client.get("/api/logging_ui/verify")
 
-    assert response.status_code == 302
-    assert response.headers["Location"].endswith("/pair")
+    assert response.status_code == 401
 
 
 def test_verify_accepts_a_paired_browser(paired_client):
@@ -26,8 +25,7 @@ def test_verify_rejects_a_browser_whose_device_was_forgotten(app, paired_client)
 
     response = client.get("/api/logging_ui/verify")
 
-    assert response.status_code == 302
-    assert response.headers["Location"].endswith("/pair")
+    assert response.status_code == 401
 
 
 def test_verify_rejects_a_browser_whose_device_was_unpaired(app, paired_client):
@@ -38,5 +36,4 @@ def test_verify_rejects_a_browser_whose_device_was_unpaired(app, paired_client):
 
     response = client.get("/api/logging_ui/verify")
 
-    assert response.status_code == 302
-    assert response.headers["Location"].endswith("/pair")
+    assert response.status_code == 401
