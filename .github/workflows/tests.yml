@@ -34,3 +34,14 @@ jobs:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: coverage.xml
           disable_search: true
+
+  caddy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Build Caddy image
+        run: docker build -t auth-broker-caddy caddy
+
+      - name: Validate Caddyfile
+        run: docker run --rm auth-broker-caddy caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile

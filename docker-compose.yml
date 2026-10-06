@@ -9,3 +9,27 @@ services:
     volumes:
       - ./data:/app/data
     env_file: .env
+
+  caddy:
+    image: ghcr.io/nvorkinn/auth-broker-caddy:${CADDY_VERSION:-latest}
+    container_name: caddy
+    pull_policy: always
+    restart: unless-stopped
+    depends_on:
+      - auth-broker
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      # Certificates and ACME account. Losing this makes Caddy re-request every
+      # certificate, and Let's Encrypt rate-limits repeated issuance.
+      - caddy_data:/data
+      - caddy_config:/config
+
+volumes:
+  # Fixed names so the volumes don't depend on the compose project (directory) name.
+  caddy_data:
+    name: caddy_data
+  caddy_config:
+    name: caddy_config
