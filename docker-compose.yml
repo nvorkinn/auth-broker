@@ -17,10 +17,10 @@ services:
     restart: unless-stopped
     # Caddy's own secrets, kept apart from the broker's .env.
     env_file: caddy.env
-    ports:
-      - "80:80"
-      - "443:443"
-      - "443:443/udp"
+    # Host networking, so 127.0.0.1 in the Caddyfile is the host: VictoriaLogs
+    # (127.0.0.1:9428) runs there outside compose, and the broker is published
+    # on 127.0.0.1:5000. Caddy binds 80/443 (and UDP 443) on the host directly.
+    network_mode: host
     volumes:
       # Certificates and ACME account. Losing this makes Caddy re-request every
       # certificate, and Let's Encrypt rate-limits repeated issuance.
