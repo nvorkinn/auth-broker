@@ -24,7 +24,6 @@ config = requests.get(
 config.raise_for_status()
 
 print(f"device_id:      {device_id}")
-print(f"device_secret:  {device_secret}")
 print(f"pairing code:   {config.json()['pairing_code']}")
 print(f"still needed:   {', '.join(config.json()['setup_missing'])}")
 print(f"\nEnter the pairing code at {base_url}/pair")
