@@ -29,13 +29,13 @@ services:
 
   # Ships every container's logs to VictoriaLogs on the host (127.0.0.1:9428).
   fluent-bit:
-    image: fluent/fluent-bit:5.1.3
+    # Fluent Bit with this repo's fluent-bit/ config baked in.
+    image: ghcr.io/nvorkinn/auth-broker-fluent-bit:${FLUENT_BIT_VERSION:-latest}
     container_name: fluent-bit
+    pull_policy: always
     restart: unless-stopped
     network_mode: host
     volumes:
-      - ./fluent-bit/fluent-bit.conf:/fluent-bit/etc/fluent-bit.conf:ro
-      - ./fluent-bit/parsers.conf:/fluent-bit/etc/parsers.conf:ro
       - /var/lib/docker/containers:/var/lib/docker/containers:ro
       - fluent-bit-state:/state
 

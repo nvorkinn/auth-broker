@@ -10,6 +10,7 @@ permissions:
 env:
   IMAGE_NAME: ghcr.io/${{ github.repository }}
   CADDY_IMAGE_NAME: ghcr.io/${{ github.repository }}-caddy
+  FLUENT_BIT_IMAGE_NAME: ghcr.io/${{ github.repository }}-fluent-bit
 
 jobs:
   build-and-push:
@@ -58,6 +59,16 @@ jobs:
           tags: |
             ${{ env.CADDY_IMAGE_NAME }}:${{ steps.tag.outputs.value }}
             ${{ env.CADDY_IMAGE_NAME }}:latest
+
+      - name: Build and push Fluent Bit image
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7
+        with:
+          context: fluent-bit
+          push: true
+          platforms: linux/amd64,linux/arm64
+          tags: |
+            ${{ env.FLUENT_BIT_IMAGE_NAME }}:${{ steps.tag.outputs.value }}
+            ${{ env.FLUENT_BIT_IMAGE_NAME }}:latest
 
   # Each deploy job waits for manual approval through its environment's
   # protection rule (Settings > Environments), then pins its container to
@@ -116,3 +127,8 @@ jobs:
 
       - name: Check every device is still there
         run: ssh -i ~/.ssh/id_deploy "$DEPLOY_TARGET" docker exec auth-broker flask --app wsgi devices list
+
+      # Fluent Bit only ships logs, so it rides along with the config server
+      # deploy rather than needing an approval of its own.
+      - name: Deploy Fluent Bit
+        run: ssh -i ~/.ssh/id_deploy "$DEPLOY_TARGET" bash -s -- fluent-bit "$TAG" < scripts/deploy.sh
