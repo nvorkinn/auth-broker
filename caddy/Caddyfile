@@ -1,6 +1,6 @@
 auth.nikolaivorkinn.com {
-	# The broker's compose service name, reachable on the compose network.
-	reverse_proxy auth-broker:5000
+	# Caddy uses host networking, so this is the broker's published port.
+	reverse_proxy 127.0.0.1:5000
 }
 logs.nikolaivorkinn.com {
 	@ingest {

@@ -376,10 +376,11 @@ back that directory up.
 
 ### Caddy
 
-Caddy runs as the `caddy` compose service, publishing ports 80 and 443 (TCP,
-plus UDP 443 for HTTP/3) on the host. It reaches the broker over the compose
-network as `auth-broker:5000`; the broker's `127.0.0.1:5000` mapping stays
-for local debugging. A Caddyfile change ships like code: edit
+Caddy runs as the `caddy` compose service with host networking, binding ports
+80 and 443 (TCP, plus UDP 443 for HTTP/3) on the host. That way `127.0.0.1` in
+the Caddyfile means the host: it reaches the broker on its published
+`127.0.0.1:5000` and VictoriaLogs on `127.0.0.1:9428`, which runs outside
+compose. A Caddyfile change ships like code: edit
 `caddy/Caddyfile`, tag a release, bump `CADDY_VERSION`.
 
 Its certificates and ACME account live in the named volume `caddy_data`
