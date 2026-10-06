@@ -14,6 +14,8 @@ jobs:
     permissions:
       contents: read
       packages: write
+    outputs:
+      tag: ${{ steps.tag.outputs.value }}
     steps:
       - uses: actions/checkout@v7
 
@@ -26,7 +28,11 @@ jobs:
 
       - name: Extract tag
         id: tag
-        run: echo "value=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
+        run: |
+          tag="${GITHUB_REF#refs/tags/}"
+          # The tag is passed to a shell on the deploy host, so keep it to safe characters.
+          [[ "$tag" =~ ^v[0-9A-Za-z._-]+$ ]] || { echo "Unsupported tag: $tag" >&2; exit 1; }
+          echo "value=$tag" >> "$GITHUB_OUTPUT"
 
       - uses: docker/setup-buildx-action@v4
 
@@ -49,3 +55,61 @@ jobs:
           tags: |
             ${{ env.CADDY_IMAGE_NAME }}:${{ steps.tag.outputs.value }}
             ${{ env.CADDY_IMAGE_NAME }}:latest
+
+  # Each deploy job waits for manual approval through its environment's
+  # protection rule (Settings > Environments), then pins its container to
+  # this release's tag on the host and restarts it. See "Deploying" in the README.
+  deploy-caddy:
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    environment: deploy-caddy
+    concurrency:
+      group: deploy-caddy
+      cancel-in-progress: false
+    env:
+      TAG: ${{ needs.build-and-push.outputs.tag }}
+      DEPLOY_TARGET: ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up SSH
+        env:
+          ORACLE_SSH_TOKEN: ${{ secrets.ORACLE_SSH_TOKEN }}
+          DEPLOY_SSH_KNOWN_HOSTS: ${{ secrets.DEPLOY_SSH_KNOWN_HOSTS }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$ORACLE_SSH_TOKEN" > ~/.ssh/id_deploy
+          chmod 600 ~/.ssh/id_deploy
+          printf '%s\n' "$DEPLOY_SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
+
+      - name: Deploy Caddy
+        run: ssh -i ~/.ssh/id_deploy "$DEPLOY_TARGET" bash -s -- caddy "$TAG" < scripts/deploy.sh
+
+  deploy-config:
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    environment: deploy-config
+    concurrency:
+      group: deploy-config
+      cancel-in-progress: false
+    env:
+      TAG: ${{ needs.build-and-push.outputs.tag }}
+      DEPLOY_TARGET: ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up SSH
+        env:
+          ORACLE_SSH_TOKEN: ${{ secrets.ORACLE_SSH_TOKEN }}
+          DEPLOY_SSH_KNOWN_HOSTS: ${{ secrets.DEPLOY_SSH_KNOWN_HOSTS }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$ORACLE_SSH_TOKEN" > ~/.ssh/id_deploy
+          chmod 600 ~/.ssh/id_deploy
+          printf '%s\n' "$DEPLOY_SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
+
+      - name: Deploy config server
+        run: ssh -i ~/.ssh/id_deploy "$DEPLOY_TARGET" bash -s -- auth-broker "$TAG" < scripts/deploy.sh
+
+      - name: Check every device is still there
+        run: ssh -i ~/.ssh/id_deploy "$DEPLOY_TARGET" docker exec auth-broker flask --app wsgi devices list
