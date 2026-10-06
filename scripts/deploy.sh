@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Runs on the deploy host (fed over ssh by release.yml): pins one compose
-# service to a release tag in .env, then pulls and restarts just that service.
+# Runs on the deploy host (fed over ssh by release.yml): installs the release's
+# docker-compose.yml if the job copied one over, pins one compose service to a
+# release tag in .env, then pulls and restarts just that service.
 # Usage: deploy.sh <auth-broker|caddy|fluent-bit> <tag>
 set -euo pipefail
 
@@ -25,9 +26,15 @@ src.backup(sqlite3.connect('/app/data/broker.db.bak-$tag'))
   echo "Backed up the database to data/broker.db.bak-$tag"
 fi
 
-# The two deploy jobs can run at once and both edit .env.
+# The two deploy jobs can run at once and both edit .env and the compose file.
 (
   flock 9
+  # The job scp's the release's compose file under its own name; mv swaps it in
+  # atomically. Both jobs of a release ship the same file.
+  if [ -f "docker-compose.yml.incoming-$service" ]; then
+    mv "docker-compose.yml.incoming-$service" docker-compose.yml
+    echo "Installed this release's docker-compose.yml"
+  fi
   if grep -q "^$var=" .env; then
     sed -i "s/^$var=.*/$var=$tag/" .env
   else

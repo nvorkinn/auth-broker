@@ -96,6 +96,9 @@ jobs:
           chmod 600 ~/.ssh/id_deploy
           printf '%s\n' "$DEPLOY_SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
 
+      - name: Copy compose file
+        run: scp -i ~/.ssh/id_deploy docker-compose.yml "$DEPLOY_TARGET:/opt/auth-broker/docker-compose.yml.incoming-caddy"
+
       - name: Deploy Caddy
         run: ssh -i ~/.ssh/id_deploy "$DEPLOY_TARGET" bash -s -- caddy "$TAG" < scripts/deploy.sh
 
@@ -121,6 +124,9 @@ jobs:
           printf '%s\n' "$ORACLE_SSH_TOKEN" > ~/.ssh/id_deploy
           chmod 600 ~/.ssh/id_deploy
           printf '%s\n' "$DEPLOY_SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
+
+      - name: Copy compose file
+        run: scp -i ~/.ssh/id_deploy docker-compose.yml "$DEPLOY_TARGET:/opt/auth-broker/docker-compose.yml.incoming-auth-broker"
 
       - name: Deploy config server
         run: ssh -i ~/.ssh/id_deploy "$DEPLOY_TARGET" bash -s -- auth-broker "$TAG" < scripts/deploy.sh
