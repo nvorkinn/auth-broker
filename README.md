@@ -345,7 +345,7 @@ One-time setup in the repo's **Settings**:
   - `DEPLOY_HOST`: the instance's public IP or hostname.
   - `DEPLOY_USER`: the SSH user, e.g. `ubuntu`. It must be able to run
     `docker` (in the `docker` group) and write `/opt/auth-broker/.env`.
-  - `DEPLOY_SSH_KEY`: a private key, made just for this
+  - `ORACLE_SSH_TOKEN`: a private key, made just for this
     (`ssh-keygen -t ed25519 -f deploy -N ''`), whose public half is in that
     user's `~/.ssh/authorized_keys`.
   - `DEPLOY_SSH_KNOWN_HOSTS`: the output of `ssh-keyscan <host>`, so the job
