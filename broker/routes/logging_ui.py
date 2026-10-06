@@ -11,7 +11,7 @@ def verify():
     device = None
     if "device_id" in session:
         device = db.session.get(Device, session["device_id"])
-    if not device:
+    if device is None or device.paired_at is None:
         return "", 401
     else:
         return "", 200
