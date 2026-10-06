@@ -2,3 +2,30 @@ auth.nikolaivorkinn.com {
 	# The broker's compose service name, reachable on the compose network.
 	reverse_proxy auth-broker:5000
 }
+logs.nikolaivorkinn.com {
+	@ingest {
+        path /insert/*
+        header Authorization "Bearer {$LOGS_INGEST_TOKEN}"
+    }
+    handle @ingest {
+        reverse_proxy 127.0.0.1:9428
+    }
+
+    @select_admin {
+        path /select/*
+        header X-Logs-Admin "{$LOGS_ADMIN_TOKEN}"
+    }
+    handle @select_admin {
+        forward_auth 127.0.0.1:5000 {
+            uri /api/logging_ui/verify
+        }
+        reverse_proxy 127.0.0.1:9428
+    }
+    handle /select/* {
+        respond 403
+    }
+
+    handle {
+        respond 401
+    }
+}

@@ -15,6 +15,8 @@ services:
     container_name: caddy
     pull_policy: always
     restart: unless-stopped
+    # Caddy's own secrets, kept apart from the broker's .env.
+    env_file: caddy.env
     ports:
       - "80:80"
       - "443:443"
@@ -25,9 +27,22 @@ services:
       - caddy_data:/data
       - caddy_config:/config
 
+  # Ships every container's logs to VictoriaLogs on the host (127.0.0.1:9428).
+  fluent-bit:
+    image: fluent/fluent-bit:5.1.3
+    container_name: fluent-bit
+    restart: unless-stopped
+    network_mode: host
+    volumes:
+      - ./fluent-bit/fluent-bit.conf:/fluent-bit/etc/fluent-bit.conf:ro
+      - ./fluent-bit/parsers.conf:/fluent-bit/etc/parsers.conf:ro
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - fluent-bit-state:/state
+
 volumes:
   # Fixed names so the volumes don't depend on the compose project (directory) name.
   caddy_data:
     name: caddy_data
   caddy_config:
     name: caddy_config
+  fluent-bit-state:
