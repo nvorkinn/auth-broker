@@ -15,8 +15,6 @@ services:
     container_name: caddy
     pull_policy: always
     restart: unless-stopped
-    depends_on:
-      - auth-broker
     ports:
       - "80:80"
       - "443:443"
