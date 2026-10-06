@@ -45,7 +45,7 @@ a Spotify token.
 Every device-facing endpoint is authenticated with `Authorization: Bearer
 <secret>`; every browser-facing page is gated on the signed session
 cookie set at pairing time. Bearer secrets mean HTTPS is required for any
-non-local deployment (Caddy terminates TLS here).
+non-local deployment (Caddy terminates TLS here; see [Caddy](#caddy)).
 
 ## Renderer and display roles
 
@@ -281,20 +281,27 @@ which posts a coverage comment and status check on each PR (config in
 ## Deploying
 
 Tagging a release (`git tag v0.1.0 && git push --tags`) triggers
-`.github/workflows/release.yml`, which builds this into a Docker image and
-pushes it to `ghcr.io/nvorkinn/auth-broker:<tag>` (and `:latest`).
+`.github/workflows/release.yml`, which builds two Docker images and pushes
+each with the release tag (and `:latest`):
+
+- `ghcr.io/nvorkinn/auth-broker:<tag>`: the broker itself (`Dockerfile`).
+- `ghcr.io/nvorkinn/auth-broker-caddy:<tag>`: [Caddy](https://caddyserver.com/)
+  with this repo's `caddy/Caddyfile` baked in. It terminates TLS for
+  `auth.nikolaivorkinn.com` and reverse-proxies to the broker.
 
 Deploying needs Docker Compose v2 (the `docker compose` subcommand). Ubuntu's
 `docker.io` package doesn't include it; install it with
 `sudo apt install docker-compose-v2`.
 
 On the Oracle Cloud instance, copy `docker-compose.yml` into
-`/opt/auth-broker/` next to the `.env` file and `data/` directory. Pin the
-version in that `.env` (compose reads it from there) rather than tracking
-`:latest`, so a restart never picks up a release you didn't choose:
+`/opt/auth-broker/` next to the `.env` file and `data/` directory. Pin both
+versions in that `.env` (compose reads it from there) rather than tracking
+`:latest`, so a restart never picks up a release you didn't choose. They're
+released together, so they're normally the same tag:
 
 ```bash
 AUTH_BROKER_VERSION=v1.8.0
+CADDY_VERSION=v1.8.0
 ```
 
 Then:
@@ -304,17 +311,18 @@ cd /opt/auth-broker
 docker compose up -d
 ```
 
-`up -d` pulls the image and recreates the container only if the image or
+`up -d` pulls the images and recreates a container only if its image or
 config changed, so the same command handles first deploy, upgrades, and picking
-up `.env` changes. Without `AUTH_BROKER_VERSION` it runs `:latest`.
+up `.env` changes. Without a version it runs `:latest`. To touch only one
+service, name it: `docker compose up -d caddy`.
 
 To upgrade:
 
 ```bash
 cd /opt/auth-broker
 cp data/broker.db data/broker.db.bak-$(date +%F)   # 1. back up the database
-# 2. set AUTH_BROKER_VERSION in .env to the new tag
-docker compose pull                                # 3. fetch the new image
+# 2. set AUTH_BROKER_VERSION and CADDY_VERSION in .env to the new tag
+docker compose pull                                # 3. fetch the new images
 docker rm -f auth-broker                           # 4. only if it was started by hand with `docker run`
 docker compose up -d                               # 5. start the new version
 docker exec auth-broker flask --app wsgi devices list   # 6. check every device is still there
@@ -322,11 +330,49 @@ docker exec auth-broker flask --app wsgi devices list   # 6. check every device 
 
 The `./data` volume mount is what makes device/token data (SQLite at `data/broker.db`,
 override with `BROKER_DB_PATH`) survive a container restart or image update —
-back that directory up. [Caddy](https://caddyserver.com/) still runs directly
-on the host for TLS — see the included `Caddyfile` — reverse-proxying
-`auth.nikolaivorkinn.com` to `127.0.0.1:5000`, which the compose
-file's `ports` mapping publishes to, so no Caddy config changes needed when moving to a new
-image tag.
+back that directory up.
+
+### Caddy
+
+Caddy runs as the `caddy` compose service, publishing ports 80 and 443 (TCP,
+plus UDP 443 for HTTP/3) on the host. It reaches the broker over the compose
+network as `auth-broker:5000`; the broker's `127.0.0.1:5000` mapping stays
+for local debugging. A Caddyfile change ships like code: edit
+`caddy/Caddyfile`, tag a release, bump `CADDY_VERSION`.
+
+Its certificates and ACME account live in the named volume `caddy_data`
+(config state in `caddy_config`). Never replace those with throwaway storage
+or remove them (`docker compose down -v` would): Caddy would re-request every
+certificate on start, and Let's Encrypt rate-limits repeated issuance for the
+same domain. The volumes have fixed names, so they survive moving or renaming
+`/opt/auth-broker`. `docker compose down` without `-v` keeps them.
+
+#### Moving from the systemd Caddy
+
+Caddy used to run on the host under systemd. To switch over once, keeping the
+existing certificates so nothing is re-issued:
+
+```bash
+cd /opt/auth-broker
+docker compose pull caddy                                   # 1. fetch the image first, to keep downtime short
+docker compose create caddy                                 # 2. create the container and its volumes, unstarted
+sudo systemctl disable --now caddy                          # 3. free ports 80/443
+sudo docker run --rm -v caddy_data:/data \
+  -v /var/lib/caddy/.local/share/caddy:/src:ro \
+  alpine sh -c 'mkdir -p /data/caddy && cp -a /src/. /data/caddy/'   # 4. copy the host's certificates into the volume
+docker compose up -d                                        # 5. start Caddy in its container
+docker compose logs caddy                                   # 6. check it loaded the certificate rather than requesting one
+```
+
+`/var/lib/caddy/.local/share/caddy` is where the Debian/Ubuntu `caddy`
+package keeps its data; check `systemctl cat caddy` if yours differs. If the
+copy is skipped, Caddy simply requests a fresh certificate once, which is
+fine. To roll back, `docker compose stop caddy && sudo systemctl enable --now caddy`.
+Once happy, `sudo apt remove caddy` (its old data directory can stay as a backup).
+
+If the GHCR package `auth-broker-caddy` comes up private after the first
+release, give it the same visibility as the `auth-broker` package in its package settings, or
+`docker login ghcr.io` on the host.
 
 ## Not built yet
 
