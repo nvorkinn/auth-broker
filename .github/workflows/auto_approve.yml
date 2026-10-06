@@ -1,0 +1,48 @@
+name: Auto-approve PRs
+
+on:
+  pull_request:
+    types: [ opened, synchronize, reopened, ready_for_review ]
+
+permissions:
+  contents: write
+  pull-requests: write
+  checks: read
+  actions: read
+
+jobs:
+  auto-approve:
+    runs-on: ubuntu-latest
+    if: ${{ !github.event.pull_request.draft }}
+    timeout-minutes: 30
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # CRUCIAL: Wait for CI checks to complete first
+      - name: Wait for CI checks to complete
+        uses: lewagon/wait-on-check-action@ccfb013c15c8afb7bf2b7c028fb74dc5a068cccc # v1.3.4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+          wait-interval: 30
+          allowed-conclusions: success,skipped,neutral
+          running-workflow-name: 'auto-approve'
+
+      # Only approve if CI passes
+      - name: Approve PR
+        if: success()
+        run: gh pr review --approve ${{ github.event.pull_request.number }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+# TODO: Disabling the merge step for now.
+#      # A merge made with GITHUB_TOKEN doesn't trigger workflows, so main would get no push
+#      # runs (CI, CodeQL). AUTO_MERGE_TOKEN, a fine-grained PAT with Contents and Pull requests
+#      # read/write on this repo, merges as a user instead. It can't do the approving above:
+#      # GitHub won't let a PR's author approve their own PR.
+#      - name: Enable auto-merge
+#        if: success()
+#        run: gh pr merge --auto --merge --delete-branch ${{ github.event.pull_request.number }}
+#        env:
+#          GH_TOKEN: ${{ secrets.AUTO_MERGE_TOKEN || secrets.GITHUB_TOKEN }}
