@@ -107,8 +107,8 @@ def search_stops(query: str) -> list[dict[str, Any]]:
     """Tube stations and bus stops matching the query. Raises if TfL's search itself fails;
     a match whose details can't be fetched is skipped."""
     http = requests.Session()
-    params = {"modes": "tube,bus", "maxResults": "15", **_params()}
-    response = http.get(f"{API_BASE}/StopPoint/Search/{query}", params=params, timeout=6)
+    params = {"query": query, "modes": "tube,bus", "maxResults": "15", **_params()}
+    response = http.get(f"{API_BASE}/StopPoint/Search", params=params, timeout=6)
     response.raise_for_status()
 
     results = []
