@@ -51,10 +51,7 @@ jobs:
           - image: caddy
             check: validate --config /etc/caddy/Caddyfile --adapter caddyfile
           - image: fluent-bit
-            check: --dry-run --config /fluent-bit/etc/fluent-bit.conf
-          # No config of its own to check, so just that the image runs.
-          - image: victoria-metrics
-            check: -version
+            check: --dry-run --config /fluent-bit/etc/fluent-bit.yaml
     steps:
       - uses: actions/checkout@v7
 
