@@ -4,7 +4,7 @@
 # /opt/auth-broker/releases/<tag>/ and runs this copy, which installs the
 # bundled docker-compose.yml, pins one compose service to the tag in .env, then
 # pulls and restarts just that service.
-# Usage: deploy.sh <auth-broker|caddy|fluent-bit|authentik> <tag>
+# Usage: deploy.sh <auth-broker|caddy|fluent-bit|victoria-metrics|authentik> <tag>
 #
 # authentik is the three Authentik services. Their image is upstream's, pinned
 # by hand with AUTHENTIK_VERSION in .env (one minor version at a time), so
@@ -20,9 +20,12 @@ cd "${DEPLOY_DIR:-/opt/auth-broker}"
 services=("$service")
 var=
 case "$service" in
-  auth-broker) var=AUTH_BROKER_VERSION ;;
-  caddy) var=CADDY_VERSION ;;
-  fluent-bit) var=FLUENT_BIT_VERSION ;;
+  # This repo's images, each pinned by <SERVICE>_VERSION in .env, e.g.
+  # fluent-bit -> FLUENT_BIT_VERSION.
+  auth-broker | caddy | fluent-bit | victoria-metrics)
+    var="${service^^}"
+    var="${var//-/_}_VERSION"
+    ;;
   authentik) services=(authentik-postgresql authentik-server authentik-worker) ;;
   *) echo "unknown service: $service" >&2; exit 1 ;;
 esac
@@ -62,3 +65,8 @@ else
   docker compose up -d --wait --wait-timeout 600 "${services[@]}"
 fi
 docker compose ps "${services[@]}"
+
+if [ "$service" = auth-broker ]; then
+  # A check that the database came through.
+  docker exec auth-broker flask --app wsgi devices list
+fi

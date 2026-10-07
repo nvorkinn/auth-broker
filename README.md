@@ -281,8 +281,8 @@ which posts a coverage comment and status check on each PR (config in
 ## Deploying
 
 Tagging a release (`git tag v0.1.0 && git push --tags`) triggers
-`.github/workflows/release.yml`, which builds three Docker images and pushes
-each with the release tag (and `:latest`):
+`.github/workflows/release.yml`, which builds four Docker images, side by
+side, and pushes each with the release tag (and `:latest`):
 
 - `ghcr.io/nvorkinn/auth-broker:<tag>`: the broker itself (`Dockerfile`).
 - `ghcr.io/nvorkinn/auth-broker-caddy:<tag>`: [Caddy](https://caddyserver.com/)
@@ -290,6 +290,8 @@ each with the release tag (and `:latest`):
   `auth.nikolaivorkinn.com` and reverse-proxies to the broker.
 - `ghcr.io/nvorkinn/auth-broker-fluent-bit:<tag>`: Fluent Bit with this repo's
   `fluent-bit/` config baked in (see [Logs](#logs)).
+- `ghcr.io/nvorkinn/auth-broker-victoria-metrics:<tag>`: single-node
+  VictoriaMetrics, listening on loopback only (see [Metrics](#metrics)).
 
 Deploying needs Docker Compose v2 (the `docker compose` subcommand). Ubuntu's
 `docker.io` package doesn't include it; install it with
@@ -299,7 +301,7 @@ On the Oracle Cloud instance, copy `docker-compose.yml` into
 `/opt/auth-broker/` next to the `.env` file and `data/` directory. Caddy reads its
 own secrets from `caddy.env` in the same directory, kept apart from the broker's
 `.env`: create it from `caddy.env.example` first, or the `caddy` service won't
-start. Pin all three
+start. Pin all four
 versions in that `.env` (compose reads it from there) rather than tracking
 `:latest`, so a restart never picks up a release you didn't choose. They're
 released together, so they're normally the same tag:
@@ -308,6 +310,7 @@ released together, so they're normally the same tag:
 AUTH_BROKER_VERSION=v1.8.0
 CADDY_VERSION=v1.8.0
 FLUENT_BIT_VERSION=v1.8.0
+VICTORIA_METRICS_VERSION=v1.8.0
 ```
 
 Then:
@@ -326,9 +329,10 @@ service, name it: `docker compose up -d caddy`.
 
 After the images are pushed, `release.yml` packages the release's deploy bundle,
 `deploy-<tag>.tar.gz` (this release's `docker-compose.yml` and
-`scripts/deploy.sh`), and attaches it to the GitHub Release. Then it has two
-deploy jobs, `deploy-caddy` and `deploy-config`. Each one waits, paused, until
-someone approves it on the workflow run page, and each is approved on its own.
+`scripts/deploy.sh`), and attaches it to the GitHub Release. Then it has three
+deploy jobs, one per environment: `deploy-caddy`, `deploy-authentik` and
+`deploy-config`. Each one waits, paused, until someone approves it on the
+workflow run page, and each is approved on its own.
 An approved job SSHes into the host and runs `scripts/fetch-release.sh`, which
 downloads the bundle from the release into `/opt/auth-broker/releases/<tag>/`
 (checking its SHA-256, and skipping the download when that release is already
@@ -338,20 +342,22 @@ there) and runs the bundle's own `deploy.sh`, which:
    the host's copy, so make compose changes in the repo, not on the host),
 2. for the config server, backs up the database to
    `data/broker.db.bak-<tag>` (SQLite's backup API, safe while running),
-3. pins `AUTH_BROKER_VERSION` or `CADDY_VERSION` in `/opt/auth-broker/.env` to
-   the release's tag (never `latest`),
+3. pins that image's `<SERVICE>_VERSION` (e.g. `CADDY_VERSION`) in
+   `/opt/auth-broker/.env` to the release's tag (never `latest`),
 4. pulls that image and recreates just that container
    (`docker compose up -d --no-deps --force-recreate <service>`).
 
-`deploy-config` then lists the devices, as a check that the database came
-through, and deploys Fluent Bit the same way (`FLUENT_BIT_VERSION`). Re-running
+Deploying the config server then lists the devices, as a check that the
+database came through. `deploy-config` goes on to deploy Fluent Bit and
+VictoriaMetrics the same way. Re-running
 a job redeploys the same tag; to roll back, re-run the deploy jobs of the older
 release's workflow run, which deploys that release's own bundle. Old releases
 stay under `releases/`; they're a few KB each.
 
 One-time setup in the repo's **Settings**:
 
-- **Environments**: create `deploy-caddy` and `deploy-config`, and on each tick
+- **Environments**: create `deploy-caddy`, `deploy-authentik` and
+  `deploy-config`, and on each tick
   **Required reviewers** and add yourself. That rule is what keeps the jobs
   from running on their own. Optionally limit each to `v*` tags under
   **Deployment branches and tags**.
@@ -392,8 +398,10 @@ back that directory up.
 Caddy runs as the `caddy` compose service with host networking, binding ports
 80 and 443 (TCP, plus UDP 443 for HTTP/3) on the host. That way `127.0.0.1` in
 the Caddyfile means the host: it reaches the broker on its published
-`127.0.0.1:5000` and VictoriaLogs on `127.0.0.1:9428`, which runs outside
-compose. A Caddyfile change ships like code: edit
+`127.0.0.1:5000`, VictoriaLogs on `127.0.0.1:9428`, which runs outside
+compose, and VictoriaMetrics on `127.0.0.1:8428`. The logs and metrics sites
+share the Caddyfile's `admin_only` snippet: an Authentik login in the admin
+group, then the upstream. A Caddyfile change ships like code: edit
 `caddy/Caddyfile`, tag a release, bump `CADDY_VERSION`.
 
 Its certificates and ACME account live in the named volume `caddy_data`
@@ -438,6 +446,19 @@ log and ships it to VictoriaLogs on the host (`127.0.0.1:9428`). Its config
 released alongside the other two images, so nothing needs copying to the host.
 The `deploy-config` job also deploys it, pinning `FLUENT_BIT_VERSION` in `.env`. Query in
 VictoriaLogs with e.g. `{container_id="abc123def456"}`; `docker ps` maps IDs to names.
+
+### Metrics
+
+The `victoria-metrics` compose service is upstream's single-node
+VictoriaMetrics (`ghcr.io/nvorkinn/auth-broker-victoria-metrics:<tag>`). It
+scrapes nothing; metrics are pushed to it. It keeps a month of data (upstream's default) in the
+named volume `victoria_metrics_data`, with a 512 MB memory limit. It listens on
+`127.0.0.1:8428` only. Caddy serves it at `metrics.nikolaivorkinn.com`, like
+the logs site: the push endpoints (`/api/v1/write`, `/api/v1/import/*`,
+`/influx/*`) take `Authorization: Bearer <LOGS_INGEST_TOKEN>`, the same ingest
+token as logs, and everything else (the UI at `/vmui` and the query API)
+needs the Authentik admin login. The `deploy-config` job deploys it, pinning
+`VICTORIA_METRICS_VERSION` in `.env`.
 
 ## Not built yet
 
