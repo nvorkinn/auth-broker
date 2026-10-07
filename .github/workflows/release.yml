@@ -134,14 +134,17 @@ jobs:
         run: ssh -i ~/.ssh/id_deploy "$DEPLOY_TARGET" bash -s -- caddy "$TAG" "$BUNDLE_URL" "$BUNDLE_SHA256" < scripts/fetch-release.sh
 
   deploy-authentik:
-    needs: build-and-push
+    needs: [build-and-push, package]
     runs-on: ubuntu-latest
     environment: deploy-authentik
     concurrency:
       group: deploy-authentik
       cancel-in-progress: false
     env:
+      TAG: ${{ needs.build-and-push.outputs.tag }}
       DEPLOY_TARGET: ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}
+      BUNDLE_URL: ${{ github.server_url }}/${{ github.repository }}/releases/download/${{ needs.build-and-push.outputs.tag }}/deploy-${{ needs.build-and-push.outputs.tag }}.tar.gz
+      BUNDLE_SHA256: ${{ needs.package.outputs.sha256 }}
     steps:
       - uses: actions/checkout@v7
 
@@ -155,16 +158,10 @@ jobs:
           chmod 600 ~/.ssh/id_deploy
           printf '%s\n' "$DEPLOY_SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
 
-      # Authentik is upstream's image, pinned by hand with AUTHENTIK_VERSION in
-      # the host's .env (one minor version at a time), so this doesn't use
-      # deploy.sh or the release tag: it pulls and restarts whatever is pinned.
+      # Installs this release's compose file, then brings up the three Authentik
+      # services on the AUTHENTIK_VERSION pinned in the host's .env.
       - name: Deploy Authentik
-        run: >-
-          ssh -i ~/.ssh/id_deploy "$DEPLOY_TARGET"
-          'cd /opt/auth-broker
-          && docker compose pull authentik-postgresql authentik-server authentik-worker
-          && docker compose up -d authentik-postgresql authentik-server authentik-worker
-          && docker compose ps authentik-postgresql authentik-server authentik-worker'
+        run: ssh -i ~/.ssh/id_deploy "$DEPLOY_TARGET" bash -s -- authentik "$TAG" "$BUNDLE_URL" "$BUNDLE_SHA256" < scripts/fetch-release.sh
 
   deploy-config:
     needs: [build-and-push, package]
