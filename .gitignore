@@ -1,5 +1,6 @@
 .env
 caddy.env
+authentik.env
 data/
 __pycache__/
 *.pyc
