@@ -1,27 +1,53 @@
+# Only admins get in: an Authentik login in the admin group (forward auth),
+# then proxied to the upstream given as the argument, e.g.
+# `import admin_only 127.0.0.1:9428`.
+(admin_only) {
+	reverse_proxy /outpost.goauthentik.io/* 127.0.0.1:9000
+	forward_auth 127.0.0.1:9000 {
+		uri /outpost.goauthentik.io/auth/caddy
+		copy_headers X-Authentik-Username X-Authentik-Groups X-Authentik-Email
+		trusted_proxies private_ranges
+	}
+	reverse_proxy {args[0]}
+}
+
+# Caddy uses host networking, so 127.0.0.1 is the host throughout.
 auth.nikolaivorkinn.com {
-	# Caddy uses host networking, so this is the broker's published port.
+	# The broker's published port.
 	reverse_proxy 127.0.0.1:5000
 }
+
+# VictoriaLogs, on the host outside compose.
 logs.nikolaivorkinn.com {
 	@ingest {
-        path /insert/*
-        header Authorization "Bearer {$LOGS_INGEST_TOKEN}"
-    }
-    handle @ingest {
-        reverse_proxy 127.0.0.1:9428
-    }
+		path /insert/*
+		header Authorization "Bearer {$LOGS_INGEST_TOKEN}"
+	}
+	handle @ingest {
+		reverse_proxy 127.0.0.1:9428
+	}
 
-    # Everything else needs an Authentik login in the admin group.
-    handle {
-        reverse_proxy /outpost.goauthentik.io/* 127.0.0.1:9000
-        forward_auth 127.0.0.1:9000 {
-            uri /outpost.goauthentik.io/auth/caddy
-            copy_headers X-Authentik-Username X-Authentik-Groups X-Authentik-Email
-            trusted_proxies private_ranges
-        }
-        reverse_proxy 127.0.0.1:9428
-    }
+	handle {
+		import admin_only 127.0.0.1:9428
+	}
 }
+
+# VictoriaMetrics, the victoria-metrics compose service. Pushes use the same
+# ingest token as logs.
+metrics.nikolaivorkinn.com {
+	@ingest {
+		path /api/v1/write /api/v1/import /api/v1/import/* /influx/*
+		header Authorization "Bearer {$LOGS_INGEST_TOKEN}"
+	}
+	handle @ingest {
+		reverse_proxy 127.0.0.1:8428
+	}
+
+	handle {
+		import admin_only 127.0.0.1:8428
+	}
+}
+
 sso.nikolaivorkinn.com {
 	# Authentik, published on loopback only.
 	reverse_proxy 127.0.0.1:9000

@@ -7,19 +7,42 @@ on:
 permissions:
   contents: read
 
-env:
-  IMAGE_NAME: ghcr.io/${{ github.repository }}
-  CADDY_IMAGE_NAME: ghcr.io/${{ github.repository }}-caddy
-  FLUENT_BIT_IMAGE_NAME: ghcr.io/${{ github.repository }}-fluent-bit
-
 jobs:
-  build-and-push:
+  tag:
+    runs-on: ubuntu-latest
+    outputs:
+      value: ${{ steps.tag.outputs.value }}
+    steps:
+      - name: Extract tag
+        id: tag
+        run: |
+          tag="${GITHUB_REF#refs/tags/}"
+          # The tag is passed to a shell on the deploy host, so keep it to safe characters.
+          [[ "$tag" =~ ^v[0-9A-Za-z._-]+$ ]] || { echo "Unsupported tag: $tag" >&2; exit 1; }
+          echo "value=$tag" >> "$GITHUB_OUTPUT"
+
+  # One build per image, side by side. Each is tagged with the release tag and
+  # latest, for amd64 and arm64 (the host is ARM).
+  images:
+    name: image ${{ matrix.image }}
+    needs: tag
     runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
-    outputs:
-      tag: ${{ steps.tag.outputs.value }}
+    strategy:
+      matrix:
+        include:
+          - image: auth-broker
+            context: .
+          - image: auth-broker-caddy
+            context: caddy
+          - image: auth-broker-fluent-bit
+            context: fluent-bit
+          - image: auth-broker-victoria-metrics
+            context: victoria-metrics
+    env:
+      IMAGE: ghcr.io/${{ github.repository_owner }}/${{ matrix.image }}
     steps:
       - uses: actions/checkout@v7
 
@@ -30,57 +53,29 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Extract tag
-        id: tag
-        run: |
-          tag="${GITHUB_REF#refs/tags/}"
-          # The tag is passed to a shell on the deploy host, so keep it to safe characters.
-          [[ "$tag" =~ ^v[0-9A-Za-z._-]+$ ]] || { echo "Unsupported tag: $tag" >&2; exit 1; }
-          echo "value=$tag" >> "$GITHUB_OUTPUT"
-
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4
 
-      - name: Build and push broker image
+      - name: Build and push
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7
         with:
-          context: .
+          context: ${{ matrix.context }}
           push: true
           platforms: linux/amd64,linux/arm64
           tags: |
-            ${{ env.IMAGE_NAME }}:${{ steps.tag.outputs.value }}
-            ${{ env.IMAGE_NAME }}:latest
-
-      - name: Build and push Caddy image
-        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7
-        with:
-          context: caddy
-          push: true
-          platforms: linux/amd64,linux/arm64
-          tags: |
-            ${{ env.CADDY_IMAGE_NAME }}:${{ steps.tag.outputs.value }}
-            ${{ env.CADDY_IMAGE_NAME }}:latest
-
-      - name: Build and push Fluent Bit image
-        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7
-        with:
-          context: fluent-bit
-          push: true
-          platforms: linux/amd64,linux/arm64
-          tags: |
-            ${{ env.FLUENT_BIT_IMAGE_NAME }}:${{ steps.tag.outputs.value }}
-            ${{ env.FLUENT_BIT_IMAGE_NAME }}:latest
+            ${{ env.IMAGE }}:${{ needs.tag.outputs.value }}
+            ${{ env.IMAGE }}:latest
 
   # The deploy bundle is what the host deploys from: this release's
   # docker-compose.yml and deploy.sh, attached to the GitHub Release.
   package:
-    needs: build-and-push
+    needs: [tag, images]
     runs-on: ubuntu-latest
     permissions:
       contents: write
     outputs:
       sha256: ${{ steps.bundle.outputs.sha256 }}
     env:
-      TAG: ${{ needs.build-and-push.outputs.tag }}
+      TAG: ${{ needs.tag.outputs.value }}
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       GH_REPO: ${{ github.repository }}
     steps:
@@ -101,21 +96,39 @@ jobs:
           gh release view "$TAG" > /dev/null 2>&1 || gh release create "$TAG" --verify-tag --title "$TAG"
           gh release upload "$TAG" "deploy-$TAG.tar.gz" --clobber
 
-  # Each deploy job waits for manual approval through its environment's
-  # protection rule (Settings > Environments), then has the host fetch this
-  # release's deploy bundle and run its deploy.sh, which pins the container to
-  # this release's tag and restarts it. See "Deploying" in the README.
-  deploy-caddy:
-    needs: [build-and-push, package]
+  # Each deploy waits for manual approval through its environment's protection
+  # rule (Settings > Environments), then has the host fetch this release's
+  # deploy bundle and run its deploy.sh once per service, which pins the
+  # container to this release's tag and restarts it. See "Deploying" in the
+  # README.
+  deploy:
+    name: ${{ matrix.environment }}
+    needs: [tag, package]
     runs-on: ubuntu-latest
-    environment: deploy-caddy
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - environment: deploy-caddy
+            services: caddy
+          # Installs this release's compose file, then brings up the three
+          # Authentik services on the AUTHENTIK_VERSION pinned in the host's .env.
+          - environment: deploy-authentik
+            services: authentik
+          # Fluent Bit and VictoriaMetrics only collect logs and metrics, so
+          # they ride along with the config server rather than needing an
+          # approval of their own.
+          - environment: deploy-config
+            services: auth-broker fluent-bit victoria-metrics
+    environment: ${{ matrix.environment }}
     concurrency:
-      group: deploy-caddy
+      group: ${{ matrix.environment }}
       cancel-in-progress: false
     env:
-      TAG: ${{ needs.build-and-push.outputs.tag }}
+      TAG: ${{ needs.tag.outputs.value }}
+      SERVICES: ${{ matrix.services }}
       DEPLOY_TARGET: ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}
-      BUNDLE_URL: ${{ github.server_url }}/${{ github.repository }}/releases/download/${{ needs.build-and-push.outputs.tag }}/deploy-${{ needs.build-and-push.outputs.tag }}.tar.gz
+      BUNDLE_URL: ${{ github.server_url }}/${{ github.repository }}/releases/download/${{ needs.tag.outputs.value }}/deploy-${{ needs.tag.outputs.value }}.tar.gz
       BUNDLE_SHA256: ${{ needs.package.outputs.sha256 }}
     steps:
       - uses: actions/checkout@v7
@@ -130,71 +143,12 @@ jobs:
           chmod 600 ~/.ssh/id_deploy
           printf '%s\n' "$DEPLOY_SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
 
-      - name: Deploy Caddy
-        run: ssh -i ~/.ssh/id_deploy "$DEPLOY_TARGET" bash -s -- caddy "$TAG" "$BUNDLE_URL" "$BUNDLE_SHA256" < scripts/fetch-release.sh
-
-  deploy-authentik:
-    needs: [build-and-push, package]
-    runs-on: ubuntu-latest
-    environment: deploy-authentik
-    concurrency:
-      group: deploy-authentik
-      cancel-in-progress: false
-    env:
-      TAG: ${{ needs.build-and-push.outputs.tag }}
-      DEPLOY_TARGET: ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}
-      BUNDLE_URL: ${{ github.server_url }}/${{ github.repository }}/releases/download/${{ needs.build-and-push.outputs.tag }}/deploy-${{ needs.build-and-push.outputs.tag }}.tar.gz
-      BUNDLE_SHA256: ${{ needs.package.outputs.sha256 }}
-    steps:
-      - uses: actions/checkout@v7
-
-      - name: Set up SSH
-        env:
-          ORACLE_SSH_TOKEN: ${{ secrets.ORACLE_SSH_TOKEN }}
-          DEPLOY_SSH_KNOWN_HOSTS: ${{ secrets.DEPLOY_SSH_KNOWN_HOSTS }}
+      # In order, stopping at the first failure. Deploying the config server
+      # also lists the devices, as a check that the database came through.
+      - name: Deploy ${{ matrix.services }}
         run: |
-          install -m 700 -d ~/.ssh
-          printf '%s\n' "$ORACLE_SSH_TOKEN" > ~/.ssh/id_deploy
-          chmod 600 ~/.ssh/id_deploy
-          printf '%s\n' "$DEPLOY_SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
-
-      # Installs this release's compose file, then brings up the three Authentik
-      # services on the AUTHENTIK_VERSION pinned in the host's .env.
-      - name: Deploy Authentik
-        run: ssh -i ~/.ssh/id_deploy "$DEPLOY_TARGET" bash -s -- authentik "$TAG" "$BUNDLE_URL" "$BUNDLE_SHA256" < scripts/fetch-release.sh
-
-  deploy-config:
-    needs: [build-and-push, package]
-    runs-on: ubuntu-latest
-    environment: deploy-config
-    concurrency:
-      group: deploy-config
-      cancel-in-progress: false
-    env:
-      TAG: ${{ needs.build-and-push.outputs.tag }}
-      DEPLOY_TARGET: ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}
-      BUNDLE_URL: ${{ github.server_url }}/${{ github.repository }}/releases/download/${{ needs.build-and-push.outputs.tag }}/deploy-${{ needs.build-and-push.outputs.tag }}.tar.gz
-      BUNDLE_SHA256: ${{ needs.package.outputs.sha256 }}
-    steps:
-      - uses: actions/checkout@v7
-
-      - name: Set up SSH
-        env:
-          ORACLE_SSH_TOKEN: ${{ secrets.ORACLE_SSH_TOKEN }}
-          DEPLOY_SSH_KNOWN_HOSTS: ${{ secrets.DEPLOY_SSH_KNOWN_HOSTS }}
-        run: |
-          install -m 700 -d ~/.ssh
-          printf '%s\n' "$ORACLE_SSH_TOKEN" > ~/.ssh/id_deploy
-          chmod 600 ~/.ssh/id_deploy
-          printf '%s\n' "$DEPLOY_SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
-
-      - name: Deploy config server
-        run: ssh -i ~/.ssh/id_deploy "$DEPLOY_TARGET" bash -s -- auth-broker "$TAG" "$BUNDLE_URL" "$BUNDLE_SHA256" < scripts/fetch-release.sh
-
-      - name: Check every device is still there
-        run: ssh -i ~/.ssh/id_deploy "$DEPLOY_TARGET" docker exec auth-broker flask --app wsgi devices list
-
-      # Fluent Bit only ships logs, so it rides along with the config server
-      # deploy rather than needing an approval of its own.
-      - name: Deploy Fluent Bit
-        run: ssh -i ~/.ssh/id_deploy "$DEPLOY_TARGET" bash -s -- fluent-bit "$TAG" "$BUNDLE_URL" "$BUNDLE_SHA256" < scripts/fetch-release.sh
+          for service in $SERVICES; do
+            echo "::group::Deploy $service"
+            ssh -i ~/.ssh/id_deploy "$DEPLOY_TARGET" bash -s -- "$service" "$TAG" "$BUNDLE_URL" "$BUNDLE_SHA256" < scripts/fetch-release.sh
+            echo "::endgroup::"
+          done

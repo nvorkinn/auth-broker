@@ -9,12 +9,13 @@ updates:
     directory: "/"
     schedule:
       interval: "daily"
+  # Every Dockerfile: the broker's and each infra image's base.
   - package-ecosystem: "docker"
-    directory: "/caddy/"
-    schedule:
-      interval: "daily"
-  - package-ecosystem: "docker"
-    directory: "/"
+    directories:
+      - "/"
+      - "/caddy"
+      - "/fluent-bit"
+      - "/victoria-metrics"
     schedule:
       interval: "daily"
   - package-ecosystem: "docker-compose"
