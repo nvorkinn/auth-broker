@@ -47,7 +47,7 @@ jobs:
         run: docker build -t auth-broker-caddy caddy
 
       - name: Validate Caddyfile
-        run: docker run --rm auth-broker-caddy caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
+        run: docker run --rm --entrypoint /usr/bin/caddy auth-broker-caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
 
   fluent-bit:
     runs-on: ubuntu-latest
@@ -58,4 +58,4 @@ jobs:
         run: docker build -t auth-broker-fluent-bit fluent-bit
 
       - name: Validate Fluent Bit config
-        run: docker run --rm --entrypoint /fluent-bit/bin/fluent-bit auth-broker-fluent-bit --dry-run -c /fluent-bit/etc/fluent-bit.conf
+        run: docker run --rm --entrypoint /fluent-bit/bin/fluent-bit auth-broker-fluent-bit --dry-run --config /fluent-bit/etc/fluent-bit.conf
