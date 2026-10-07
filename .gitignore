@@ -1,6 +1,9 @@
-.env
-caddy.env
-authentik.env
+# Decrypted env files, on the host or for local development. The encrypted
+# copies in secrets/ are committed.
+/.env
+/broker.env
+/caddy.env
+/authentik.env
 data/
 __pycache__/
 *.pyc
