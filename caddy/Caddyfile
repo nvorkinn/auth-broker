@@ -32,9 +32,20 @@ logs.nikolaivorkinn.com {
 	}
 }
 
-# VictoriaMetrics, the victoria-metrics compose service.
+# VictoriaMetrics, the victoria-metrics compose service. Pushes use the same
+# ingest token as logs.
 metrics.nikolaivorkinn.com {
-	import admin_only 127.0.0.1:8428
+	@ingest {
+		path /api/v1/write /api/v1/import /api/v1/import/* /influx/*
+		header Authorization "Bearer {$LOGS_INGEST_TOKEN}"
+	}
+	handle @ingest {
+		reverse_proxy 127.0.0.1:8428
+	}
+
+	handle {
+		import admin_only 127.0.0.1:8428
+	}
 }
 
 sso.nikolaivorkinn.com {

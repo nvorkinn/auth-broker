@@ -44,8 +44,7 @@ services:
       - caddy_data:/data
       - caddy_config:/config
 
-  # Ships every container's logs to VictoriaLogs on the host (127.0.0.1:9428),
-  # and every metric to VictoriaMetrics (127.0.0.1:8428).
+  # Ships every container's logs to VictoriaLogs on the host (127.0.0.1:9428).
   fluent-bit:
     # Fluent Bit with this repo's fluent-bit/ config baked in.
     <<: *release-image
@@ -56,10 +55,10 @@ services:
       - /var/lib/docker/containers:/var/lib/docker/containers:ro
       - fluent-bit-state:/state
 
-  # Metrics. Upstream's single-node VictoriaMetrics; it scrapes nothing, Fluent
-  # Bit forwards every metric to it. It listens on 127.0.0.1:8428 (host
-  # networking, like Fluent Bit and Caddy) and Caddy serves its UI to admins at
-  # metrics.nikolaivorkinn.com.
+  # Metrics. Upstream's single-node VictoriaMetrics; it scrapes nothing, metrics
+  # are pushed to it. It listens on 127.0.0.1:8428 (host networking, like
+  # Fluent Bit and Caddy) and Caddy serves it at metrics.nikolaivorkinn.com:
+  # ingest with the ingest token, the UI to admins.
   victoria-metrics:
     <<: *release-image
     image: ghcr.io/nvorkinn/auth-broker-victoria-metrics:${VICTORIA_METRICS_VERSION:-latest}

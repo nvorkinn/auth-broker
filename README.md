@@ -441,8 +441,7 @@ release, give it the same visibility as the `auth-broker` package in its package
 ### Logs
 
 The compose file also runs Fluent Bit, which tails every container's Docker
-log and ships it to VictoriaLogs on the host (`127.0.0.1:9428`), and forwards
-metrics to VictoriaMetrics (see [Metrics](#metrics)). Its config
+log and ships it to VictoriaLogs on the host (`127.0.0.1:9428`). Its config
 (`fluent-bit/`) is baked into `ghcr.io/nvorkinn/auth-broker-fluent-bit:<tag>`,
 released alongside the other two images, so nothing needs copying to the host.
 The `deploy-config` job also deploys it, pinning `FLUENT_BIT_VERSION` in `.env`. Query in
@@ -452,15 +451,14 @@ VictoriaLogs with e.g. `{container_id="abc123def456"}`; `docker ps` maps IDs to 
 
 The `victoria-metrics` compose service is upstream's single-node
 VictoriaMetrics (`ghcr.io/nvorkinn/auth-broker-victoria-metrics:<tag>`). It
-scrapes nothing itself: Fluent Bit collects every metric (its own, and
-VictoriaLogs' and VictoriaMetrics' `/metrics` every minute) and forwards them
-to `/api/v1/write`. It keeps a month of data (upstream's default) in the
+scrapes nothing; metrics are pushed to it. It keeps a month of data (upstream's default) in the
 named volume `victoria_metrics_data`, with a 512 MB memory limit. It listens on
-`127.0.0.1:8428` only; Caddy serves its UI (`/vmui`) and API to admins at
-`metrics.nikolaivorkinn.com`, behind the same Authentik login as the logs
-site. The `deploy-config` job deploys it, pinning `VICTORIA_METRICS_VERSION`
-in `.env`. To collect something else, add a Fluent Bit input tagged
-`metrics.*` to `fluent-bit/fluent-bit.conf` and release.
+`127.0.0.1:8428` only. Caddy serves it at `metrics.nikolaivorkinn.com`, like
+the logs site: the push endpoints (`/api/v1/write`, `/api/v1/import/*`,
+`/influx/*`) take `Authorization: Bearer <LOGS_INGEST_TOKEN>`, the same ingest
+token as logs, and everything else (the UI at `/vmui` and the query API)
+needs the Authentik admin login. The `deploy-config` job deploys it, pinning
+`VICTORIA_METRICS_VERSION` in `.env`.
 
 ## Not built yet
 
