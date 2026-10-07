@@ -4,7 +4,12 @@
 # /opt/auth-broker/releases/<tag>/ and runs this copy, which installs the
 # bundled docker-compose.yml, pins one compose service to the tag in .env, then
 # pulls and restarts just that service.
-# Usage: deploy.sh <auth-broker|caddy|fluent-bit> <tag>
+# Usage: deploy.sh <auth-broker|caddy|fluent-bit|authentik> <tag>
+#
+# authentik is the three Authentik services. Their image is upstream's, pinned
+# by hand with AUTHENTIK_VERSION in .env (one minor version at a time), so
+# they aren't pinned to the release tag: this installs the compose file and
+# brings them up on whatever is pinned.
 set -euo pipefail
 
 service="$1"
@@ -12,10 +17,13 @@ tag="$2"
 bundle="$(cd "$(dirname "$0")" && pwd)"
 cd "${DEPLOY_DIR:-/opt/auth-broker}"
 
+services=("$service")
+var=
 case "$service" in
   auth-broker) var=AUTH_BROKER_VERSION ;;
   caddy) var=CADDY_VERSION ;;
   fluent-bit) var=FLUENT_BIT_VERSION ;;
+  authentik) services=(authentik-postgresql authentik-server authentik-worker) ;;
   *) echo "unknown service: $service" >&2; exit 1 ;;
 esac
 
@@ -35,14 +43,22 @@ fi
   # Copy then mv, so compose never reads a half-written file.
   cp "$bundle/docker-compose.yml" docker-compose.yml.tmp
   mv docker-compose.yml.tmp docker-compose.yml
-  if grep -q "^$var=" .env; then
-    sed -i "s/^$var=.*/$var=$tag/" .env
-  else
-    echo "$var=$tag" >> .env
+  if [ -n "$var" ]; then
+    if grep -q "^$var=" .env; then
+      sed -i "s/^$var=.*/$var=$tag/" .env
+    else
+      echo "$var=$tag" >> .env
+    fi
   fi
 ) 9>.env.lock
-echo "Installed $tag's docker-compose.yml and pinned $var=$tag in .env"
+echo "Installed $tag's docker-compose.yml${var:+ and pinned $var=$tag in .env}"
 
-docker compose pull "$service"
-docker compose up -d --no-deps --force-recreate "$service"
-docker compose ps "$service"
+docker compose pull "${services[@]}"
+if [ -n "$var" ]; then
+  docker compose up -d --no-deps --force-recreate "${services[@]}"
+else
+  # Recreates only what changed, so a release that doesn't touch Authentik
+  # leaves its database running.
+  docker compose up -d --wait --wait-timeout 600 "${services[@]}"
+fi
+docker compose ps "${services[@]}"

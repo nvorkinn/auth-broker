@@ -29,3 +29,7 @@ logs.nikolaivorkinn.com {
         respond 401
     }
 }
+sso.nikolaivorkinn.com {
+	# Authentik, published on loopback only.
+	reverse_proxy 127.0.0.1:9000
+}
