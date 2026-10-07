@@ -38,24 +38,24 @@ jobs:
           files: coverage.xml
           disable_search: true
 
-  caddy:
+  # Builds each container image and checks the config baked into it. Both
+  # images have their program as the entrypoint, so `check` is just its args.
+  image:
+    name: ${{ matrix.image }}
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image: caddy
+            check: validate --config /etc/caddy/Caddyfile --adapter caddyfile
+          - image: fluent-bit
+            check: --dry-run --config /fluent-bit/etc/fluent-bit.conf
     steps:
       - uses: actions/checkout@v7
 
-      - name: Build Caddy image
-        run: docker build -t auth-broker-caddy caddy
+      - name: Build image
+        run: docker build -t auth-broker-${{ matrix.image }} ${{ matrix.image }}
 
-      - name: Validate Caddyfile
-        run: docker run --rm --entrypoint /usr/bin/caddy auth-broker-caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
-
-  fluent-bit:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-
-      - name: Build Fluent Bit image
-        run: docker build -t auth-broker-fluent-bit fluent-bit
-
-      - name: Validate Fluent Bit config
-        run: docker run --rm --entrypoint /fluent-bit/bin/fluent-bit auth-broker-fluent-bit --dry-run --config /fluent-bit/etc/fluent-bit.conf
+      - name: Check config
+        run: docker run --rm auth-broker-${{ matrix.image }} ${{ matrix.check }}
