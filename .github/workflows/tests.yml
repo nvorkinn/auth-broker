@@ -51,7 +51,7 @@ jobs:
           - image: caddy
             check: validate --config /etc/caddy/Caddyfile --adapter caddyfile
           - image: fluent-bit
-            check: --dry-run --config /fluent-bit/etc/fluent-bit.conf
+            check: --dry-run --config /fluent-bit/etc/fluent-bit.yaml
     steps:
       - uses: actions/checkout@v7
 
