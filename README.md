@@ -324,21 +324,30 @@ service, name it: `docker compose up -d caddy`.
 
 ### Deploying a release from GitHub Actions
 
-After the images are pushed, `release.yml` has two deploy jobs, `deploy-caddy`
-and `deploy-config`. Each one waits, paused, until someone approves it on the
-workflow run page, and each is approved on its own. An approved job SSHes into
-the host and runs `scripts/deploy.sh`, which:
+After the images are pushed, `release.yml` packages the release's deploy bundle,
+`deploy-<tag>.tar.gz` (this release's `docker-compose.yml` and
+`scripts/deploy.sh`), and attaches it to the GitHub Release. Then it has two
+deploy jobs, `deploy-caddy` and `deploy-config`. Each one waits, paused, until
+someone approves it on the workflow run page, and each is approved on its own.
+An approved job SSHes into the host and runs `scripts/fetch-release.sh`, which
+downloads the bundle from the release into `/opt/auth-broker/releases/<tag>/`
+(checking its SHA-256, and skipping the download when that release is already
+there) and runs the bundle's own `deploy.sh`, which:
 
-1. for the config server, backs up the database to
+1. installs the bundle's `docker-compose.yml` in `/opt/auth-broker/` (replacing
+   the host's copy, so make compose changes in the repo, not on the host),
+2. for the config server, backs up the database to
    `data/broker.db.bak-<tag>` (SQLite's backup API, safe while running),
-2. pins `AUTH_BROKER_VERSION` or `CADDY_VERSION` in `/opt/auth-broker/.env` to
+3. pins `AUTH_BROKER_VERSION` or `CADDY_VERSION` in `/opt/auth-broker/.env` to
    the release's tag (never `latest`),
-3. pulls that image and recreates just that container
+4. pulls that image and recreates just that container
    (`docker compose up -d --no-deps --force-recreate <service>`).
 
 `deploy-config` then lists the devices, as a check that the database came
-through, and deploys Fluent Bit the same way (`FLUENT_BIT_VERSION`). Re-running a job redeploys the same tag; to roll back, re-run the
-deploy jobs of the older release's workflow run.
+through, and deploys Fluent Bit the same way (`FLUENT_BIT_VERSION`). Re-running
+a job redeploys the same tag; to roll back, re-run the deploy jobs of the older
+release's workflow run, which deploys that release's own bundle. Old releases
+stay under `releases/`; they're a few KB each.
 
 One-time setup in the repo's **Settings**:
 
@@ -350,16 +359,17 @@ One-time setup in the repo's **Settings**:
   read them) or once under **Secrets and variables > Actions**:
   - `DEPLOY_HOST`: the instance's public IP or hostname.
   - `DEPLOY_USER`: the SSH user, e.g. `ubuntu`. It must be able to run
-    `docker` (in the `docker` group) and write `/opt/auth-broker/.env`.
+    `docker` (in the `docker` group) and own `/opt/auth-broker/` and its `.env`.
   - `ORACLE_SSH_TOKEN`: a private key, made just for this
     (`ssh-keygen -t ed25519 -f deploy -N ''`), whose public half is in that
     user's `~/.ssh/authorized_keys`.
   - `DEPLOY_SSH_KNOWN_HOSTS`: the output of `ssh-keyscan <host>`, so the job
     only talks to your host.
 
-The host still needs the one-time setup above (compose file, `.env`, and the
-move off the systemd Caddy) before the first automated deploy. The jobs don't
-copy `docker-compose.yml`; copy it by hand when it changes.
+The host still needs the one-time setup above (`.env`, `caddy.env`, and the
+move off the systemd Caddy) before the first automated deploy. After that the
+jobs keep `docker-compose.yml` in step with each release. The host needs
+`curl`, which Ubuntu has.
 
 To upgrade by hand instead:
 
