@@ -6,4 +6,4 @@ creation_rules:
   - path_regex: ^secrets/[^/]+\.env$
     age: >-
       age10ekvquu5g773glj5a24ht3uaegdm6atkv7el8nmql4jyvtr3fgeqyxvfuy,
-      HOST_AGE_PUBLIC_KEY
+      age1dwge8qknrx7sxee9yg6u5yn2fgpzd2hqrv3gna7x0d937s4a6qysvud3x0
