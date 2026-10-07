@@ -99,6 +99,38 @@ jobs:
       - name: Deploy Caddy
         run: ssh -i ~/.ssh/id_deploy "$DEPLOY_TARGET" bash -s -- caddy "$TAG" < scripts/deploy.sh
 
+  deploy-authentik:
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    environment: deploy-authentik
+    concurrency:
+      group: deploy-authentik
+      cancel-in-progress: false
+    env:
+      TAG: ${{ needs.build-and-push.outputs.tag }}
+      DEPLOY_TARGET: ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up SSH
+        env:
+          ORACLE_SSH_TOKEN: ${{ secrets.ORACLE_SSH_TOKEN }}
+          DEPLOY_SSH_KNOWN_HOSTS: ${{ secrets.DEPLOY_SSH_KNOWN_HOSTS }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$ORACLE_SSH_TOKEN" > ~/.ssh/id_deploy
+          chmod 600 ~/.ssh/id_deploy
+          printf '%s\n' "$DEPLOY_SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
+
+      - name: Deploy Postgres
+        run: ssh -i ~/.ssh/id_deploy "$DEPLOY_TARGET" bash -s -- postgresql "$TAG" < scripts/deploy.sh
+
+      - name: Deploy Authentik Server
+        run: ssh -i ~/.ssh/id_deploy "$DEPLOY_TARGET" bash -s -- authentik-server "$TAG" < scripts/deploy.sh
+
+      - name: Deploy Authentik Worker
+        run: ssh -i ~/.ssh/id_deploy "$DEPLOY_TARGET" bash -s -- authentik-worker "$TAG" < scripts/deploy.sh
+
   deploy-config:
     needs: build-and-push
     runs-on: ubuntu-latest

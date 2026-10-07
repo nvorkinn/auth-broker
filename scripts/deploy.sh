@@ -12,6 +12,9 @@ case "$service" in
   auth-broker) var=AUTH_BROKER_VERSION ;;
   caddy) var=CADDY_VERSION ;;
   fluent-bit) var=FLUENT_BIT_VERSION ;;
+  postgresql) var=16-alpine ;;
+  authentik-server) var=AUTHENTIK_VERSION ;;
+  authentik-worker) var=AUTHENTIK_VERSION ;;
   *) echo "unknown service: $service" >&2; exit 1 ;;
 esac
 
