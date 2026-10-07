@@ -291,8 +291,7 @@ side, and pushes each with the release tag (and `:latest`):
 - `ghcr.io/nvorkinn/auth-broker-fluent-bit:<tag>`: Fluent Bit with this repo's
   `fluent-bit/` config baked in (see [Logs](#logs)).
 - `ghcr.io/nvorkinn/auth-broker-victoria-metrics:<tag>`: single-node
-  VictoriaMetrics with this repo's `victoria-metrics/` config baked in (see
-  [Metrics](#metrics)).
+  VictoriaMetrics, listening on loopback only (see [Metrics](#metrics)).
 
 Deploying needs Docker Compose v2 (the `docker compose` subcommand). Ubuntu's
 `docker.io` package doesn't include it; install it with
@@ -442,7 +441,8 @@ release, give it the same visibility as the `auth-broker` package in its package
 ### Logs
 
 The compose file also runs Fluent Bit, which tails every container's Docker
-log and ships it to VictoriaLogs on the host (`127.0.0.1:9428`). Its config
+log and ships it to VictoriaLogs on the host (`127.0.0.1:9428`), and forwards
+metrics to VictoriaMetrics (see [Metrics](#metrics)). Its config
 (`fluent-bit/`) is baked into `ghcr.io/nvorkinn/auth-broker-fluent-bit:<tag>`,
 released alongside the other two images, so nothing needs copying to the host.
 The `deploy-config` job also deploys it, pinning `FLUENT_BIT_VERSION` in `.env`. Query in
@@ -451,14 +451,16 @@ VictoriaLogs with e.g. `{container_id="abc123def456"}`; `docker ps` maps IDs to 
 ### Metrics
 
 The `victoria-metrics` compose service is upstream's single-node
-VictoriaMetrics, with `victoria-metrics/scrape.yml` baked into
-`ghcr.io/nvorkinn/auth-broker-victoria-metrics:<tag>`. It scrapes itself and
-VictoriaLogs every minute and keeps a month of data (upstream's default) in the
+VictoriaMetrics (`ghcr.io/nvorkinn/auth-broker-victoria-metrics:<tag>`). It
+scrapes nothing itself: Fluent Bit collects every metric (its own, and
+VictoriaLogs' and VictoriaMetrics' `/metrics` every minute) and forwards them
+to `/api/v1/write`. It keeps a month of data (upstream's default) in the
 named volume `victoria_metrics_data`, with a 512 MB memory limit. It listens on
 `127.0.0.1:8428` only; Caddy serves its UI (`/vmui`) and API to admins at
 `metrics.nikolaivorkinn.com`, behind the same Authentik login as the logs
 site. The `deploy-config` job deploys it, pinning `VICTORIA_METRICS_VERSION`
-in `.env`. To scrape something else, add it to `scrape.yml` and release.
+in `.env`. To collect something else, add a Fluent Bit input tagged
+`metrics.*` to `fluent-bit/fluent-bit.conf` and release.
 
 ## Not built yet
 
