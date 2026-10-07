@@ -39,8 +39,8 @@ jobs:
           files: coverage.xml
           disable_search: true
 
-  # Builds each container image and checks the config baked into it. Both
-  # images have their program as the entrypoint, so `check` is just its args.
+  # Builds each container image and checks the config baked into it. Every
+  # image has its program as the entrypoint, so `check` is just its args.
   image:
     name: ${{ matrix.image }}
     runs-on: ubuntu-latest
@@ -52,6 +52,8 @@ jobs:
             check: validate --config /etc/caddy/Caddyfile --adapter caddyfile
           - image: fluent-bit
             check: --dry-run --config /fluent-bit/etc/fluent-bit.conf
+          - image: victoria-metrics
+            check: -promscrape.config=/etc/victoria-metrics/scrape.yml -promscrape.config.dryRun
     steps:
       - uses: actions/checkout@v7
 

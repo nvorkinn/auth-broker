@@ -1,9 +1,26 @@
+# Shared by the images this repo releases (ghcr.io/nvorkinn/auth-broker*),
+# each pinned to a release tag in .env by deploy.sh.
+x-release-image: &release-image
+  pull_policy: always
+  restart: unless-stopped
+
+# Shared by the Authentik server and worker, which run the same image.
+x-authentik: &authentik
+  image: ghcr.io/goauthentik/server:${AUTHENTIK_VERSION:-2026.8.3}
+  restart: unless-stopped
+  env_file: authentik.env
+  depends_on:
+    authentik-postgresql:
+      condition: service_healthy
+  shm_size: 512mb
+  volumes:
+    - authentik_media:/data
+
 services:
   auth-broker:
+    <<: *release-image
     image: ghcr.io/nvorkinn/auth-broker:${AUTH_BROKER_VERSION:-latest}
     container_name: auth-broker
-    pull_policy: always
-    restart: unless-stopped
     ports:
       - "127.0.0.1:5000:5000"
     volumes:
@@ -11,15 +28,15 @@ services:
     env_file: .env
 
   caddy:
+    <<: *release-image
     image: ghcr.io/nvorkinn/auth-broker-caddy:${CADDY_VERSION:-latest}
     container_name: caddy
-    pull_policy: always
-    restart: unless-stopped
     # Caddy's own secrets, kept apart from the broker's .env.
     env_file: caddy.env
     # Host networking, so 127.0.0.1 in the Caddyfile is the host: VictoriaLogs
-    # (127.0.0.1:9428) runs there outside compose, and the broker is published
-    # on 127.0.0.1:5000. Caddy binds 80/443 (and UDP 443) on the host directly.
+    # (127.0.0.1:9428) runs there outside compose, the broker is published on
+    # 127.0.0.1:5000, and VictoriaMetrics listens on 127.0.0.1:8428. Caddy binds
+    # 80/443 (and UDP 443) on the host directly.
     network_mode: host
     volumes:
       # Certificates and ACME account. Losing this makes Caddy re-request every
@@ -30,14 +47,28 @@ services:
   # Ships every container's logs to VictoriaLogs on the host (127.0.0.1:9428).
   fluent-bit:
     # Fluent Bit with this repo's fluent-bit/ config baked in.
+    <<: *release-image
     image: ghcr.io/nvorkinn/auth-broker-fluent-bit:${FLUENT_BIT_VERSION:-latest}
     container_name: fluent-bit
-    pull_policy: always
-    restart: unless-stopped
     network_mode: host
     volumes:
       - /var/lib/docker/containers:/var/lib/docker/containers:ro
       - fluent-bit-state:/state
+
+  # Metrics. Upstream's single-node VictoriaMetrics with this repo's
+  # victoria-metrics/scrape.yml baked in; it listens on 127.0.0.1:8428 (host
+  # networking, so it can scrape VictoriaLogs on the host) and Caddy serves its
+  # UI to admins at metrics.nikolaivorkinn.com.
+  victoria-metrics:
+    <<: *release-image
+    image: ghcr.io/nvorkinn/auth-broker-victoria-metrics:${VICTORIA_METRICS_VERSION:-latest}
+    container_name: victoria-metrics
+    network_mode: host
+    # The host's 6 GB is shared with Authentik. VictoriaMetrics sizes its caches
+    # from this limit (60% of it by default).
+    mem_limit: 512m
+    volumes:
+      - victoria_metrics_data:/victoria-metrics-data
 
   # Authentik (SSO with passkeys). All three read their secrets from
   # authentik.env, kept apart from the broker's .env like caddy.env is.
@@ -60,34 +91,18 @@ services:
       - authentik_db:/var/lib/postgresql/data
 
   authentik-server:
-    image: ghcr.io/goauthentik/server:${AUTHENTIK_VERSION:-2026.8.3}
+    <<: *authentik
     container_name: authentik-server
     command: server
-    restart: unless-stopped
-    env_file: authentik.env
-    depends_on:
-      authentik-postgresql:
-        condition: service_healthy
     # Loopback only: Caddy (host networking) is the one way in, at
     # sso.nikolaivorkinn.com.
     ports:
       - "127.0.0.1:9000:9000"
-    shm_size: 512mb
-    volumes:
-      - authentik_media:/data
 
   authentik-worker:
-    image: ghcr.io/goauthentik/server:${AUTHENTIK_VERSION:-2026.8.3}
+    <<: *authentik
     container_name: authentik-worker
     command: worker
-    restart: unless-stopped
-    env_file: authentik.env
-    depends_on:
-      authentik-postgresql:
-        condition: service_healthy
-    shm_size: 512mb
-    volumes:
-      - authentik_media:/data
 
 volumes:
   # Fixed names so the volumes don't depend on the compose project (directory) name.
@@ -100,3 +115,5 @@ volumes:
     name: authentik_db
   authentik_media:
     name: authentik_media
+  victoria_metrics_data:
+    name: victoria_metrics_data
