@@ -1,12 +1,15 @@
 #!/usr/bin/env bash
-# Runs on the deploy host (fed over ssh by release.yml): installs the release's
-# docker-compose.yml if the job copied one over, pins one compose service to a
-# release tag in .env, then pulls and restarts just that service.
+# Ships inside each release's deploy bundle (deploy-<tag>.tar.gz) next to that
+# release's docker-compose.yml. release.yml unpacks the bundle on the host into
+# /opt/auth-broker/releases/<tag>/ and runs this copy, which installs the
+# bundled docker-compose.yml, pins one compose service to the tag in .env, then
+# pulls and restarts just that service.
 # Usage: deploy.sh <auth-broker|caddy|fluent-bit> <tag>
 set -euo pipefail
 
 service="$1"
 tag="$2"
+bundle="$(cd "$(dirname "$0")" && pwd)"
 cd "${DEPLOY_DIR:-/opt/auth-broker}"
 
 case "$service" in
@@ -29,19 +32,16 @@ fi
 # The two deploy jobs can run at once and both edit .env and the compose file.
 (
   flock 9
-  # The job scp's the release's compose file under its own name; mv swaps it in
-  # atomically. Both jobs of a release ship the same file.
-  if [ -f "docker-compose.yml.incoming-$service" ]; then
-    mv "docker-compose.yml.incoming-$service" docker-compose.yml
-    echo "Installed this release's docker-compose.yml"
-  fi
+  # Copy then mv, so compose never reads a half-written file.
+  cp "$bundle/docker-compose.yml" docker-compose.yml.tmp
+  mv docker-compose.yml.tmp docker-compose.yml
   if grep -q "^$var=" .env; then
     sed -i "s/^$var=.*/$var=$tag/" .env
   else
     echo "$var=$tag" >> .env
   fi
 ) 9>.env.lock
-echo "Pinned $var=$tag in .env"
+echo "Installed $tag's docker-compose.yml and pinned $var=$tag in .env"
 
 docker compose pull "$service"
 docker compose up -d --no-deps --force-recreate "$service"
