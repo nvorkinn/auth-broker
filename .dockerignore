@@ -3,6 +3,7 @@
 .idea/
 data/
 tests/
-.env
+*.env
+secrets/
 *.pyc
 __pycache__/

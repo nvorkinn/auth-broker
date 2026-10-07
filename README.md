@@ -141,7 +141,7 @@ it puts it in the pool as a new device.
 `GET /api/status/devices` is a read-only view of every device, meant for a
 Home Assistant RESTful sensor. HA polls it from the home network, so it also
 covers devices on other people's Wi-Fi, which MQTT can't reach. It's off
-(404) unless `STATUS_TOKEN` is set in `.env`, and then needs
+(404) unless `STATUS_TOKEN` is set in `secrets/broker.env`, and then needs
 `Authorization: Bearer <STATUS_TOKEN>`. It only reads: resetting or deleting a
 device stays with the admin CLI.
 
@@ -198,8 +198,9 @@ broker/
 ```bash
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
-cp .env.example .env  # fill in Spotify app credentials + a random FLASK_SECRET_KEY
-export $(cat .env | xargs)
+cp secrets/broker.env.example .env  # fill in Spotify app credentials + a random FLASK_SECRET_KEY
+export SPOTIFY_REDIRECT_URI=https://auth.nikolaivorkinn.com/auth/spotify/callback
+export $(grep -v '^#' .env | xargs)
 FLASK_DEBUG=1 python wsgi.py  # debug mode only when asked for; never on a reachable host
 ```
 
@@ -297,11 +298,11 @@ Deploying needs Docker Compose v2 (the `docker compose` subcommand). Ubuntu's
 `docker.io` package doesn't include it; install it with
 `sudo apt install docker-compose-v2`.
 
-On the Oracle Cloud instance, copy `docker-compose.yml` into
-`/opt/auth-broker/` next to the `.env` file and `data/` directory. Caddy reads its
-own secrets from `caddy.env` in the same directory, kept apart from the broker's
-`.env`: create it from `caddy.env.example` first, or the `caddy` service won't
-start. Pin all four
+On the Oracle Cloud instance, `/opt/auth-broker/` holds `docker-compose.yml`,
+the `.env` file and the `data/` directory. Each service's secrets are in its
+own env file next to them (`broker.env`, `caddy.env`, `authentik.env`), which
+the deploy jobs decrypt from the repo (see [Secrets](#secrets)); don't edit
+them on the host. Pin all four
 versions in that `.env` (compose reads it from there) rather than tracking
 `:latest`, so a restart never picks up a release you didn't choose. They're
 released together, so they're normally the same tag:
@@ -338,13 +339,16 @@ downloads the bundle from the release into `/opt/auth-broker/releases/<tag>/`
 (checking its SHA-256, and skipping the download when that release is already
 there) and runs the bundle's own `deploy.sh`, which:
 
-1. installs the bundle's `docker-compose.yml` in `/opt/auth-broker/` (replacing
+1. decrypts the bundle's `secrets/*.env` into `/opt/auth-broker/` (see
+   [Secrets](#secrets)),
+2. installs the bundle's `docker-compose.yml` in `/opt/auth-broker/` (replacing
    the host's copy, so make compose changes in the repo, not on the host),
-2. for the config server, backs up the database to
+3. for the config server, backs up the database to
    `data/broker.db.bak-<tag>` (SQLite's backup API, safe while running),
-3. pins that image's `<SERVICE>_VERSION` (e.g. `CADDY_VERSION`) in
-   `/opt/auth-broker/.env` to the release's tag (never `latest`),
-4. pulls that image and recreates just that container
+4. pins that image's `<SERVICE>_VERSION` (e.g. `CADDY_VERSION`) in
+   `/opt/auth-broker/.env` to the release's tag (never `latest`), keeping
+   only the `*_VERSION` lines there,
+5. pulls that image and recreates just that container
    (`docker compose up -d --no-deps --force-recreate <service>`).
 
 Deploying the config server then lists the devices, as a check that the
@@ -372,8 +376,8 @@ One-time setup in the repo's **Settings**:
   - `DEPLOY_SSH_KNOWN_HOSTS`: the output of `ssh-keyscan <host>`, so the job
     only talks to your host.
 
-The host still needs the one-time setup above (`.env`, `caddy.env`, and the
-move off the systemd Caddy) before the first automated deploy. After that the
+The host also needs its age key, `/opt/auth-broker/age.key` (see
+[Secrets](#secrets)), before the first automated deploy. After that the
 jobs keep `docker-compose.yml` in step with each release. The host needs
 `curl`, which Ubuntu has.
 
@@ -392,6 +396,41 @@ docker exec auth-broker flask --app wsgi devices list   # 6. check every device 
 The `./data` volume mount is what makes device/token data (SQLite at `data/broker.db`,
 override with `BROKER_DB_PATH`) survive a container restart or image update —
 back that directory up.
+
+### Secrets
+
+Every secret the host needs is in `secrets/`, encrypted with
+[SOPS](https://github.com/getsops/sops) and age, one file per service:
+`broker.env`, `caddy.env` and `authentik.env`. The `.example` files next to
+them list what each one holds. `.sops.yaml` lists who can decrypt them: your
+laptop's age key, to edit them, and the host's, to deploy them. Each release
+ships the encrypted files in its deploy bundle, and `deploy.sh` decrypts all of
+them on every deploy into `/opt/auth-broker/<name>.env` (mode 600), with
+`/opt/auth-broker/age.key` and a pinned, checksum-checked `sops` it downloads
+into `/opt/auth-broker/bin/`. The Tests workflow fails if any value in
+`secrets/` isn't encrypted.
+
+To change a secret, from a checkout on your laptop:
+
+```bash
+sops secrets/broker.env    # opens the decrypted file in $EDITOR, re-encrypts on save
+```
+
+then commit, release and deploy as usual. Settings that aren't secret (cookie
+domain, redirect URI, database names) are in `docker-compose.yml`.
+
+One-time setup:
+
+1. On your laptop, `brew install sops age` and
+   `age-keygen -o ~/.config/sops/age/keys.txt`. Keep a copy of that file
+   somewhere safe, like a password manager: it is the only key that can edit
+   the secrets, so it is also their backup.
+2. On the host, `sudo apt install age` and
+   `age-keygen -o /opt/auth-broker/age.key && chmod 600 /opt/auth-broker/age.key`
+   as the deploy user.
+3. Put both public keys (`age1...`) in `.sops.yaml`. When a key changes, e.g.
+   a rebuilt host, update `.sops.yaml` and run `sops updatekeys secrets/*.env`
+   from your laptop.
 
 ### Caddy
 

@@ -39,6 +39,24 @@ jobs:
           files: coverage.xml
           disable_search: true
 
+  # Everything in secrets/ is committed, so make sure no value in it is plaintext.
+  secrets:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Check secrets are encrypted
+        run: |
+          status=0
+          for f in secrets/*.env; do
+            # SOPS's dotenv format: every value is ENC[...], plus its own sops_* metadata.
+            if ! grep -q '^sops_mac=' "$f" || grep -vE '^(#|$|sops_)' "$f" | grep -qv '=ENC\['; then
+              echo "::error file=$f::not fully SOPS-encrypted; encrypt it with sops before committing"
+              status=1
+            fi
+          done
+          exit $status
+
   # Builds each container image and checks the config baked into it. Every
   # image has its program as the entrypoint, so `check` is just its args.
   image:

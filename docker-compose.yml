@@ -9,6 +9,10 @@ x-authentik: &authentik
   image: ghcr.io/goauthentik/server:${AUTHENTIK_VERSION:-2026.8.3}
   restart: unless-stopped
   env_file: authentik.env
+  environment:
+    AUTHENTIK_POSTGRESQL__HOST: authentik-postgresql
+    AUTHENTIK_POSTGRESQL__NAME: authentik
+    AUTHENTIK_POSTGRESQL__USER: authentik
   depends_on:
     authentik-postgresql:
       condition: service_healthy
@@ -25,13 +29,21 @@ services:
       - "127.0.0.1:5000:5000"
     volumes:
       - ./data:/app/data
-    env_file: .env
+    # Secrets, decrypted from secrets/broker.env by deploy.sh.
+    env_file: broker.env
+    environment:
+      # The leading dot shares the pairing cookie with every subdomain (e.g. for
+      # /api/logging_ui/verify behind logs.).
+      SESSION_COOKIE_DOMAIN: .nikolaivorkinn.com
+      SESSION_COOKIE_SECURE: "true"
+      SESSION_COOKIE_SAMESITE: Lax
+      SPOTIFY_REDIRECT_URI: https://auth.nikolaivorkinn.com/auth/spotify/callback
 
   caddy:
     <<: *release-image
     image: ghcr.io/nvorkinn/auth-broker-caddy:${CADDY_VERSION:-latest}
     container_name: caddy
-    # Caddy's own secrets, kept apart from the broker's .env.
+    # Caddy's own secrets, decrypted from secrets/caddy.env by deploy.sh.
     env_file: caddy.env
     # Host networking, so 127.0.0.1 in the Caddyfile is the host: VictoriaLogs
     # (127.0.0.1:9428) runs there outside compose, the broker is published on
@@ -71,7 +83,7 @@ services:
       - victoria_metrics_data:/victoria-metrics-data
 
   # Authentik (SSO with passkeys). All three read their secrets from
-  # authentik.env, kept apart from the broker's .env like caddy.env is.
+  # authentik.env, decrypted from secrets/authentik.env by deploy.sh.
   # AUTHENTIK_VERSION in .env pins the upstream release; bump it by hand,
   # one minor version at a time.
   authentik-postgresql:
@@ -79,6 +91,9 @@ services:
     container_name: authentik-postgresql
     restart: unless-stopped
     env_file: authentik.env
+    environment:
+      POSTGRES_DB: authentik
+      POSTGRES_USER: authentik
     healthcheck:
       # $$ so the container's shell expands these, not Compose.
       test: ["CMD-SHELL", "pg_isready -d $${POSTGRES_DB} -U $${POSTGRES_USER}"]

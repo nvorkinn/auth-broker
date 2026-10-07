@@ -66,7 +66,8 @@ jobs:
             ${{ env.IMAGE }}:latest
 
   # The deploy bundle is what the host deploys from: this release's
-  # docker-compose.yml and deploy.sh, attached to the GitHub Release.
+  # docker-compose.yml, deploy.sh and SOPS-encrypted secrets, attached to the
+  # GitHub Release.
   package:
     needs: [tag, images]
     runs-on: ubuntu-latest
@@ -84,8 +85,9 @@ jobs:
       - name: Build deploy bundle
         id: bundle
         run: |
-          mkdir "deploy-$TAG"
+          mkdir -p "deploy-$TAG/secrets"
           cp docker-compose.yml scripts/deploy.sh "deploy-$TAG/"
+          cp secrets/*.env "deploy-$TAG/secrets/"
           # Fixed order, times and owners, so a re-run builds the same bytes.
           tar --sort=name --mtime=@0 --owner=0 --group=0 --numeric-owner -cf - "deploy-$TAG" \
             | gzip -n > "deploy-$TAG.tar.gz"
