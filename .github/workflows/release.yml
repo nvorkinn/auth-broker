@@ -70,11 +70,43 @@ jobs:
             ${{ env.FLUENT_BIT_IMAGE_NAME }}:${{ steps.tag.outputs.value }}
             ${{ env.FLUENT_BIT_IMAGE_NAME }}:latest
 
-  # Each deploy job waits for manual approval through its environment's
-  # protection rule (Settings > Environments), then pins its container to
-  # this release's tag on the host and restarts it. See "Deploying" in the README.
-  deploy-caddy:
+  # The deploy bundle is what the host deploys from: this release's
+  # docker-compose.yml and deploy.sh, attached to the GitHub Release.
+  package:
     needs: build-and-push
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      sha256: ${{ steps.bundle.outputs.sha256 }}
+    env:
+      TAG: ${{ needs.build-and-push.outputs.tag }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Build deploy bundle
+        id: bundle
+        run: |
+          mkdir "deploy-$TAG"
+          cp docker-compose.yml scripts/deploy.sh "deploy-$TAG/"
+          # Fixed order, times and owners, so a re-run builds the same bytes.
+          tar --sort=name --mtime=@0 --owner=0 --group=0 --numeric-owner -cf - "deploy-$TAG" \
+            | gzip -n > "deploy-$TAG.tar.gz"
+          echo "sha256=$(sha256sum "deploy-$TAG.tar.gz" | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+
+      - name: Attach bundle to the release
+        run: |
+          gh release view "$TAG" > /dev/null 2>&1 || gh release create "$TAG" --verify-tag --title "$TAG"
+          gh release upload "$TAG" "deploy-$TAG.tar.gz" --clobber
+
+  # Each deploy job waits for manual approval through its environment's
+  # protection rule (Settings > Environments), then has the host fetch this
+  # release's deploy bundle and run its deploy.sh, which pins the container to
+  # this release's tag and restarts it. See "Deploying" in the README.
+  deploy-caddy:
+    needs: [build-and-push, package]
     runs-on: ubuntu-latest
     environment: deploy-caddy
     concurrency:
@@ -83,6 +115,8 @@ jobs:
     env:
       TAG: ${{ needs.build-and-push.outputs.tag }}
       DEPLOY_TARGET: ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}
+      BUNDLE_URL: ${{ github.server_url }}/${{ github.repository }}/releases/download/${{ needs.build-and-push.outputs.tag }}/deploy-${{ needs.build-and-push.outputs.tag }}.tar.gz
+      BUNDLE_SHA256: ${{ needs.package.outputs.sha256 }}
     steps:
       - uses: actions/checkout@v7
 
@@ -97,7 +131,7 @@ jobs:
           printf '%s\n' "$DEPLOY_SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
 
       - name: Deploy Caddy
-        run: ssh -i ~/.ssh/id_deploy "$DEPLOY_TARGET" bash -s -- caddy "$TAG" < scripts/deploy.sh
+        run: ssh -i ~/.ssh/id_deploy "$DEPLOY_TARGET" bash -s -- caddy "$TAG" "$BUNDLE_URL" "$BUNDLE_SHA256" < scripts/fetch-release.sh
 
   deploy-authentik:
     needs: build-and-push
@@ -133,7 +167,7 @@ jobs:
           && docker compose ps authentik-postgresql authentik-server authentik-worker'
 
   deploy-config:
-    needs: build-and-push
+    needs: [build-and-push, package]
     runs-on: ubuntu-latest
     environment: deploy-config
     concurrency:
@@ -142,6 +176,8 @@ jobs:
     env:
       TAG: ${{ needs.build-and-push.outputs.tag }}
       DEPLOY_TARGET: ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}
+      BUNDLE_URL: ${{ github.server_url }}/${{ github.repository }}/releases/download/${{ needs.build-and-push.outputs.tag }}/deploy-${{ needs.build-and-push.outputs.tag }}.tar.gz
+      BUNDLE_SHA256: ${{ needs.package.outputs.sha256 }}
     steps:
       - uses: actions/checkout@v7
 
@@ -156,7 +192,7 @@ jobs:
           printf '%s\n' "$DEPLOY_SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
 
       - name: Deploy config server
-        run: ssh -i ~/.ssh/id_deploy "$DEPLOY_TARGET" bash -s -- auth-broker "$TAG" < scripts/deploy.sh
+        run: ssh -i ~/.ssh/id_deploy "$DEPLOY_TARGET" bash -s -- auth-broker "$TAG" "$BUNDLE_URL" "$BUNDLE_SHA256" < scripts/fetch-release.sh
 
       - name: Check every device is still there
         run: ssh -i ~/.ssh/id_deploy "$DEPLOY_TARGET" docker exec auth-broker flask --app wsgi devices list
@@ -164,4 +200,4 @@ jobs:
       # Fluent Bit only ships logs, so it rides along with the config server
       # deploy rather than needing an approval of its own.
       - name: Deploy Fluent Bit
-        run: ssh -i ~/.ssh/id_deploy "$DEPLOY_TARGET" bash -s -- fluent-bit "$TAG" < scripts/deploy.sh
+        run: ssh -i ~/.ssh/id_deploy "$DEPLOY_TARGET" bash -s -- fluent-bit "$TAG" "$BUNDLE_URL" "$BUNDLE_SHA256" < scripts/fetch-release.sh
