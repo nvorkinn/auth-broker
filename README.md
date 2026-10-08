@@ -503,6 +503,24 @@ VictoriaLogs used to run by hand from its own compose project in
 stop that one so port 9428 is free (its data isn't carried over):
 `docker compose -f /opt/victorialogs/compose.yaml down`.
 
+### Authentik's Postgres
+
+The `authentik-postgresql` service runs `postgres:18-alpine`, with the named
+volume `authentik_db` mounted at `/var/lib/postgresql` (18+ images keep the
+data in a per-major-version subdirectory, so the parent is the mount point).
+A 16 data directory can't be opened by 18, so moving from 16 means starting
+with an empty database (a real upgrade would need `pg_upgrade` or a
+dump and restore). Before the first deploy that includes this, on the host:
+
+```bash
+cd /opt/auth-broker
+docker compose stop authentik-server authentik-worker authentik-postgresql
+docker compose rm -f authentik-postgresql
+docker volume rm authentik_db
+```
+
+Authentik then bootstraps from scratch on the next `deploy-authentik`.
+
 ### Metrics
 
 The `victoria-metrics` compose service is upstream's single-node
