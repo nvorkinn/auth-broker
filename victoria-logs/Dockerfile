@@ -1,4 +1,4 @@
-FROM victoriametrics/victoria-logs:v1.51.0
+FROM victoriametrics/victoria-logs:v1.53.0
 
 # Upstream's entrypoint is the binary, as with the other infra images. Fluent
 # Bit pushes every container's logs to it. Everything else is upstream's
