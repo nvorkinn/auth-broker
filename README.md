@@ -282,7 +282,7 @@ which posts a coverage comment and status check on each PR (config in
 ## Deploying
 
 Tagging a release (`git tag v0.1.0 && git push --tags`) triggers
-`.github/workflows/release.yml`, which builds four Docker images, side by
+`.github/workflows/release.yml`, which builds five Docker images, side by
 side, and pushes each with the release tag (and `:latest`):
 
 - `ghcr.io/nvorkinn/auth-broker:<tag>`: the broker itself (`Dockerfile`).
@@ -291,6 +291,8 @@ side, and pushes each with the release tag (and `:latest`):
   `auth.nikolaivorkinn.com` and reverse-proxies to the broker.
 - `ghcr.io/nvorkinn/auth-broker-fluent-bit:<tag>`: Fluent Bit with this repo's
   `fluent-bit/` config baked in (see [Logs](#logs)).
+- `ghcr.io/nvorkinn/auth-broker-victoria-logs:<tag>`: single-node
+  VictoriaLogs, listening on loopback only (see [Logs](#logs)).
 - `ghcr.io/nvorkinn/auth-broker-victoria-metrics:<tag>`: single-node
   VictoriaMetrics, listening on loopback only (see [Metrics](#metrics)).
 
@@ -302,7 +304,7 @@ On the Oracle Cloud instance, `/opt/auth-broker/` holds `docker-compose.yml`,
 the `.env` file and the `data/` directory. Each service's secrets are in its
 own env file next to them (`broker.env`, `caddy.env`, `authentik.env`), which
 the deploy jobs decrypt from the repo (see [Secrets](#secrets)); don't edit
-them on the host. Pin all four
+them on the host. Pin all five
 versions in that `.env` (compose reads it from there) rather than tracking
 `:latest`, so a restart never picks up a release you didn't choose. They're
 released together, so they're normally the same tag:
@@ -311,6 +313,7 @@ released together, so they're normally the same tag:
 AUTH_BROKER_VERSION=v1.8.0
 CADDY_VERSION=v1.8.0
 FLUENT_BIT_VERSION=v1.8.0
+VICTORIA_LOGS_VERSION=v1.8.0
 VICTORIA_METRICS_VERSION=v1.8.0
 ```
 
@@ -352,8 +355,8 @@ there) and runs the bundle's own `deploy.sh`, which:
    (`docker compose up -d --no-deps --force-recreate <service>`).
 
 Deploying the config server then lists the devices, as a check that the
-database came through. `deploy-config` goes on to deploy Fluent Bit and
-VictoriaMetrics the same way. Re-running
+database came through. `deploy-config` goes on to deploy Fluent Bit,
+VictoriaLogs and VictoriaMetrics the same way. Re-running
 a job redeploys the same tag; to roll back, re-run the deploy jobs of the older
 release's workflow run, which deploys that release's own bundle. Old releases
 stay under `releases/`; they're a few KB each.
@@ -437,8 +440,8 @@ One-time setup:
 Caddy runs as the `caddy` compose service with host networking, binding ports
 80 and 443 (TCP, plus UDP 443 for HTTP/3) on the host. That way `127.0.0.1` in
 the Caddyfile means the host: it reaches the broker on its published
-`127.0.0.1:5000`, VictoriaLogs on `127.0.0.1:9428`, which runs outside
-compose, and VictoriaMetrics on `127.0.0.1:8428`. The logs and metrics sites
+`127.0.0.1:5000`, VictoriaLogs on `127.0.0.1:9428` and VictoriaMetrics on
+`127.0.0.1:8428`. The logs and metrics sites
 share the Caddyfile's `admin_only` snippet: an Authentik login in the admin
 group, then the upstream. A Caddyfile change ships like code: edit
 `caddy/Caddyfile`, tag a release, bump `CADDY_VERSION`.
@@ -480,11 +483,25 @@ release, give it the same visibility as the `auth-broker` package in its package
 ### Logs
 
 The compose file also runs Fluent Bit, which tails every container's Docker
-log and ships it to VictoriaLogs on the host (`127.0.0.1:9428`). Its config
+log and ships it to VictoriaLogs (`127.0.0.1:9428`). Its config
 (`fluent-bit/`) is baked into `ghcr.io/nvorkinn/auth-broker-fluent-bit:<tag>`,
 released alongside the other two images, so nothing needs copying to the host.
 The `deploy-config` job also deploys it, pinning `FLUENT_BIT_VERSION` in `.env`. Query in
 VictoriaLogs with e.g. `{container_id="abc123def456"}`; `docker ps` maps IDs to names.
+
+The `victoria-logs` compose service is upstream's single-node VictoriaLogs
+(`ghcr.io/nvorkinn/auth-broker-victoria-logs:<tag>`). It keeps a week of logs
+(upstream's default) in the named volume `victoria_logs_data`, with a 512 MB
+memory limit, and listens on `127.0.0.1:9428` only. Caddy serves it at
+`logs.nikolaivorkinn.com`: `/insert/*` takes
+`Authorization: Bearer <LOGS_INGEST_TOKEN>`, and everything else (the UI at
+`/select/vmui` and the query API) needs the Authentik admin login. The
+`deploy-config` job deploys it, pinning `VICTORIA_LOGS_VERSION` in `.env`.
+
+VictoriaLogs used to run by hand from its own compose project in
+`/opt/victorialogs/`. Before the first deploy that includes this service,
+stop that one so port 9428 is free (its data isn't carried over):
+`docker compose -f /opt/victorialogs/compose.yaml down`.
 
 ### Metrics
 
