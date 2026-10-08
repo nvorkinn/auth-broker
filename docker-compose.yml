@@ -116,7 +116,9 @@ services:
       start_period: 20s
     volumes:
       # Holds every user and passkey: back it up off the host.
-      - authentik_db:/var/lib/postgresql/data
+      # Postgres 18+ images keep PGDATA under /var/lib/postgresql/<major>/docker,
+      # so mount the parent, not .../data.
+      - authentik_db:/var/lib/postgresql
 
   authentik-server:
     <<: *authentik
