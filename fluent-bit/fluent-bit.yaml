@@ -15,6 +15,15 @@ pipeline:
       mem_buf_limit: 16MB
       skip_long_lines: on
       refresh_interval: 10
+      #inputs:
+    - name: cpu
+      tag: telemetry
+    - name: mem
+      tag: telemetry
+    - name: docker
+      tag: telemetry
+    - name: fluentbit_metrics
+      tag: telemetry
 
   filters:
     # Docker's log files only carry the container ID, in the path; lift it into a field.
@@ -23,6 +32,11 @@ pipeline:
       call: add_container_id
       code: |
         function add_container_id(tag, ts, record) local id = string.match(record["path"] or "", "/containers/(%x+)/"); if id then record["container_id"] = string.sub(id, 1, 12) end; record["path"] = nil; return 1, ts, record end
+    - name: sysinfo
+      match: '*'
+      fluentbit_version_key: flb_ver
+      os_name_key: os_name
+      hostname_key: hostname
 
   outputs:
     - name: http
@@ -35,3 +49,8 @@ pipeline:
       json_date_format: iso8601
       compress: gzip
       retry_limit: false
+    - name: prometheus_remote_write
+      match: telemetry
+      host: 127.0.0.1
+      port: 8428
+      uri: /api/v1/write
