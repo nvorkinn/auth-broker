@@ -39,6 +39,8 @@ jobs:
             context: caddy
           - image: auth-broker-fluent-bit
             context: fluent-bit
+          - image: auth-broker-victoria-logs
+            context: victoria-logs
           - image: auth-broker-victoria-metrics
             context: victoria-metrics
     env:
@@ -117,11 +119,11 @@ jobs:
           # Authentik services on the AUTHENTIK_VERSION pinned in the host's .env.
           - environment: deploy-authentik
             services: authentik
-          # Fluent Bit and VictoriaMetrics only collect logs and metrics, so
-          # they ride along with the config server rather than needing an
+          # Fluent Bit, VictoriaLogs and VictoriaMetrics only collect logs and
+          # metrics, so they ride along with the config server rather than needing an
           # approval of their own.
           - environment: deploy-config
-            services: auth-broker fluent-bit victoria-metrics
+            services: auth-broker fluent-bit victoria-logs victoria-metrics
     environment: ${{ matrix.environment }}
     concurrency:
       group: ${{ matrix.environment }}

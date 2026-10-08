@@ -15,6 +15,7 @@ updates:
       - "/"
       - "/caddy"
       - "/fluent-bit"
+      - "/victoria-logs"
       - "/victoria-metrics"
     schedule:
       interval: "daily"

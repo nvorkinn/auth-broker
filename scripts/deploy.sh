@@ -4,7 +4,7 @@
 # /opt/auth-broker/releases/<tag>/ and runs this copy, which installs the
 # bundled docker-compose.yml, pins one compose service to the tag in .env, then
 # pulls and restarts just that service.
-# Usage: deploy.sh <auth-broker|caddy|fluent-bit|victoria-metrics|authentik> <tag>
+# Usage: deploy.sh <auth-broker|caddy|fluent-bit|victoria-logs|victoria-metrics|authentik> <tag>
 #
 # Secrets come from the bundle's SOPS-encrypted secrets/<name>.env, all of
 # them decrypted on every deploy with the host's age key into <name>.env next
@@ -36,7 +36,7 @@ var=
 case "$service" in
   # This repo's images, each pinned by <SERVICE>_VERSION in .env, e.g.
   # fluent-bit -> FLUENT_BIT_VERSION.
-  auth-broker | caddy | fluent-bit | victoria-metrics)
+  auth-broker | caddy | fluent-bit | victoria-logs | victoria-metrics)
     var="${service^^}"
     var="${var//-/_}_VERSION"
     ;;

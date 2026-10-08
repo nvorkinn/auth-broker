@@ -17,7 +17,7 @@ auth.nikolaivorkinn.com {
 	reverse_proxy 127.0.0.1:5000
 }
 
-# VictoriaLogs, on the host outside compose.
+# VictoriaLogs, the victoria-logs compose service.
 logs.nikolaivorkinn.com {
 	@ingest {
 		path /insert/*
