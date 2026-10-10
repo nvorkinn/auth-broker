@@ -9,7 +9,7 @@ def _headers(secret):
 
 
 def _config(client, device_id, secret):
-    return client.get(f"/api/devices/{device_id}/config", headers=_headers(secret)).get_json()
+    return client.get("/api/config", headers=_headers(secret)).get_json()
 
 
 def _paired_device(client, register_device):
@@ -39,7 +39,7 @@ def test_list_with_no_devices(cli):
 
 def test_list_shows_device_name_when_set_and_unnamed_otherwise(client, register_device, cli):
     named_id, secret = register_device()
-    client.get(f"/api/devices/{named_id}/config", headers={**_headers(secret), "X-Device-Name": "camilla"})
+    client.get("/api/config", headers={**_headers(secret), "X-Device-Name": "camilla"})
     unnamed_id, _ = register_device("another-very-long-device-secret")
 
     result = cli("list")
@@ -89,7 +89,7 @@ def test_forget_deletes_the_device_so_it_must_register_again(app, client, regist
 
     assert cli("forget", device_id).exit_code == 0
 
-    assert client.get(f"/api/devices/{device_id}/config", headers=_headers(secret)).status_code == 401
+    assert client.get("/api/config", headers=_headers(secret)).status_code == 401
     with app.app_context():
         for table in db.metadata.sorted_tables:
             assert db.session.scalar(select(func.count()).select_from(table)) == 0, table.name

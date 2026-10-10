@@ -21,7 +21,7 @@ def _etag(frame: bytes) -> str:
 
 
 def _url(device_id):
-    return f"/api/frames/{device_id}/frame"
+    return "/api/frame"
 
 
 def _auth(secret=SECRET):
@@ -80,14 +80,6 @@ def test_put_rejects_the_display_secret(app, client, split_device):
     assert response.status_code == 403
     assert response.get_json() == {"error": "forbidden"}
     assert _stored_rows(app, device_id) == []
-
-
-def test_put_rejects_another_devices_renderer_secret(app, client, register_device):
-    device_a, _ = register_device()
-    _, secret_b = register_device("another-very-long-device-secret")
-
-    assert _put(client, device_a, _frame(), secret=secret_b).status_code == 401
-    assert _stored_rows(app, device_a) == []
 
 
 def test_put_works_for_an_attached_renderer(app, client, split_device):
@@ -233,7 +225,7 @@ def test_put_for_forgotten_device_is_unauthorized(app, client, register_device, 
     assert _stored_rows(app, device_id) == []
 
 
-@pytest.mark.parametrize("method", ["post", "patch", "delete"])
+@pytest.mark.parametrize("method", ["patch", "delete"])
 def test_frame_endpoint_rejects_other_methods(client, register_device, method):
     device_id, _ = register_device()
     response = getattr(client, method)(_url(device_id), headers=_auth())
@@ -260,27 +252,12 @@ def test_get_rejects_wrong_secret(client, register_device):
     assert _get(client, device_id, "wrong-secret").status_code == 401
 
 
-def test_get_rejects_another_devices_secret(client, register_device):
-    device_a, _ = register_device()
-    _, secret_b = register_device("another-very-long-device-secret")
-    _put(client, device_a, _frame())
-
-    assert _get(client, device_a, secret_b).status_code == 401
-
-
 def test_get_works_for_both_roles(client, split_device):
     device_id, renderer_secret, display_secret = split_device
     _put(client, device_id, _frame(), secret=renderer_secret)
 
     assert _get(client, device_id, display_secret).data == _frame()
     assert _get(client, device_id, renderer_secret).data == _frame()
-
-
-def test_get_rejects_a_display_secret_on_another_devices_path(client, register_device, split_device):
-    other_id, _ = register_device("another-very-long-device-secret")
-    _, _, display_secret = split_device
-
-    assert _get(client, other_id, display_secret).status_code == 401
 
 
 def test_get_unknown_device_is_unauthorized_not_not_found(client):
@@ -510,7 +487,7 @@ def shipped(monkeypatch):
     return calls
 
 
-def _post(client, body=None, secret=SECRET, path="/api/frames/frame", **headers):
+def _post(client, body=None, secret=SECRET, path="/api/frame", **headers):
     return client.post(path, json=body, headers={"Authorization": f"Bearer {secret}", **headers})
 
 
@@ -523,7 +500,7 @@ def _logs_calls(shipped):
 
 
 def test_post_requires_auth(client, shipped):
-    response = client.post("/api/frames/frame", json={"metrics": LINES, "logs": ["x"]})
+    response = client.post("/api/frame", json={"metrics": LINES, "logs": ["x"]})
 
     assert response.status_code == 401
     assert shipped == []
@@ -704,7 +681,7 @@ def test_post_with_non_json_body_still_serves_the_frame(client, register_device,
     device_id, secret = register_device()
     _put(client, device_id, _frame())
 
-    response = client.post("/api/frames/frame", data=b"\xff\x00", headers=_auth(secret))
+    response = client.post("/api/frame", data=b"\xff\x00", headers=_auth(secret))
 
     assert response.status_code == 200
     assert shipped == []

@@ -11,6 +11,7 @@ from ..services import pairing, registration
 from ..services.setup import setup_missing
 
 bp = Blueprint("devices", __name__, url_prefix="/api/devices")
+config_bp = Blueprint("config", __name__, url_prefix="/api")
 
 
 @bp.post("/register")
@@ -74,7 +75,7 @@ def register():
     return jsonify(device_id=found.device_id), 200
 
 
-@bp.post("/<device_id>/pairing-code")
+@bp.post("/pairing-code")
 @require_device_auth(roles={"renderer"})
 def create_pairing_code(device_id):
     """Forces a fresh code, e.g. to link a new browser to an already-paired device."""
@@ -93,7 +94,7 @@ def _update_device_name(device_id: str) -> None:
         db.session.commit()
 
 
-@bp.get("/<device_id>/config")
+@config_bp.get("/config")
 @require_device_auth(roles={"renderer"})
 def get_config(device_id):
     """Polled by the renderer, here or as /api/config with no device_id. Bundles the device's own

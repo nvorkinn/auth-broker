@@ -86,7 +86,7 @@ def paired_client(client, register_device):
     device_id, device_secret = register_device()
 
     code_response = client.post(
-        f"/api/devices/{device_id}/pairing-code",
+        "/api/devices/pairing-code",
         headers={"Authorization": f"Bearer {device_secret}"},
     )
     code = code_response.get_json()["code"]

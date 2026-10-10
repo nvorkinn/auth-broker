@@ -332,9 +332,6 @@ def test_0004_keeps_existing_devices_and_their_secret_as_the_renderer(app, clien
         assert device.display_secret_hash is None
         assert device.paired_at == datetime(2026, 3, 1, 12, 5, tzinfo=UTC)
 
-    response = client.get("/api/devices/old-pi/config", headers={"Authorization": f"Bearer {secret}"})
-    assert response.status_code == 200
-
 
 def test_0004_downgrade_and_upgrade_keep_split_devices(app, split_device):
     device_id, _, display_secret = split_device

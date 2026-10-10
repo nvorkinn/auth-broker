@@ -12,7 +12,7 @@ from ..auth import require_device_auth
 from ..db import db
 from ..models import DeviceConfig, Frame
 
-bp = Blueprint("frames", __name__, url_prefix="/api/frames")
+bp = Blueprint("frames", __name__, url_prefix="/api")
 
 FRAME_BYTES = 800 * 480 // 8  # 1-bit packed; better to share this via the protocol package
 # Retry-After, in seconds, on a GET before the renderer's first frame: it's expected any moment.
@@ -31,7 +31,7 @@ logger = logging.getLogger(__name__)
 _executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="forward")
 
 
-@bp.put("/<device_id>/frame")
+@bp.put("/frame")
 @require_device_auth(roles={"renderer"})
 def update_frame(device_id):
     frame = request.get_data()
@@ -49,7 +49,7 @@ def update_frame(device_id):
     return "", 204
 
 
-@bp.get("/<device_id>/frame")
+@bp.get("/frame")
 @require_device_auth(roles={"display", "renderer"})
 def get_frame(device_id):
     """Polled by the screen. Every answer it should keep polling after carries Retry-After, so its

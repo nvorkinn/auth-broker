@@ -25,25 +25,19 @@ def test_register_rejects_missing_body(client):
 
 def test_pairing_code_requires_auth(client, register_device):
     device_id, _ = register_device()
-    response = client.post(f"/api/devices/{device_id}/pairing-code")
+    response = client.post("/api/devices/pairing-code")
     assert response.status_code == 401
 
 
 def test_pairing_code_rejects_wrong_secret(client, register_device):
     device_id, _ = register_device()
-    response = client.post(f"/api/devices/{device_id}/pairing-code", headers={"Authorization": "Bearer wrong-secret"})
-    assert response.status_code == 401
-
-
-def test_pairing_code_rejects_unknown_device(client, register_device):
-    _, secret = register_device()
-    response = client.post("/api/devices/does-not-exist/pairing-code", headers={"Authorization": f"Bearer {secret}"})
+    response = client.post("/api/devices/pairing-code", headers={"Authorization": "Bearer wrong-secret"})
     assert response.status_code == 401
 
 
 def test_pairing_code_uses_unambiguous_alphabet(client, register_device):
     device_id, secret = register_device()
-    response = client.post(f"/api/devices/{device_id}/pairing-code", headers={"Authorization": f"Bearer {secret}"})
+    response = client.post("/api/devices/pairing-code", headers={"Authorization": f"Bearer {secret}"})
     assert response.status_code == 200
     body = response.get_json()
     assert len(body["code"]) == 6
@@ -56,8 +50,8 @@ def test_requesting_new_pairing_code_invalidates_old_one(client, register_device
     device_id, secret = register_device()
     headers = {"Authorization": f"Bearer {secret}"}
 
-    first = client.post(f"/api/devices/{device_id}/pairing-code", headers=headers).get_json()["code"]
-    client.post(f"/api/devices/{device_id}/pairing-code", headers=headers)
+    first = client.post("/api/devices/pairing-code", headers=headers).get_json()["code"]
+    client.post("/api/devices/pairing-code", headers=headers)
 
     response = client.post("/pair", data={"code": first})
     assert b"invalid or has expired" in response.data
@@ -65,13 +59,13 @@ def test_requesting_new_pairing_code_invalidates_old_one(client, register_device
 
 def test_get_config_requires_auth(client, register_device):
     device_id, _ = register_device()
-    response = client.get(f"/api/devices/{device_id}/config")
+    response = client.get("/api/config")
     assert response.status_code == 401
 
 
 def test_get_config_returns_defaults_and_shared_keys(client, register_device):
     device_id, secret = register_device()
-    response = client.get(f"/api/devices/{device_id}/config", headers={"Authorization": f"Bearer {secret}"})
+    response = client.get("/api/config", headers={"Authorization": f"Bearer {secret}"})
     assert response.status_code == 200
     body = response.get_json()
     assert body == {
@@ -88,24 +82,20 @@ def test_get_config_returns_defaults_and_shared_keys(client, register_device):
 
 
 def _get_pairing_code(client, device_id, secret):
-    response = client.get(f"/api/devices/{device_id}/config", headers={"Authorization": f"Bearer {secret}"})
+    response = client.get("/api/config", headers={"Authorization": f"Bearer {secret}"})
     return response.get_json()["pairing_code"]
 
 
 def test_get_config_returns_active_pairing_code(client, register_device):
     device_id, secret = register_device()
-    code = client.post(
-        f"/api/devices/{device_id}/pairing-code", headers={"Authorization": f"Bearer {secret}"}
-    ).get_json()["code"]
+    code = client.post("/api/devices/pairing-code", headers={"Authorization": f"Bearer {secret}"}).get_json()["code"]
 
     assert _get_pairing_code(client, device_id, secret) == code
 
 
 def test_get_config_pairing_code_persists_until_paired(client, register_device):
     device_id, secret = register_device()
-    code = client.post(
-        f"/api/devices/{device_id}/pairing-code", headers={"Authorization": f"Bearer {secret}"}
-    ).get_json()["code"]
+    code = client.post("/api/devices/pairing-code", headers={"Authorization": f"Bearer {secret}"}).get_json()["code"]
 
     assert _get_pairing_code(client, device_id, secret) == code
     assert _get_pairing_code(client, device_id, secret) == code
@@ -113,9 +103,7 @@ def test_get_config_pairing_code_persists_until_paired(client, register_device):
 
 def test_get_config_pairing_code_cleared_once_paired(client, register_device):
     device_id, secret = register_device()
-    code = client.post(
-        f"/api/devices/{device_id}/pairing-code", headers={"Authorization": f"Bearer {secret}"}
-    ).get_json()["code"]
+    code = client.post("/api/devices/pairing-code", headers={"Authorization": f"Bearer {secret}"}).get_json()["code"]
 
     assert client.post("/pair", data={"code": code}).status_code == 302
 
@@ -124,9 +112,7 @@ def test_get_config_pairing_code_cleared_once_paired(client, register_device):
 
 def test_get_config_replaces_an_expired_code_for_an_unpaired_device(app, client, register_device):
     device_id, secret = register_device()
-    code = client.post(
-        f"/api/devices/{device_id}/pairing-code", headers={"Authorization": f"Bearer {secret}"}
-    ).get_json()["code"]
+    code = client.post("/api/devices/pairing-code", headers={"Authorization": f"Bearer {secret}"}).get_json()["code"]
 
     with app.app_context():
         _expire_codes(device_id)
@@ -186,8 +172,8 @@ def test_purge_keeps_a_code_up_to_its_expiry(app, client, register_device):
 def test_get_config_pairing_code_is_the_latest_one(client, register_device):
     device_id, secret = register_device()
     headers = {"Authorization": f"Bearer {secret}"}
-    client.post(f"/api/devices/{device_id}/pairing-code", headers=headers)
-    second = client.post(f"/api/devices/{device_id}/pairing-code", headers=headers).get_json()["code"]
+    client.post("/api/devices/pairing-code", headers=headers)
+    second = client.post("/api/devices/pairing-code", headers=headers).get_json()["code"]
 
     assert _get_pairing_code(client, device_id, secret) == second
 
@@ -195,7 +181,7 @@ def test_get_config_pairing_code_is_the_latest_one(client, register_device):
 def test_get_config_pairing_code_not_leaked_to_other_devices(client, register_device):
     device_id, secret = register_device()
     other_id, other_secret = register_device("another-very-long-device-secret")
-    client.post(f"/api/devices/{device_id}/pairing-code", headers={"Authorization": f"Bearer {secret}"})
+    client.post("/api/devices/pairing-code", headers={"Authorization": f"Bearer {secret}"})
 
     assert _get_pairing_code(client, other_id, other_secret) != _get_pairing_code(client, device_id, secret)
 
@@ -203,7 +189,7 @@ def test_get_config_pairing_code_not_leaked_to_other_devices(client, register_de
 def test_get_config_stores_device_name_from_header(app, client, register_device):
     device_id, secret = register_device()
     client.get(
-        f"/api/devices/{device_id}/config",
+        "/api/config",
         headers={"Authorization": f"Bearer {secret}", "X-Device-Name": "camilla"},
     )
 
@@ -214,7 +200,7 @@ def test_get_config_stores_device_name_from_header(app, client, register_device)
 
 def test_get_config_without_device_name_header_leaves_it_unset(app, client, register_device):
     device_id, secret = register_device()
-    client.get(f"/api/devices/{device_id}/config", headers={"Authorization": f"Bearer {secret}"})
+    client.get("/api/config", headers={"Authorization": f"Bearer {secret}"})
 
     with app.app_context():
         device_name = db.session.get(Device, device_id).device_name
@@ -225,9 +211,9 @@ def test_get_config_device_name_self_heals_on_rename(app, client, register_devic
     """A renamed Pi's next poll updates the stored name -- no re-registration needed."""
     device_id, secret = register_device()
     headers = {"Authorization": f"Bearer {secret}"}
-    client.get(f"/api/devices/{device_id}/config", headers={**headers, "X-Device-Name": "old-name"})
+    client.get("/api/config", headers={**headers, "X-Device-Name": "old-name"})
 
-    client.get(f"/api/devices/{device_id}/config", headers={**headers, "X-Device-Name": "new-name"})
+    client.get("/api/config", headers={**headers, "X-Device-Name": "new-name"})
 
     with app.app_context():
         device_name = db.session.get(Device, device_id).device_name
@@ -237,9 +223,9 @@ def test_get_config_device_name_self_heals_on_rename(app, client, register_devic
 def test_get_config_blank_device_name_header_does_not_overwrite(app, client, register_device):
     device_id, secret = register_device()
     headers = {"Authorization": f"Bearer {secret}"}
-    client.get(f"/api/devices/{device_id}/config", headers={**headers, "X-Device-Name": "camilla"})
+    client.get("/api/config", headers={**headers, "X-Device-Name": "camilla"})
 
-    client.get(f"/api/devices/{device_id}/config", headers={**headers, "X-Device-Name": "  "})
+    client.get("/api/config", headers={**headers, "X-Device-Name": "  "})
 
     with app.app_context():
         device_name = db.session.get(Device, device_id).device_name
@@ -250,7 +236,7 @@ def test_get_config_returns_decrypted_glowmarkt_credentials(paired_client):
     client, device_id, secret = paired_client
     client.post("/device", data={"glowmarkt_username": "someone@example.com", "glowmarkt_password": "hunter2"})
 
-    response = client.get(f"/api/devices/{device_id}/config", headers={"Authorization": f"Bearer {secret}"})
+    response = client.get("/api/config", headers={"Authorization": f"Bearer {secret}"})
     assert response.get_json()["glowmarkt"] == {"username": "someone@example.com", "password": "hunter2"}
 
 
@@ -289,9 +275,7 @@ def test_a_failed_pairing_attempt_does_not_mark_the_device_paired(app, client, r
 def test_a_forced_code_for_a_paired_device_is_shown_until_redeemed(client, register_device):
     device_id, secret = register_device()
     client.post("/pair", data={"code": _get_pairing_code(client, device_id, secret)})
-    forced = client.post(
-        f"/api/devices/{device_id}/pairing-code", headers={"Authorization": f"Bearer {secret}"}
-    ).get_json()["code"]
+    forced = client.post("/api/devices/pairing-code", headers={"Authorization": f"Bearer {secret}"}).get_json()["code"]
 
     assert _get_pairing_code(client, device_id, secret) == forced
 
@@ -300,7 +284,7 @@ def test_a_forced_code_for_a_paired_device_is_shown_until_redeemed(client, regis
 
 
 def _setup_missing(client, device_id, secret):
-    response = client.get(f"/api/devices/{device_id}/config", headers={"Authorization": f"Bearer {secret}"})
+    response = client.get("/api/config", headers={"Authorization": f"Bearer {secret}"})
     return response.get_json()["setup_missing"]
 
 
@@ -337,7 +321,7 @@ def test_get_config_returns_the_saved_postcode(app, client, register_device):
         db.session.get(DeviceConfig, device_id).postcode = "SW1A 1AA"
         db.session.commit()
 
-    response = client.get(f"/api/devices/{device_id}/config", headers={"Authorization": f"Bearer {secret}"})
+    response = client.get("/api/config", headers={"Authorization": f"Bearer {secret}"})
     assert response.get_json()["notice_board"] == {"postcode": "SW1A 1AA"}
 
 
