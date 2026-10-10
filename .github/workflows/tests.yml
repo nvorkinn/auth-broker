@@ -60,7 +60,7 @@ jobs:
   # Builds each container image and checks the config baked into it. Every
   # image has its program as the entrypoint, so `check` is just its args.
   image:
-    name: test image ${{ matrix.image }}
+    name: test image
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
