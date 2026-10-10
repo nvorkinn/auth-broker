@@ -25,7 +25,7 @@ pipeline:
       port: 9880
     - name: fluentbit_metrics
       tag: telemetry
-      scrape_interval: 10
+      scrape_interval: 30
     - name: node_exporter_metrics
       tag: telemetry
       scrape_interval: 30
