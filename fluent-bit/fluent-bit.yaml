@@ -14,6 +14,11 @@ pipeline:
       mem_buf_limit: 16MB
       skip_long_lines: on
       refresh_interval: 10
+    # OTLP/HTTP from anything that speaks it. With no tag set, the URI path becomes the tag
+    # (/v1/logs, /v1/metrics), which the outputs below match on.
+    - name: opentelemetry
+      listen: 127.0.0.1
+      port: 4318
     - name: http
       tag: http_logs
       host: 127.0.0.1
@@ -56,7 +61,7 @@ pipeline:
       compress: gzip
       retry_limit: false
     - name: prometheus_remote_write
-      match: '*telemetry'
+      match_regex: '.*(telemetry|metrics)$'
       host: 127.0.0.1
       port: 8428
       uri: /api/v1/write
