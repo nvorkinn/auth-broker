@@ -1,0 +1,66 @@
+name: All checks
+
+# The one check branch protection requires. Other workflows only run when their paths change, so
+# requiring them directly blocks every PR that doesn't touch them. This runs on every PR, waits for
+# whatever else was triggered for its head commit, and fails if any of it failed.
+on:
+  pull_request:
+
+permissions:
+  actions: read
+  checks: read
+
+jobs:
+  all-checks:
+    name: all-checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Wait for the PR's other checks
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.event.pull_request.head.sha }}
+          RUN_ID: ${{ github.run_id }}
+          # auto-approve waits for every check, this one included, so waiting on it would deadlock.
+          IGNORED_CHECKS: '["all-checks","auto-approve"]'
+          IGNORED_WORKFLOWS: '["All checks","Auto-approve PRs"]'
+        run: |
+          # Workflows triggered by the same push start together, but a workflow's later jobs (and
+          # matrix entries) only get check runs once the jobs before them finish. So "done" means
+          # every workflow run for the commit has finished as well as every check run, seen on two
+          # polls in a row.
+          ok='["success","skipped","neutral"]'
+          settled=0
+          sleep 20
+          while true; do
+            runs=$(gh api --paginate "repos/$REPO/actions/runs?head_sha=$SHA&per_page=100" \
+              --jq ".workflow_runs[] | select(.id != $RUN_ID and (.name | IN($IGNORED_WORKFLOWS[]) | not))
+                    | {name, status, conclusion, url: .html_url}" | jq -s .)
+            checks=$(gh api --paginate "repos/$REPO/commits/$SHA/check-runs?filter=latest&per_page=100" \
+              --jq ".check_runs[] | select(.name | IN($IGNORED_CHECKS[]) | not)
+                    | {name, status, conclusion, url: .html_url}" | jq -s .)
+
+            failed=$(jq -n --argjson ok "$ok" --argjson runs "$runs" --argjson checks "$checks" \
+              '[$runs[], $checks[] | select(.status == "completed" and (.conclusion | IN($ok[]) | not))]')
+            if [ "$(jq length <<<"$failed")" -gt 0 ]; then
+              echo "::error::Some checks didn't pass:"
+              jq -r '.[] | "  \(.name): \(.conclusion) \(.url)"' <<<"$failed"
+              exit 1
+            fi
+
+            pending=$(jq -n --argjson runs "$runs" --argjson checks "$checks" \
+              '[$runs[], $checks[] | select(.status != "completed") | .name]')
+            if [ "$(jq length <<<"$pending")" -eq 0 ]; then
+              settled=$((settled + 1))
+              if [ "$settled" -ge 2 ]; then
+                echo "All checks passed:"
+                jq -r '.[] | "  \(.name): \(.conclusion)"' <<<"$checks"
+                exit 0
+              fi
+            else
+              settled=0
+              echo "Waiting on: $(jq -r 'join(", ")' <<<"$pending")"
+            fi
+            sleep 20
+          done
