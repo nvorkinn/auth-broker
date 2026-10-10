@@ -23,18 +23,12 @@ pipeline:
       tag: http_logs
       host: 127.0.0.1
       port: 9880
-    - name: cpu
-      tag: telemetry
-      interval_sec: 10
-    - name: mem
-      tag: telemetry
-      interval_sec: 10
-    - name: docker
-      tag: telemetry
-      interval_sec: 10
     - name: fluentbit_metrics
       tag: telemetry
-      scrape_interval: 10
+      scrape_interval: 30
+    - name: node_exporter_metrics
+      tag: telemetry
+      scrape_interval: 30
 
   filters:
     # Docker's log files only carry the container ID, in the path; lift it into a field.
