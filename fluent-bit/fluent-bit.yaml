@@ -5,30 +5,36 @@ service:
 
 pipeline:
   inputs:
-    # Every container's stdout/stderr, as written by Docker's default json-file driver.
     - name: tail
       path: /var/lib/docker/containers/*/*-json.log
       path_key: path
       parser: docker
-      tag: docker
+      tag: docker_logs
       db: /state/docker-logs.db
       mem_buf_limit: 16MB
       skip_long_lines: on
       refresh_interval: 10
-      #inputs:
+    - name: http
+      tag: http_logs
+      host: 127.0.0.1
+      port: 9880
     - name: cpu
       tag: telemetry
+      interval_sec: 10
     - name: mem
       tag: telemetry
+      interval_sec: 10
     - name: docker
       tag: telemetry
+      interval_sec: 10
     - name: fluentbit_metrics
       tag: telemetry
+      scrape_interval: 10
 
   filters:
     # Docker's log files only carry the container ID, in the path; lift it into a field.
     - name: lua
-      match: docker
+      match: docker_logs
       call: add_container_id
       code: |
         function add_container_id(tag, ts, record) local id = string.match(record["path"] or "", "/containers/(%x+)/"); if id then record["container_id"] = string.sub(id, 1, 12) end; record["path"] = nil; return 1, ts, record end
@@ -40,7 +46,7 @@ pipeline:
 
   outputs:
     - name: http
-      match: docker
+      match: '*logs'
       host: 127.0.0.1
       port: 9428
       uri: /insert/jsonline?_stream_fields=container_id&_msg_field=log&_time_field=date
@@ -50,7 +56,7 @@ pipeline:
       compress: gzip
       retry_limit: false
     - name: prometheus_remote_write
-      match: telemetry
+      match: '*telemetry'
       host: 127.0.0.1
       port: 8428
       uri: /api/v1/write

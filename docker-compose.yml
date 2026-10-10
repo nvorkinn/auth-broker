@@ -25,8 +25,11 @@ services:
     <<: *release-image
     image: ghcr.io/nvorkinn/auth-broker:${AUTH_BROKER_VERSION:-latest}
     container_name: auth-broker
-    ports:
-      - "127.0.0.1:5000:5000"
+    # Host networking, so it can reach Fluent Bit (127.0.0.1:9880, logs) and VictoriaMetrics
+    # (127.0.0.1:8428, metrics), like Caddy reaches it. That makes the image's 0.0.0.0 bind public,
+    # so bind loopback.
+    network_mode: host
+    command: ["gunicorn", "--bind", "127.0.0.1:5000", "--access-logfile", "-", "--error-logfile", "-", "--log-level", "info", "wsgi:app"]
     volumes:
       - ./data:/app/data
     # Secrets, decrypted from secrets/broker.env by deploy.sh.

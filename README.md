@@ -128,6 +128,12 @@ single-writer lock makes it safe across threads, workers and the CLI.
 | `POST /api/devices/<id>/pairing-code` | renderer |
 | `PUT /api/frame`, `PUT /api/frames/<id>/frame` (raw 800x480 1-bit, 48000 bytes) | renderer |
 | `GET /api/frame`, `GET /api/frames/<id>/frame` (ETag / `If-None-Match` → 304) | renderer, display |
+| `POST /api/frames/frame` (JSON `{"metrics": "<InfluxDB line protocol>", "logs": [...]}`; answers like the GET) | renderer, display |
+
+`POST /api/frames/frame` is the screen's poll with its report attached. The broker forwards
+`metrics` to VictoriaMetrics' `/write` after replacing every literal `{device_id}` in it with the
+device's id, and `logs` to Fluent Bit's HTTP input (`127.0.0.1:9880`), both in the background and
+best-effort: a destination being down is logged and never fails the poll.
 
 A wrong or missing secret gets 401. A valid secret for the wrong role gets
 403. A secret still waiting in the pool gets 202 on the ID-less routes.
@@ -439,8 +445,8 @@ One-time setup:
 
 Caddy runs as the `caddy` compose service with host networking, binding ports
 80 and 443 (TCP, plus UDP 443 for HTTP/3) on the host. That way `127.0.0.1` in
-the Caddyfile means the host: it reaches the broker on its published
-`127.0.0.1:5000`, VictoriaLogs on `127.0.0.1:9428` and VictoriaMetrics on
+the Caddyfile means the host: it reaches the broker (also host-networked, bound to
+`127.0.0.1:5000`), VictoriaLogs on `127.0.0.1:9428` and VictoriaMetrics on
 `127.0.0.1:8428`. The logs and metrics sites
 share the Caddyfile's `admin_only` snippet: an Authentik login in the admin
 group, then the upstream. A Caddyfile change ships like code: edit
