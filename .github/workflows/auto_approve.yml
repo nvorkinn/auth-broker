@@ -35,14 +35,3 @@ jobs:
         run: gh pr review --approve ${{ github.event.pull_request.number }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-# TODO: Disabling the merge step for now.
-#      # A merge made with GITHUB_TOKEN doesn't trigger workflows, so main would get no push
-#      # runs (CI, CodeQL). AUTO_MERGE_TOKEN, a fine-grained PAT with Contents and Pull requests
-#      # read/write on this repo, merges as a user instead. It can't do the approving above:
-#      # GitHub won't let a PR's author approve their own PR.
-#      - name: Enable auto-merge
-#        if: success()
-#        run: gh pr merge --auto --merge --delete-branch ${{ github.event.pull_request.number }}
-#        env:
-#          GH_TOKEN: ${{ secrets.AUTO_MERGE_TOKEN || secrets.GITHUB_TOKEN }}
