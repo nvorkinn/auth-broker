@@ -128,7 +128,7 @@ single-writer lock makes it safe across threads, workers and the CLI.
 | `POST /api/devices/<id>/pairing-code` | renderer |
 | `PUT /api/frame`, `PUT /api/frames/<id>/frame` (raw 800x480 1-bit, 48000 bytes) | renderer |
 | `GET /api/frame`, `GET /api/frames/<id>/frame` (ETag / `If-None-Match` → 304) | renderer, display |
-| `POST /api/frames/frame` (JSON `{"metrics": "<InfluxDB line protocol>", "logs": [...]}`; answers like the GET) | renderer, display |
+| `POST /api/frame`, `POST /api/frames/frame` (JSON `{"metrics": "<InfluxDB line protocol>", "logs": [...]}`; answers like the GET) | renderer, display |
 
 `POST /api/frames/frame` is the screen's poll with its report attached. The broker forwards
 `metrics` to VictoriaMetrics' `/write` after replacing every literal `{device_id}` in it with the
