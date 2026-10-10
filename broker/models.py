@@ -17,7 +17,7 @@ class Device(db.Model):
 
     device_id: Mapped[str] = mapped_column(String, primary_key=True)
     # One secret per role (see auth.ROLES), each identifying the device on its own. A standalone Pi has
-    # no display secret. SHA-256 hex, or a werkzeug hash not yet rewritten (see auth.hash_secret).
+    # no display secret. SHA-256 hex (see auth.hash_secret).
     renderer_secret_hash: Mapped[str] = mapped_column(String, index=True, unique=True)
     display_secret_hash: Mapped[str | None] = mapped_column(String, index=True, unique=True)
     created_at: Mapped[datetime] = mapped_column(UTCDateTime)
