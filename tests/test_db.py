@@ -7,8 +7,8 @@ from alembic.migration import MigrationContext
 from alembic.script import ScriptDirectory
 from flask_migrate import downgrade, upgrade
 from sqlalchemy import inspect, select
-from werkzeug.security import check_password_hash, generate_password_hash
 
+from broker.auth import hash_secret
 from broker.db import db
 from broker.models import Device, DeviceConfig, Frame, PairingCode, SpotifyToken
 
@@ -315,25 +315,22 @@ def test_utc_datetime_refuses_a_naive_datetime(app):
 # --- 0004: a secret per role ----------------------------------------------------------------------
 
 
-def test_0004_keeps_existing_devices_and_their_secret_as_the_renderer(app, client):
+def test_0004_keeps_existing_devices_and_their_secret_as_the_renderer(app):
     secret = "a-pi-secret-from-before-roles"
     with app.app_context():
         downgrade(revision="0003")
         with db.engine.begin() as conn:
             conn.exec_driver_sql(
                 "INSERT INTO devices (device_id, device_secret_hash, created_at, paired_at) VALUES (?, ?, ?, ?)",
-                ("old-pi", generate_password_hash(secret), "2026-03-01 12:00:00", "2026-03-01 12:05:00"),
+                ("old-pi", hash_secret(secret), "2026-03-01 12:00:00", "2026-03-01 12:05:00"),
             )
             conn.exec_driver_sql("INSERT INTO device_config (device_id) VALUES ('old-pi')")
         upgrade()
 
         device = db.session.get(Device, "old-pi")
-        assert check_password_hash(device.renderer_secret_hash, secret)
+        assert device.renderer_secret_hash == hash_secret(secret)
         assert device.display_secret_hash is None
         assert device.paired_at == datetime(2026, 3, 1, 12, 5, tzinfo=UTC)
-
-    response = client.get("/api/devices/old-pi/config", headers={"Authorization": f"Bearer {secret}"})
-    assert response.status_code == 200
 
 
 def test_0004_downgrade_and_upgrade_keep_split_devices(app, split_device):

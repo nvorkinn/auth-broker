@@ -6,8 +6,7 @@ as its renderer. display_secret_hash is new and NULL for standalone Pis. Both ar
 alone identifies its device. pending_registrations holds renderers and screens that registered but
 haven't been matched with the other role yet.
 
-Existing hashes are werkzeug password hashes; the app rewrites each as SHA-256 the next time it
-verifies. Downgrading keeps whatever is stored, so a device whose hash was already rewritten can't
+Downgrading keeps whatever is stored, so a device whose secret is stored as SHA-256 can't
 authenticate on the old code and has to register again.
 
 Revision ID: 0004

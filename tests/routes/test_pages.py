@@ -48,9 +48,7 @@ def test_pair_rejects_unknown_code(client):
 
 def test_pair_code_is_single_use(client, register_device):
     device_id, secret = register_device()
-    code = client.post(
-        f"/api/devices/{device_id}/pairing-code", headers={"Authorization": f"Bearer {secret}"}
-    ).get_json()["code"]
+    code = client.post("/api/devices/pairing-code", headers={"Authorization": f"Bearer {secret}"}).get_json()["code"]
 
     first = client.post("/pair", data={"code": code})
     assert first.status_code == 302
@@ -61,9 +59,7 @@ def test_pair_code_is_single_use(client, register_device):
 
 def test_pair_accepts_lowercase_code(client, register_device):
     device_id, secret = register_device()
-    code = client.post(
-        f"/api/devices/{device_id}/pairing-code", headers={"Authorization": f"Bearer {secret}"}
-    ).get_json()["code"]
+    code = client.post("/api/devices/pairing-code", headers={"Authorization": f"Bearer {secret}"}).get_json()["code"]
 
     response = client.post("/pair", data={"code": code.lower()})
     assert response.status_code == 302
@@ -215,9 +211,7 @@ def test_a_forgotten_device_sends_the_browser_to_pair_instead_of_erroring(paired
 def test_pairing_again_after_an_unpair_restores_access(paired_client, cli):
     client, device_id, secret = paired_client
     cli("unpair", device_id)
-    code = client.get(f"/api/devices/{device_id}/config", headers={"Authorization": f"Bearer {secret}"}).get_json()[
-        "pairing_code"
-    ]
+    code = client.get("/api/config", headers={"Authorization": f"Bearer {secret}"}).get_json()["pairing_code"]
 
     assert client.post("/pair", data={"code": code}).status_code == 302
 
@@ -236,9 +230,7 @@ def test_linking_another_browser_shows_a_code_it_can_pair_with(app, paired_clien
     response = client.post("/device/pairing-code")
 
     assert response.status_code == 302 and response.headers["Location"] == "/device"
-    code = client.get(f"/api/devices/{device_id}/config", headers={"Authorization": f"Bearer {secret}"}).get_json()[
-        "pairing_code"
-    ]
+    code = client.get("/api/config", headers={"Authorization": f"Bearer {secret}"}).get_json()["pairing_code"]
     page = client.get("/device").data
     assert code.encode() in page and b"Link another browser" not in page
 
@@ -361,9 +353,7 @@ def test_pair_locks_out_an_ip_after_ten_wrong_codes(client):
 
 def test_a_locked_out_ip_is_refused_even_with_the_right_code(client, register_device):
     device_id, secret = register_device()
-    code = client.post(
-        f"/api/devices/{device_id}/pairing-code", headers={"Authorization": f"Bearer {secret}"}
-    ).get_json()["code"]
+    code = client.post("/api/devices/pairing-code", headers={"Authorization": f"Bearer {secret}"}).get_json()["code"]
     _wrong_codes(client, 10)
 
     response = client.post("/pair", data={"code": code}, headers={"X-Forwarded-For": "203.0.113.7"})

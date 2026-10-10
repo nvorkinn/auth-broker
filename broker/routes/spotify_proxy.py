@@ -10,7 +10,7 @@ from ..clients import spotify
 from ..db import db
 from ..models import DeviceConfig
 
-bp = Blueprint("spotify_proxy", __name__, url_prefix="/api/devices")
+bp = Blueprint("spotify_proxy", __name__, url_prefix="/api/spotify")
 
 
 def require_spotify_enabled(default):
@@ -33,7 +33,7 @@ def require_spotify_enabled(default):
     return decorator
 
 
-@bp.get("/<device_id>/now-playing")
+@bp.get("/now-playing")
 @require_device_auth(roles={"renderer"})
 @require_spotify_enabled(default=None)
 def now_playing(device_id):
@@ -41,7 +41,7 @@ def now_playing(device_id):
     return jsonify(spotify.get_current_track(device_id))
 
 
-@bp.get("/<device_id>/queue")
+@bp.get("/queue")
 @require_device_auth(roles={"renderer"})
 @require_spotify_enabled(default=[])
 def queue(device_id):
@@ -50,7 +50,7 @@ def queue(device_id):
     return jsonify(spotify.get_queue(device_id))
 
 
-@bp.get("/<device_id>/top/<any(artists, tracks):type_>")
+@bp.get("/top/<any(artists, tracks):type_>")
 @require_device_auth(roles={"renderer"})
 @require_spotify_enabled(default=None)
 def top(device_id: str, type_: str):

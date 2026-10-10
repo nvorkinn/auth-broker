@@ -268,7 +268,7 @@ def test_a_matched_display_polls_frames_without_knowing_its_device_id(client, sp
     assert client.get("/api/frame", headers=_auth(display_secret)).status_code == 404
 
     frame = bytes([0x5A]) * FRAME_BYTES
-    put = client.put(f"/api/frames/{device_id}/frame", data=frame, headers=_auth(renderer_secret))
+    put = client.put("/api/frame", data=frame, headers=_auth(renderer_secret))
     assert put.status_code == 204
 
     response = client.get("/api/frame", headers=_auth(display_secret))
@@ -327,7 +327,7 @@ def test_a_renderer_puts_frames_without_its_device_id(client, split_device):
     assert client.put("/api/frame", data=frame, headers=_auth(renderer_secret)).status_code == 204
 
     assert client.get("/api/frame", headers=_auth(display_secret)).data == frame
-    assert client.get(f"/api/frames/{device_id}/frame", headers=_auth(display_secret)).data == frame
+    assert client.get("/api/frame", headers=_auth(display_secret)).data == frame
 
 
 def test_an_id_less_put_is_forbidden_to_the_display(app, client, split_device):

@@ -18,7 +18,7 @@ def _status(client, token=TOKEN):
     return client.get("/api/status/devices", headers={"Authorization": f"Bearer {token}"})
 
 
-def _poll(client, device_id, secret, path="/api/devices/{}/config"):
+def _poll(client, device_id, secret, path="/api/config"):
     return client.get(path.format(device_id), headers={"Authorization": f"Bearer {secret}"})
 
 
@@ -95,7 +95,7 @@ def test_last_seen_at_is_unset_until_the_device_authenticates(app, client, regis
     device_id, _ = register_device()
     assert _last_seen(app, device_id) is None
 
-    client.get(f"/api/devices/{device_id}/config", headers={"Authorization": "Bearer wrong-secret"})
+    client.get("/api/config", headers={"Authorization": "Bearer wrong-secret"})
 
     assert _last_seen(app, device_id) is None
 
@@ -103,10 +103,10 @@ def test_last_seen_at_is_unset_until_the_device_authenticates(app, client, regis
 @pytest.mark.parametrize(
     "path",
     [
-        "/api/devices/{}/config",
-        "/api/devices/{}/now-playing",
-        "/api/spotify/{}/queue",
-        "/api/frames/{}/frame",
+        "/api/config",
+        "/api/spotify/now-playing",
+        "/api/spotify/queue",
+        "/api/frame",
     ],
 )
 def test_any_authenticated_device_request_sets_last_seen_at(app, client, register_device, path):

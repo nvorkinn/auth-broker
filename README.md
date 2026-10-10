@@ -14,7 +14,7 @@ a Spotify token.
 1. **First boot:** the Pi generates its own secret and calls
    `POST /api/devices/register` once, getting back its `device_id`. The server only ever stores a
    hash of the secret; the Pi is the only place the plaintext secret lives.
-2. **Pairing:** the Pi polls `GET /api/devices/<id>/config`. While the
+2. **Pairing:** the Pi polls `GET /api/config`. While the
    device is unpaired, the response carries a short-lived `pairing_code` (the
    server issues a fresh one whenever the last expires), which the Pi shows on
    its screen. The recipient enters it at `/pair`, which binds their browser
@@ -26,21 +26,19 @@ a Spotify token.
    already-paired device (or get back in after the 30-day session expires),
    get a fresh code: "Link another browser" on `/device` from a browser that's
    still paired, `flask devices code <device_id>` (below), or the Pi itself via
-   `POST /api/devices/<id>/pairing-code`. Any live code also appears on the
+   `POST /api/devices/pairing-code`. Any live code also appears on the
    Pi's screen until it expires or is used.
 3. **Spotify:** from `/device`, "Connect Spotify" kicks off the OAuth flow.
    The server exchanges the code for tokens and keeps them — the Pi never
    sees a Spotify token, only its own device secret.
-4. **Ongoing:** the Pi polls `GET /api/devices/<id>/config` (device settings +
+4. **Ongoing:** the Pi polls `GET /api/config` (device settings +
    shared app-level API keys like the TfL/weather ones) and `GET
-   /api/devices/<id>/now-playing` (server refreshes the Spotify token
+   /api/spotify/now-playing` (server refreshes the Spotify token
    server-side and proxies back just the now-playing payload, shaped to match
    `SpotifyClient.get_current_track()` in `countdown` so the Pi-side swap is a
-   drop-in). `GET /api/devices/<id>/queue` works the same way and returns the
+   drop-in). `GET /api/spotify/queue` works the same way and returns the
    upcoming Spotify queue as a JSON list of the same track shape.
-   These Spotify routes (and `top/<artists|tracks>`) are also served under
-   `/api/spotify/<id>/...`, where they're moving; the `/api/devices/` paths
-   stay until the Pis have switched.
+   `GET /api/spotify/top/<artists|tracks>` is served the same way.
 
 Every device-facing endpoint is authenticated with `Authorization: Bearer
 <secret>`; every browser-facing page is gated on the signed session
@@ -58,11 +56,7 @@ A device has up to two secrets, one per role:
 **The secret is the device's identity.** Each client generates its own long
 random secret and sends it, never its hash, as `Authorization: Bearer
 <secret>` on every request. The broker stores only its SHA-256, which is
-unique per device, so the secret alone finds the device. The routes shaped
-`/api/devices/<id>/...` and `/api/frames/<id>/frame` keep working too, and
-then the secret must belong to that device. Secrets registered before this
-change are werkzeug hashes; each is rewritten as SHA-256 the first time its
-Pi authenticates on a path route.
+unique per device, so the secret alone finds the device.
 
 ### Registering
 
@@ -123,14 +117,14 @@ single-writer lock makes it safe across threads, workers and the CLI.
 
 | Route | Roles |
 |---|---|
-| `GET /api/config`, `GET /api/devices/<id>/config` | renderer |
-| `GET /api/spotify/<now-playing \| queue \| top/<artists\|tracks>>`, and the same under `/api/devices/<id>/` | renderer |
-| `POST /api/devices/<id>/pairing-code` | renderer |
-| `PUT /api/frame`, `PUT /api/frames/<id>/frame` (raw 800x480 1-bit, 48000 bytes) | renderer |
-| `GET /api/frame`, `GET /api/frames/<id>/frame` (ETag / `If-None-Match` → 304) | renderer, display |
-| `POST /api/frame`, `POST /api/frames/frame` (JSON `{"metrics": "<InfluxDB line protocol>", "logs": [...]}`; answers like the GET) | renderer, display |
+| `GET /api/config` | renderer |
+| `GET /api/spotify/<now-playing \| queue \| top/<artists\|tracks>>` | renderer |
+| `POST /api/devices/pairing-code` | renderer |
+| `PUT /api/frame` (raw 800x480 1-bit, 48000 bytes) | renderer |
+| `GET /api/frame` (ETag / `If-None-Match` → 304) | renderer, display |
+| `POST /api/frame` (JSON `{"metrics": "<InfluxDB line protocol>", "logs": [...]}`; answers like the GET) | renderer, display |
 
-`POST /api/frames/frame` is the screen's poll with its report attached. The broker forwards
+`POST /api/frame` is the screen's poll with its report attached. The broker forwards
 `metrics` to VictoriaMetrics' `/write` after replacing every literal `{device_id}` in it with the
 device's id, and `logs` to Fluent Bit's HTTP input (`127.0.0.1:9880`), both in the background and
 best-effort: a destination being down is logged and never fails the poll.
