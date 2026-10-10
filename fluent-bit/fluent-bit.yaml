@@ -26,8 +26,11 @@ pipeline:
     - name: fluentbit_metrics
       tag: telemetry
       scrape_interval: 30
+    # Only the collectors that work in a container on this host: the defaults also include cpufreq
+    # (no /sys/.../cpufreq here) and systemd (no D-Bus socket), which log errors on every start.
     - name: node_exporter_metrics
       tag: telemetry
+      metrics: cpu,meminfo,loadavg,filesystem,diskstats,netdev,uname,time
       scrape_interval: 30
 
   filters:
