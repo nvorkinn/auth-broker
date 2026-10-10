@@ -510,8 +510,8 @@ def shipped(monkeypatch):
     return calls
 
 
-def _post(client, body=None, secret=SECRET, **headers):
-    return client.post("/api/frames/frame", json=body, headers={"Authorization": f"Bearer {secret}", **headers})
+def _post(client, body=None, secret=SECRET, path="/api/frames/frame", **headers):
+    return client.post(path, json=body, headers={"Authorization": f"Bearer {secret}", **headers})
 
 
 def _metrics_calls(shipped):
@@ -816,3 +816,53 @@ def test_post_does_not_wait_for_a_slow_destination(client, register_device, monk
         assert started.wait(2)
     finally:
         release.set()
+
+
+# --- POST /api/frame: the same report on the route a screen uses without knowing its device_id ------
+
+
+def test_post_on_the_id_less_route_returns_the_frame_and_ships_the_report(client, register_device, shipped):
+    device_id, _ = register_device()
+    _put(client, device_id, _frame())
+
+    response = _post(client, {"metrics": LINES, "logs": ["x"]}, path="/api/frame")
+
+    assert response.status_code == 200
+    assert response.data == _frame()
+    assert response.headers["ETag"] == f'"{_etag(_frame())}"'
+    assert _metrics_calls(shipped)[0]["data"] == f"esp,device_id={device_id} uptime_s=3600i,rssi=-60i".encode()
+    assert _logs_calls(shipped)[0]["json"] == [{"log": "x", "device_id": device_id}]
+
+
+def test_post_on_the_id_less_route_honours_if_none_match(client, register_device, shipped):
+    device_id, _ = register_device()
+    _put(client, device_id, _frame())
+
+    response = _post(client, None, path="/api/frame", **{"If-None-Match": f'"{_etag(_frame())}"'})
+
+    assert response.status_code == 304
+
+
+def test_post_on_the_id_less_route_requires_auth(client, shipped):
+    response = client.post("/api/frame", json={"metrics": LINES})
+
+    assert response.status_code == 401
+    assert shipped == []
+
+
+def test_post_on_the_id_less_route_uses_the_secrets_own_device(client, register_device, split_device, shipped):
+    register_device("another-very-long-device-secret")
+    device_id, _, display_secret = split_device
+
+    _post(client, {"metrics": LINES}, secret=display_secret, path="/api/frame")
+
+    assert _metrics_calls(shipped)[0]["data"] == f"esp,device_id={device_id} uptime_s=3600i,rssi=-60i".encode()
+
+
+def test_post_on_the_id_less_route_ships_nothing_while_the_secret_waits_in_the_pool(client, register_pending, shipped):
+    assert register_pending("display", "display-secret-0123456789").status_code == 202
+
+    response = _post(client, {"metrics": LINES, "logs": ["x"]}, secret="display-secret-0123456789", path="/api/frame")
+
+    assert response.status_code == 202
+    assert shipped == []
