@@ -467,3 +467,352 @@ def test_renderer_can_upload_again_after_unpair_with_config(client, register_dev
 
     assert _put(client, device_id, _frame(0xFF)).status_code == 204
     assert _get(client, device_id, secret).data == _frame(0xFF)
+
+
+# --- POST: frame plus telemetry ---------------------------------------------------------------------
+
+LOGS_URL = "http://127.0.0.1:9880/logs"
+METRICS_URL = "http://127.0.0.1:8428/write"
+LINES = "esp,device_id={device_id} uptime_s=3600i,rssi=-60i"
+
+
+class _Response:
+    def __init__(self, status=204):
+        self.status = status
+
+    def raise_for_status(self):
+        from broker.routes import frames
+
+        if self.status >= 400:
+            raise frames.requests.HTTPError(f"{self.status} error")
+
+
+class _Inline:
+    """Stands in for the executor, so forwarding has finished by the time the response is back."""
+
+    def submit(self, fn, *args):
+        fn(*args)
+
+
+@pytest.fixture
+def shipped(monkeypatch):
+    """Runs forwarding inline and records each (url, kwargs) the broker posts."""
+    from broker.routes import frames
+
+    calls = []
+
+    def fake_post(url, **kwargs):
+        calls.append((url, kwargs))
+        return _Response()
+
+    monkeypatch.setattr(frames, "_executor", _Inline())
+    monkeypatch.setattr(frames.requests, "post", fake_post)
+    return calls
+
+
+def _post(client, body=None, secret=SECRET, **headers):
+    return client.post("/api/frames/frame", json=body, headers={"Authorization": f"Bearer {secret}", **headers})
+
+
+def _metrics_calls(shipped):
+    return [kwargs for url, kwargs in shipped if url == METRICS_URL]
+
+
+def _logs_calls(shipped):
+    return [kwargs for url, kwargs in shipped if url == LOGS_URL]
+
+
+def test_post_requires_auth(client, shipped):
+    response = client.post("/api/frames/frame", json={"metrics": LINES, "logs": ["x"]})
+
+    assert response.status_code == 401
+    assert shipped == []
+
+
+def test_post_returns_the_frame_like_get(client, register_device, shipped):
+    device_id, _ = register_device()
+    _put(client, device_id, _frame())
+
+    response = _post(client, {"metrics": "", "logs": []})
+
+    assert response.status_code == 200
+    assert response.data == _frame()
+    assert response.headers["ETag"] == f'"{_etag(_frame())}"'
+    assert "Retry-After" in response.headers
+
+
+def test_post_before_any_frame_is_404_with_retry_after_but_still_ships(client, register_device, shipped):
+    register_device()
+
+    response = _post(client, {"metrics": LINES, "logs": ["boot"]})
+
+    assert response.status_code == 404
+    assert response.headers["Retry-After"] == "5"
+    assert len(shipped) == 2
+
+
+def test_post_honours_if_none_match(client, register_device, shipped):
+    device_id, _ = register_device()
+    _put(client, device_id, _frame())
+
+    response = _post(client, None, **{"If-None-Match": f'"{_etag(_frame())}"'})
+
+    assert response.status_code == 304
+    assert response.headers["ETag"] == f'"{_etag(_frame())}"'
+
+
+# --- POST: metrics, straight to VictoriaMetrics -----------------------------------------------------
+
+
+def test_post_sends_metrics_to_victoria_metrics_with_the_device_id_filled_in(client, register_device, shipped):
+    device_id, _ = register_device()
+
+    _post(client, {"metrics": LINES})
+
+    assert shipped == [
+        (
+            METRICS_URL,
+            {
+                "data": f"esp,device_id={device_id} uptime_s=3600i,rssi=-60i".encode(),
+                "headers": {"Content-Type": "text/plain"},
+                "timeout": 2,
+            },
+        )
+    ]
+
+
+def test_post_fills_in_every_placeholder_on_every_line(client, register_device, shipped):
+    device_id, _ = register_device()
+    metrics = "a,device_id={device_id} x=1i\nb,device_id={device_id},peer={device_id} y=2i 1700000000000000000"
+
+    _post(client, {"metrics": metrics})
+
+    [call] = _metrics_calls(shipped)
+    assert call["data"] == (
+        f"a,device_id={device_id} x=1i\nb,device_id={device_id},peer={device_id} y=2i 1700000000000000000".encode()
+    )
+
+
+def test_post_passes_metrics_without_a_placeholder_through(client, register_device, shipped):
+    register_device()
+
+    _post(client, {"metrics": "esp,device_id=fixed x=1i"})
+
+    assert _metrics_calls(shipped)[0]["data"] == b"esp,device_id=fixed x=1i"
+
+
+@pytest.mark.parametrize("stray", ["{0}", "{}", "{other}", "}{", "{device_id.__class__}", "{device_id!r:>9}"])
+def test_post_leaves_other_braces_alone(client, register_device, shipped, stray):
+    device_id, _ = register_device()
+    metrics = f'esp,device_id={{device_id}} note="{stray}"'
+
+    response = _post(client, {"metrics": metrics})
+
+    assert response.status_code == 404  # no frame yet; the point is it isn't a 500
+    assert _metrics_calls(shipped)[0]["data"] == f'esp,device_id={device_id} note="{stray}"'.encode()
+
+
+def test_post_sends_non_ascii_metrics_as_utf8(client, register_device, shipped):
+    device_id, _ = register_device()
+
+    _post(client, {"metrics": 'esp,device_id={device_id} ssid="caf\u00e9"'})
+
+    assert _metrics_calls(shipped)[0]["data"] == f'esp,device_id={device_id} ssid="caf\u00e9"'.encode()
+
+
+@pytest.mark.parametrize("metrics", [None, {}, {"rssi": -60}, [], ["esp x=1i"], 5, True, "", "  \n\t"])
+def test_post_ignores_metrics_that_are_not_a_line_protocol_string(client, register_device, shipped, metrics):
+    register_device()
+
+    assert _post(client, {"metrics": metrics}).status_code == 404
+
+    assert shipped == []
+
+
+# --- POST: logs, to Fluent Bit ----------------------------------------------------------------------
+
+
+def test_post_sends_logs_to_fluent_bit_tagged_with_the_device(client, register_device, shipped):
+    device_id, _ = register_device()
+
+    _post(client, {"logs": [{"log": "a", "level": "warn"}, "plain", 7]})
+
+    assert shipped == [
+        (
+            LOGS_URL,
+            {
+                "json": [
+                    {"log": "a", "level": "warn", "device_id": device_id},
+                    {"log": "plain", "device_id": device_id},
+                    {"log": "7", "device_id": device_id},
+                ],
+                "timeout": 2,
+            },
+        )
+    ]
+
+
+def test_post_overrides_a_device_id_the_screen_claims_in_a_log(client, register_device, shipped):
+    device_id, _ = register_device()
+
+    _post(client, {"logs": [{"log": "a", "device_id": "someone-else"}]})
+
+    assert _logs_calls(shipped)[0]["json"] == [{"log": "a", "device_id": device_id}]
+
+
+@pytest.mark.parametrize("logs", [None, [], "text", {"log": "x"}, 5])
+def test_post_ignores_logs_that_are_not_a_non_empty_list(client, register_device, shipped, logs):
+    register_device()
+
+    assert _post(client, {"logs": logs}).status_code == 404
+
+    assert shipped == []
+
+
+# --- POST: both, and the body around them -----------------------------------------------------------
+
+
+def test_post_ships_metrics_and_logs_to_their_own_destinations(client, register_device, shipped):
+    register_device()
+
+    _post(client, {"metrics": LINES, "logs": ["x"]})
+
+    assert [url for url, _ in shipped] == [METRICS_URL, LOGS_URL]
+
+
+def test_post_only_ships_what_it_was_sent(client, register_device, shipped):
+    register_device()
+
+    _post(client, {"logs": ["only logs"]})
+    assert [url for url, _ in shipped] == [LOGS_URL]
+
+    shipped.clear()
+    _post(client, {"metrics": LINES})
+    assert [url for url, _ in shipped] == [METRICS_URL]
+
+
+@pytest.mark.parametrize("body", [None, {}, [], "text", 5], ids=["no-body", "empty", "list", "string", "number"])
+def test_post_ignores_a_body_that_is_not_a_report(client, register_device, shipped, body):
+    device_id, _ = register_device()
+    _put(client, device_id, _frame())
+
+    assert _post(client, body).status_code == 200
+    assert shipped == []
+
+
+def test_post_with_non_json_body_still_serves_the_frame(client, register_device, shipped):
+    device_id, secret = register_device()
+    _put(client, device_id, _frame())
+
+    response = client.post("/api/frames/frame", data=b"\xff\x00", headers=_auth(secret))
+
+    assert response.status_code == 200
+    assert shipped == []
+
+
+def test_post_uses_destinations_from_the_environment(client, register_device, shipped, monkeypatch):
+    monkeypatch.setenv("VICTORIA_METRICS_URL", "http://vm.example:8428/write")
+    monkeypatch.setenv("FLUENT_BIT_LOGS_URL", "http://fb.example:9880/logs")
+    register_device()
+
+    _post(client, {"metrics": LINES, "logs": ["x"]})
+
+    assert [url for url, _ in shipped] == ["http://vm.example:8428/write", "http://fb.example:9880/logs"]
+
+
+# --- POST: a destination that's down or unhappy never touches the screen ----------------------------
+
+
+@pytest.fixture
+def failing(monkeypatch):
+    """Makes every forward fail the given way; returns the list of attempted URLs."""
+    from broker.routes import frames
+
+    attempts = []
+
+    def install(effect):
+        def fake_post(url, **kwargs):
+            attempts.append(url)
+            if isinstance(effect, Exception):
+                raise effect
+            return _Response(effect)
+
+        monkeypatch.setattr(frames, "_executor", _Inline())
+        monkeypatch.setattr(frames.requests, "post", fake_post)
+        return attempts
+
+    return install
+
+
+@pytest.mark.parametrize(
+    "effect",
+    [
+        pytest.param("connection", id="connection-refused"),
+        pytest.param("timeout", id="timeout"),
+        pytest.param(400, id="rejected-line"),
+        pytest.param(503, id="unavailable"),
+    ],
+)
+def test_post_survives_a_failing_destination(client, register_device, failing, caplog, effect):
+    from broker.routes import frames
+
+    effect = {
+        "connection": frames.requests.ConnectionError("refused"),
+        "timeout": frames.requests.Timeout("slow"),
+    }.get(effect, effect)
+    attempts = failing(effect)
+    device_id, _ = register_device()
+    _put(client, device_id, _frame())
+
+    response = _post(client, {"metrics": LINES, "logs": ["x"]})
+
+    assert response.status_code == 200
+    assert response.data == _frame()
+    assert attempts == [METRICS_URL, LOGS_URL]
+    assert f"could not forward to {METRICS_URL}" in caplog.text
+    assert f"could not forward to {LOGS_URL}" in caplog.text
+
+
+def test_one_failing_destination_does_not_stop_the_other(client, register_device, monkeypatch):
+    from broker.routes import frames
+
+    sent = []
+
+    def fake_post(url, **kwargs):
+        if url == METRICS_URL:
+            raise frames.requests.ConnectionError("down")
+        sent.append(url)
+        return _Response()
+
+    monkeypatch.setattr(frames, "_executor", _Inline())
+    monkeypatch.setattr(frames.requests, "post", fake_post)
+    register_device()
+
+    _post(client, {"metrics": LINES, "logs": ["x"]})
+
+    assert sent == [LOGS_URL]
+
+
+def test_post_does_not_wait_for_a_slow_destination(client, register_device, monkeypatch):
+    """The real executor hands the request to a worker thread; the response doesn't depend on it."""
+    import threading
+
+    from broker.routes import frames
+
+    release, started = threading.Event(), threading.Event()
+
+    def slow(url, **kwargs):
+        started.set()
+        release.wait(5)
+        return _Response()
+
+    monkeypatch.setattr(frames.requests, "post", slow)
+    device_id, _ = register_device()
+    _put(client, device_id, _frame())
+
+    try:
+        response = _post(client, {"metrics": LINES})
+        assert response.status_code == 200
+        assert started.wait(2)
+    finally:
+        release.set()
