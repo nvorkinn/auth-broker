@@ -382,7 +382,9 @@ which validates the whole blueprint before changing anything. The blueprint is
 labelled `blueprints.goauthentik.io/instantiate: 'false'`, so the worker never
 applies it on its own. It takes the providers' client secrets with `!Env` from
 `authentik.env` (`BLUEPRINT_LOGS_CLIENT_SECRET`,
-`BLUEPRINT_METRICS_CLIENT_SECRET`); never commit them in the YAML. It leaves
+`BLUEPRINT_METRICS_CLIENT_SECRET`), and likewise the Google login source's OAuth
+client (`BLUEPRINT_GOOGLE_CLIENT_ID`, `BLUEPRINT_GOOGLE_CLIENT_SECRET`; its
+redirect URI is `https://sso.nikolaivorkinn.com/source/oauth/callback/google/`); never commit them in the YAML. It leaves
 users alone: no users, tokens, TOTP or passkey devices, or group members are
 in it, so manage those in Authentik's UI, and strip them from any fresh
 export before committing it. Also strip the `authentik_blueprints.blueprintinstance`

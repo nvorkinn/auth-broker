@@ -3052,6 +3052,20 @@ entries:
   model: authentik_policies.policybinding
   permissions: []
   state: present
+- model: authentik_sources_oauth.oauthsource
+  state: present
+  identifiers:
+    slug: google
+  attrs:
+    name: Google
+    enabled: true
+    provider_type: google
+    consumer_key: !Env BLUEPRINT_GOOGLE_CLIENT_ID
+    consumer_secret: !Env BLUEPRINT_GOOGLE_CLIENT_SECRET
+    authentication_flow: !Find [authentik_flows.flow, [slug, default-source-authentication]]
+    enrollment_flow: !Find [authentik_flows.flow, [slug, default-source-enrollment]]
+    user_matching_mode: email_link
+    user_path_template: goauthentik.io/sources/%(slug)s
 metadata:
   labels:
     blueprints.goauthentik.io/generated: 'true'
