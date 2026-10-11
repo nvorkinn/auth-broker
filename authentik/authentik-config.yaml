@@ -1,3 +1,4 @@
+# yaml-language-server: $schema=https://goauthentik.io/blueprints/schema.json
 context: {}
 entries:
 - attrs:
@@ -2118,7 +2119,7 @@ entries:
     password_stage: null
     passwordless_flow: null
     pretend_user_exists: true
-    recovery_flow: null
+    recovery_flow: 02b1cbf6-2b86-4966-b0ba-bc1ac0374597
     show_matched_user: true
     show_source_labels: false
     sources: []
@@ -2708,7 +2709,7 @@ entries:
     flow_device_code: null
     flow_invalidation: 9738e92d-2230-449e-b0e6-20a071ada854
     flow_lockdown: null
-    flow_recovery: null
+    flow_recovery: 02b1cbf6-2b86-4966-b0ba-bc1ac0374597
     flow_request: 035c0385-3603-42ed-8a3e-2dfeb3b37fe2
     flow_unenrollment: null
     flow_user_settings: ff442574-6f4b-46de-98e3-62a92539588d
@@ -2736,7 +2737,7 @@ entries:
     flow_device_code: null
     flow_invalidation: null
     flow_lockdown: null
-    flow_recovery: null
+    flow_recovery: 02b1cbf6-2b86-4966-b0ba-bc1ac0374597
     flow_request: null
     flow_unenrollment: null
     flow_user_settings: null
@@ -3183,6 +3184,254 @@ entries:
   identifiers:
     pk: a5add24c-8765-4b73-9c70-3cf396be6111
   model: authentik_providers_microsoft_entra.microsoftentraprovidermapping
+  permissions: []
+  state: present
+- attrs:
+    authentication: require_unauthenticated
+    designation: recovery
+    layout: stacked
+    name: Default recovery flow
+    policy_engine_mode: any
+    slug: default-recovery-flow
+    title: Reset your password
+  conditions: []
+  identifiers:
+    pk: 02b1cbf6-2b86-4966-b0ba-bc1ac0374597
+  model: authentik_flows.flow
+  permissions: []
+  state: present
+- attrs:
+    field_key: password
+    initial_value: ''
+    initial_value_expression: false
+    label: Password
+    name: default-recovery-field-password
+    order: 0
+    placeholder: Password
+    placeholder_expression: false
+    required: true
+    sub_text: ''
+    type: password
+  conditions: []
+  identifiers:
+    pk: c2eea87f-7a4e-4ad0-82ca-e421a59f22ab
+  model: authentik_stages_prompt.prompt
+  permissions: []
+  state: present
+- attrs:
+    field_key: password_repeat
+    initial_value: ''
+    initial_value_expression: false
+    label: Password (repeat)
+    name: default-recovery-field-password-repeat
+    order: 1
+    placeholder: Password (repeat)
+    placeholder_expression: false
+    required: true
+    sub_text: ''
+    type: password
+  conditions: []
+  identifiers:
+    pk: a4d96bf7-e5de-4601-8028-d24646026f4b
+  model: authentik_stages_prompt.prompt
+  permissions: []
+  state: present
+- attrs:
+    expression: |
+      return bool(request.context.get('is_restored', True))
+    name: default-recovery-skip-if-restored
+  conditions: []
+  identifiers:
+    pk: 0a83e1b6-36e2-4c64-ab2f-8620dada36e3
+  model: authentik_policies_expression.expressionpolicy
+  permissions: []
+  state: present
+- attrs:
+    activate_user_on_success: false
+    from_address: system@authentik.local
+    host: localhost
+    name: default-recovery-email
+    port: 25
+    recovery_cache_timeout: minutes=5
+    recovery_max_attempts: 5
+    subject: Password reset
+    template: email/password_reset.html
+    timeout: 10
+    token_expiry: minutes=30
+    use_global_settings: true
+    use_ssl: false
+    use_tls: false
+    username: ''
+  conditions: []
+  identifiers:
+    pk: cf302e99-9edb-4336-976a-c52a40bb7187
+  model: authentik_stages_email.emailstage
+  permissions: []
+  state: present
+- attrs:
+    configuration_stages: []
+    device_classes:
+    - totp
+    - webauthn
+    last_auth_threshold: seconds=0
+    name: default-recovery-mfa
+    not_configured_action: deny
+    webauthn_allowed_device_types: []
+    webauthn_hints: []
+    webauthn_user_verification: preferred
+  conditions: []
+  identifiers:
+    pk: be505a6b-e40c-4a5a-845a-84e97ffd83ec
+  model: authentik_stages_authenticator_validate.authenticatorvalidatestage
+  permissions: []
+  state: present
+- attrs:
+    create_users_as_inactive: false
+    create_users_group: null
+    name: default-recovery-user-write
+    user_creation_mode: never_create
+    user_path_template: ''
+    user_type: external
+  conditions: []
+  identifiers:
+    pk: fd5ce789-b9ca-45b5-bb49-e44d8318546b
+  model: authentik_stages_user_write.userwritestage
+  permissions: []
+  state: present
+- attrs:
+    case_insensitive_matching: true
+    enable_remember_me: false
+    name: default-recovery-identification
+    pretend_user_exists: true
+    recovery_flow: null
+    show_matched_user: true
+    show_source_labels: false
+    sources: []
+    user_fields:
+    - email
+    - username
+  conditions: []
+  identifiers:
+    pk: fd4a1f97-6f19-4f61-a169-45c3c692a7b2
+  model: authentik_stages_identification.identificationstage
+  permissions: []
+  state: present
+- attrs:
+    name: default-recovery-user-login
+  conditions: []
+  identifiers:
+    pk: 80ef7621-99c8-436e-8ba2-dfff22fe63b5
+  model: authentik_stages_user_login.userloginstage
+  permissions: []
+  state: present
+- attrs:
+    fields:
+    - c2eea87f-7a4e-4ad0-82ca-e421a59f22ab
+    - a4d96bf7-e5de-4601-8028-d24646026f4b
+    name: default-recovery-prompt-password
+    validation_policies:
+    - 29910686-efe4-420c-be94-26a02fceb6bd
+  conditions: []
+  identifiers:
+    pk: 8b3bcc0d-0cee-46b4-af31-cd7c6e1d91ec
+  model: authentik_stages_prompt.promptstage
+  permissions: []
+  state: present
+- attrs:
+    evaluate_on_plan: true
+    invalid_response_action: retry
+    order: 10
+    policy_engine_mode: any
+    re_evaluate_policies: true
+    stage: fd4a1f97-6f19-4f61-a169-45c3c692a7b2
+    target: 02b1cbf6-2b86-4966-b0ba-bc1ac0374597
+  conditions: []
+  identifiers:
+    pk: c9c24133-e276-4d12-b170-47cf6ed8ff45
+  model: authentik_flows.flowstagebinding
+  permissions: []
+  state: present
+- attrs:
+    evaluate_on_plan: true
+    invalid_response_action: retry
+    order: 20
+    policy_engine_mode: any
+    re_evaluate_policies: true
+    stage: cf302e99-9edb-4336-976a-c52a40bb7187
+    target: 02b1cbf6-2b86-4966-b0ba-bc1ac0374597
+  conditions: []
+  identifiers:
+    pk: ad36ae6a-bf6f-457c-9267-37ad2e9689c2
+  model: authentik_flows.flowstagebinding
+  permissions: []
+  state: present
+- attrs:
+    evaluate_on_plan: true
+    invalid_response_action: retry
+    order: 21
+    policy_engine_mode: any
+    re_evaluate_policies: true
+    stage: be505a6b-e40c-4a5a-845a-84e97ffd83ec
+    target: 02b1cbf6-2b86-4966-b0ba-bc1ac0374597
+  conditions: []
+  identifiers:
+    pk: 866d1bf3-3d7a-4f6b-98de-911653617e77
+  model: authentik_flows.flowstagebinding
+  permissions: []
+  state: present
+- attrs:
+    evaluate_on_plan: true
+    invalid_response_action: retry
+    order: 30
+    policy_engine_mode: any
+    re_evaluate_policies: false
+    stage: 8b3bcc0d-0cee-46b4-af31-cd7c6e1d91ec
+    target: 02b1cbf6-2b86-4966-b0ba-bc1ac0374597
+  conditions: []
+  identifiers:
+    pk: 58c9c13f-b078-49fd-9e0e-5ff29a9fe1ca
+  model: authentik_flows.flowstagebinding
+  permissions: []
+  state: present
+- attrs:
+    evaluate_on_plan: true
+    invalid_response_action: retry
+    order: 40
+    policy_engine_mode: any
+    re_evaluate_policies: false
+    stage: fd5ce789-b9ca-45b5-bb49-e44d8318546b
+    target: 02b1cbf6-2b86-4966-b0ba-bc1ac0374597
+  conditions: []
+  identifiers:
+    pk: 8a79f52f-39de-4dd8-89d6-b521b89735bf
+  model: authentik_flows.flowstagebinding
+  permissions: []
+  state: present
+- attrs:
+    evaluate_on_plan: true
+    invalid_response_action: retry
+    order: 100
+    policy_engine_mode: any
+    re_evaluate_policies: false
+    stage: 80ef7621-99c8-436e-8ba2-dfff22fe63b5
+    target: 02b1cbf6-2b86-4966-b0ba-bc1ac0374597
+  conditions: []
+  identifiers:
+    pk: 33571ab2-bbd9-43ce-89e4-97b21389aa70
+  model: authentik_flows.flowstagebinding
+  permissions: []
+  state: present
+- attrs:
+    enabled: true
+    negate: false
+    order: 0
+    policy: 0a83e1b6-36e2-4c64-ab2f-8620dada36e3
+    target: c9c24133-e276-4d12-b170-47cf6ed8ff45
+    timeout: 30
+  conditions: []
+  identifiers:
+    pk: d0f4f647-9712-4e6a-a80e-f8a8e93f2b6c
+  model: authentik_policies.policybinding
   permissions: []
   state: present
 metadata:
