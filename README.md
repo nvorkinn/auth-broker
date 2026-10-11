@@ -416,7 +416,8 @@ before this change that aren't discoverable still work as a second factor only.
 
 One-time setup in the repo's **Settings**:
 
-- **Live blueprint validation** in the Tests workflow uses the repository-level
+- **Live blueprint validation** in the Authentik config workflow (which only runs when
+  `authentik/` or its validator changes) uses the repository-level
   SSH secrets listed below. It streams the candidate YAML into a temporary file
   in a private `/tmp` directory inside the running Authentik worker and runs
   `ak apply_blueprint --dry-run`. `AUTHENTIK_BLUEPRINTS_DIR` points to that

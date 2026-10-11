@@ -11,35 +11,6 @@ permissions:
   contents: read
 
 jobs:
-  authentik:
-    name: validate Authentik config
-    # Fork PRs cannot access deployment credentials. Never run untrusted PR code via
-    # pull_request_target to give it access to production credentials.
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
-        with:
-          python-version: "3.12"
-      - name: Set up SSH
-        env:
-          ORACLE_SSH_TOKEN: ${{ secrets.ORACLE_SSH_TOKEN }}
-          DEPLOY_SSH_KNOWN_HOSTS: ${{ secrets.DEPLOY_SSH_KNOWN_HOSTS }}
-        run: |
-          test -n "$ORACLE_SSH_TOKEN"
-          test -n "$DEPLOY_SSH_KNOWN_HOSTS"
-          install -m 700 -d ~/.ssh
-          printf '%s\n' "$ORACLE_SSH_TOKEN" > ~/.ssh/id_deploy
-          chmod 600 ~/.ssh/id_deploy
-          printf '%s\n' "$DEPLOY_SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
-      - name: Validate against the running Authentik instance
-        env:
-          DEPLOY_TARGET: ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}
-          DEPLOY_SSH_IDENTITY_FILE: /home/runner/.ssh/id_deploy
-        run: python scripts/validate_authentik_config.py
-
   test:
     runs-on: ubuntu-latest
     steps:
