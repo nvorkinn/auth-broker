@@ -13,6 +13,8 @@ directory=$(mktemp -d /tmp/authentik-validation-XXXXXXXX)
 blueprint="$directory/candidate.yaml"
 trap 'rm -f "$blueprint"; rmdir "$directory"' EXIT
 cat > "$blueprint"
+BLUEPRINT_LOGS_CLIENT_SECRET=validation-only \
+BLUEPRINT_METRICS_CLIENT_SECRET=validation-only \
 AUTHENTIK_BLUEPRINTS_DIR="$directory" ak apply_blueprint --dry-run candidate.yaml
 """
 REMOTE_COMMAND = "cd /opt/auth-broker && docker compose exec -T authentik-worker sh -c " + shlex.quote(WORKER_COMMAND)

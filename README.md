@@ -407,9 +407,10 @@ One-time setup in the repo's **Settings**:
   in a private `/tmp` directory inside the running Authentik worker and runs
   `ak apply_blueprint --dry-run`. `AUTHENTIK_BLUEPRINTS_DIR` points to that
   directory for the dry-run process only, leaving the deployed configuration
-  and the worker's normal blueprint discovery unchanged.
-  This checks against the live database and resolves `!Env` in the container,
-  rolling back validation's database transaction without applying the blueprint.
+  and the worker's normal blueprint discovery unchanged. It supplies
+  validation-only values for the two `!Env` client-secret tags; the dry-run
+  checks the blueprint against the live database without validating the actual
+  production secret values, and rolls back its database transaction.
   The temporary file is removed when the worker command exits. Missing SSH
   credentials, connection failures, and invalid blueprints fail the check;
   fork PRs skip this credential-bearing job. No Authentik API token is needed.

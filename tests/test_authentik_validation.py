@@ -35,6 +35,8 @@ def test_worker_command_is_dry_run_with_cleanup():
     assert "mktemp -d /tmp/authentik-validation-" in validator.WORKER_COMMAND
     assert """trap 'rm -f "$blueprint"; rmdir "$directory"' EXIT""" in validator.WORKER_COMMAND
     assert 'cat > "$blueprint"' in validator.WORKER_COMMAND
+    assert "BLUEPRINT_LOGS_CLIENT_SECRET=validation-only" in validator.WORKER_COMMAND
+    assert "BLUEPRINT_METRICS_CLIENT_SECRET=validation-only" in validator.WORKER_COMMAND
     assert (
         'AUTHENTIK_BLUEPRINTS_DIR="$directory" ak apply_blueprint --dry-run candidate.yaml' in validator.WORKER_COMMAND
     )
@@ -49,6 +51,8 @@ ak() {{
     test "$2" = --dry-run
     test "$3" = candidate.yaml
     test "$(cat "$AUTHENTIK_BLUEPRINTS_DIR/$3")" = candidate
+    test "$BLUEPRINT_LOGS_CLIENT_SECRET" = validation-only
+    test "$BLUEPRINT_METRICS_CLIENT_SECRET" = validation-only
     return {exit_code}
 }}
 """
