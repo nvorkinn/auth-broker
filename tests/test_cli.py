@@ -1,7 +1,8 @@
+import pytest
 from sqlalchemy import func, select
 
 from broker.db import db
-from broker.models import DeviceConfig, GlowmarktCredentials, SpotifyToken
+from broker.models import DeviceConfig, GlowmarktCredentials, PendingRegistration, SpotifyToken
 
 
 def _headers(secret):
@@ -142,3 +143,59 @@ def test_unknown_device_is_an_error(cli):
         result = cli(command, "nope")
         assert result.exit_code == 1
         assert "No device nope." in result.stderr
+
+
+def test_clear_pending_with_empty_queue(cli):
+    result = cli("clear-pending")
+
+    assert result.exit_code == 0
+    assert result.output == "Cleared 0 pending devices.\n"
+
+
+@pytest.mark.parametrize("role", ["renderer", "display"])
+def test_clear_pending_removes_all_waiting_registrations(app, register_pending, cli, role):
+    secrets = ["pending-device-one-0123456789", "pending-device-two-0123456789"]
+    for secret in secrets:
+        assert register_pending(role, secret).status_code == 202
+
+    result = cli("clear-pending")
+
+    assert result.exit_code == 0
+    assert result.output == "Cleared 2 pending devices.\n"
+    with app.app_context():
+        assert db.session.scalar(select(func.count()).select_from(PendingRegistration)) == 0
+    assert cli("pending").output == "Nothing waiting.\n"
+    assert cli("clear-pending").output == "Cleared 0 pending devices.\n"
+    # Cleared callers must be able to register again, rather than staying in the pool.
+    for secret in secrets:
+        assert register_pending(role, secret).status_code == 202
+
+
+def test_clear_pending_preserves_registered_devices(app, client, register_device, register_pending, split_device, cli):
+    paired_id, paired_secret = _paired_device(client, register_device)
+    unpaired_id, unpaired_secret = register_device("unpaired-device-secret-0123456789")
+    split_id, renderer_secret, _ = split_device
+    with app.app_context():
+        db.session.get(DeviceConfig, paired_id).weather_location = "London"
+        db.session.add(SpotifyToken(device_id=paired_id, refresh_token="refresh"))
+        db.session.add(GlowmarktCredentials(device_id=paired_id, username="me"))
+        db.session.commit()
+        counts = {
+            table.name: db.session.scalar(select(func.count()).select_from(table))
+            for table in db.metadata.sorted_tables
+            if table.name != PendingRegistration.__tablename__
+        }
+    assert register_pending("display", "pending-display-secret-0123456789").status_code == 202
+
+    result = cli("clear-pending")
+
+    assert result.exit_code == 0
+    assert result.output == "Cleared 1 pending devices.\n"
+    with app.app_context():
+        assert db.session.scalar(select(func.count()).select_from(PendingRegistration)) == 0
+        for table in db.metadata.sorted_tables:
+            if table.name in counts:
+                assert db.session.scalar(select(func.count()).select_from(table)) == counts[table.name], table.name
+    assert _config(client, paired_id, paired_secret)["weather"]["location"] == "London"
+    assert _config(client, unpaired_id, unpaired_secret)["pairing_code"] is not None
+    assert _config(client, split_id, renderer_secret) is not None

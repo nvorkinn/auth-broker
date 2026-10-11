@@ -239,6 +239,7 @@ docker exec auth-broker flask --app wsgi devices unpair <device_id>            #
 docker exec auth-broker flask --app wsgi devices unpair <device_id> --config   # ...and reset its settings and linked accounts
 docker exec auth-broker flask --app wsgi devices forget <device_id>            # delete it; it must register again
 docker exec auth-broker flask --app wsgi devices pending                       # renderers/screens waiting to be matched
+docker exec auth-broker flask --app wsgi devices clear-pending                 # clear waiting registrations, keep matched devices
 ```
 
 `unpair` keeps the device's identity, so the Pi just shows a new code on its
