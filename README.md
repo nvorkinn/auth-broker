@@ -390,6 +390,16 @@ a job redeploys the same tag; to roll back, re-run the deploy jobs of the older
 release's workflow run, which deploys that release's own bundle. Old releases
 stay under `releases/`; they're a few KB each.
 
+The login screen's recovery link uses `default-recovery-flow`: identify by
+email or username, follow the emailed link (valid for 30 minutes), verify an
+already-enrolled TOTP authenticator or WebAuthn device, then enter and confirm
+a new password. Recovery uses the existing password-change policy and denies
+users without either supported second factor; it does not enroll new factors
+or reactivate disabled accounts. Configure Authentik's global SMTP settings
+in `authentik.env` before using recovery. The blueprint uses `!Env` tags, so
+generic YAML schema validators cannot parse it unchanged; the deploy job uses
+Authentik's own `ak apply_blueprint`, which applies changes, not just validates.
+
 One-time setup in the repo's **Settings**:
 
 - **Environments**: create `deploy-caddy`, `deploy-config`, `deploy-authentik`
