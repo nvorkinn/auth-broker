@@ -1,6 +1,6 @@
 name: Authentik config
 
-# Dry-runs the blueprint on the live worker, so it only runs when something that feeds it changes.
+# Applies the blueprint to a throwaway Authentik, so it only runs when something that feeds it changes.
 # all-checks treats a workflow that never started as fine.
 on:
   push:
@@ -8,6 +8,8 @@ on:
     paths: &paths
       - authentik/**
       - scripts/validate_authentik_config.py
+      - scripts/authentik-validate/**
+      - docker-compose.yml
       - tests/test_authentik_validation.py
       - .github/workflows/authentik.yml
   pull_request:
@@ -21,29 +23,13 @@ permissions:
 jobs:
   authentik:
     name: validate Authentik config
-    # Fork PRs cannot access deployment credentials. Never run untrusted PR code via
-    # pull_request_target to give it access to production credentials.
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
-      - name: Set up SSH
-        env:
-          ORACLE_SSH_TOKEN: ${{ secrets.ORACLE_SSH_TOKEN }}
-          DEPLOY_SSH_KNOWN_HOSTS: ${{ secrets.DEPLOY_SSH_KNOWN_HOSTS }}
-        run: |
-          test -n "$ORACLE_SSH_TOKEN"
-          test -n "$DEPLOY_SSH_KNOWN_HOSTS"
-          install -m 700 -d ~/.ssh
-          printf '%s\n' "$ORACLE_SSH_TOKEN" > ~/.ssh/id_deploy
-          chmod 600 ~/.ssh/id_deploy
-          printf '%s\n' "$DEPLOY_SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
-      - name: Validate against the running Authentik instance
-        env:
-          DEPLOY_TARGET: ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}
-          DEPLOY_SSH_IDENTITY_FILE: /home/runner/.ssh/id_deploy
+      # Applies the blueprint to a throwaway Authentik and Postgres: no secrets, so fork PRs run it too.
+      - name: Apply to a throwaway Authentik
         run: python scripts/validate_authentik_config.py
