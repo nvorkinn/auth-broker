@@ -649,6 +649,20 @@ entries:
   permissions: []
   state: present
 - attrs:
+    authentication: require_unauthenticated
+    designation: recovery
+    layout: stacked
+    name: Default recovery flow
+    policy_engine_mode: any
+    slug: default-recovery-flow
+    title: Reset your password
+  conditions: []
+  identifiers:
+    pk: 02b1cbf6-2b86-4966-b0ba-bc1ac0374597
+  model: authentik_flows.flow
+  permissions: []
+  state: present
+- attrs:
     evaluate_on_plan: false
     invalid_response_action: retry
     order: 0
@@ -3184,20 +3198,6 @@ entries:
   identifiers:
     pk: a5add24c-8765-4b73-9c70-3cf396be6111
   model: authentik_providers_microsoft_entra.microsoftentraprovidermapping
-  permissions: []
-  state: present
-- attrs:
-    authentication: require_unauthenticated
-    designation: recovery
-    layout: stacked
-    name: Default recovery flow
-    policy_engine_mode: any
-    slug: default-recovery-flow
-    title: Reset your password
-  conditions: []
-  identifiers:
-    pk: 02b1cbf6-2b86-4966-b0ba-bc1ac0374597
-  model: authentik_flows.flow
   permissions: []
   state: present
 - attrs:
