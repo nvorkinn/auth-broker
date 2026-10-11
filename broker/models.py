@@ -20,6 +20,12 @@ class Device(db.Model):
     # no display secret. SHA-256 hex (see auth.hash_secret).
     renderer_secret_hash: Mapped[str] = mapped_column(String, index=True, unique=True)
     display_secret_hash: Mapped[str | None] = mapped_column(String, index=True, unique=True)
+    # What the device's owner's browser presents to pair with it without a code (see
+    # services/pairing.py). Derived from the renderer's secret, so the device never has to send it.
+    pairing_token: Mapped[str | None] = mapped_column(String, index=True, unique=True)
+    # The Authentik user the device is paired with: the user id the login proxy passes in a header
+    # (see auth.current_user). One owner; settings are theirs to see and edit.
+    owner: Mapped[str | None] = mapped_column(String, index=True)
     created_at: Mapped[datetime] = mapped_column(UTCDateTime)
     paired_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
     device_name: Mapped[str | None] = mapped_column(String)

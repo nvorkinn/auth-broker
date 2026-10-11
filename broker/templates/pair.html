@@ -4,10 +4,17 @@
 {% block heading %}Connect your device{% endblock %}
 
 {% block content %}
-<div class="card">
+<div class="card" id="waiting" hidden>
+    <div class="card-header">
+        <h2 class="card-title">Connecting to your device…</h2>
+        <p class="card-subtitle" id="waiting-note">This takes a few seconds while it comes online.</p>
+    </div>
+</div>
+
+<div class="card" id="code-card">
     <div class="card-header">
         <h2 class="card-title">Enter your pairing code</h2>
-        <p class="card-subtitle">Your device is showing a 6-character code on its screen. Enter it below to link this browser to it.</p>
+        <p class="card-subtitle">Your device is showing a 6-character code on its screen. Enter it below to link it to your account.</p>
     </div>
 
     {% if error %}
@@ -20,4 +27,49 @@
         <button type="submit" class="btn-save">Connect</button>
     </form>
 </div>
+
+<script>
+    // A device that has just finished WiFi setup sends its owner here with a pairing token, normally
+    // in the fragment, which browsers never send to a server. The device may not have registered yet,
+    // so keep asking until it has; if it doesn't, the code below still works.
+    var token = location.hash.slice(1) || {{ token|tojson }};
+    var GIVE_UP_AFTER_MS = 90000;
+    if (/^[0-9a-f]{64}$/.test(token)) {
+        var waiting = document.getElementById("waiting");
+        var codeCard = document.getElementById("code-card");
+        var note = document.getElementById("waiting-note");
+        var started = Date.now();
+        waiting.hidden = false;
+        codeCard.hidden = true;
+
+        var fail = function (message) {
+            note.textContent = message;
+            codeCard.hidden = false;
+        };
+        var attempt = function () {
+            fetch("{{ url_for('pages.pair_by_token') }}", {
+                method: "POST",
+                headers: {"Content-Type": "application/json"},
+                body: JSON.stringify({token: token}),
+            }).then(function (response) {
+                if (response.status === 200) {
+                    location.replace("{{ url_for('pages.device_config') }}");
+                } else if (response.status === 409) {
+                    fail("This device already belongs to another account.");
+                } else if (response.status === 202 && Date.now() - started < GIVE_UP_AFTER_MS) {
+                    setTimeout(attempt, 2000);
+                } else {
+                    fail("Your device hasn't come online yet. You can enter the code on its screen instead.");
+                }
+            }).catch(function () {
+                if (Date.now() - started < GIVE_UP_AFTER_MS) {
+                    setTimeout(attempt, 2000);
+                } else {
+                    fail("Couldn't reach the server. You can enter the code on your device's screen instead.");
+                }
+            });
+        };
+        attempt();
+    }
+</script>
 {% endblock %}

@@ -3,7 +3,7 @@ import hashlib
 import hmac
 from datetime import UTC, datetime, timedelta
 
-from flask import current_app, g, jsonify, redirect, request, session, url_for
+from flask import current_app, g, jsonify, redirect, request, url_for
 from sqlalchemy import select
 
 from .db import db
@@ -114,18 +114,48 @@ def require_status_token(view):
     return wrapped
 
 
-def require_paired_session(view):
-    """Protects browser-facing pages that act on 'whichever device this browser
-    paired with'. The cookie only carries the device_id, so check the device still
-    exists and is paired: unpair and forget must take effect on browsers too."""
+def current_user() -> str | None:
+    """The signed-in user's id: the header the login proxy sets on every browser-facing request,
+    which the broker trusts because only the proxy can reach it (see caddy/Caddyfile)."""
+    return request.headers.get(current_app.config["USER_HEADER"], "").strip() or None
+
+
+def paired_device_id() -> str | None:
+    """The device the signed-in user is paired with (the one paired most recently, if several)."""
+    user = current_user()
+    if user is None:
+        return None
+    return db.session.scalar(
+        select(Device.device_id)
+        .where(Device.owner == user, Device.paired_at.is_not(None))
+        .order_by(Device.paired_at.desc())
+        .limit(1)
+    )
+
+
+def require_user(view):
+    """Protects browser pages that only need someone signed in. Without the proxy's header the
+    request didn't come through the login, so it's a 401."""
 
     @functools.wraps(view)
     def wrapped(*args, **kwargs):
-        device = None
-        if "device_id" in session:
-            device = db.session.get(Device, session["device_id"])
-        if device is None or device.paired_at is None:
-            session.clear()
+        if current_user() is None:
+            return "Sign in required.", 401
+        return view(*args, **kwargs)
+
+    return wrapped
+
+
+def require_paired_user(view):
+    """Protects browser pages that act on 'the signed-in user's device': a user with none goes to
+    /pair. Sets g.device_id. Looked up on every request, so unpairing and forgetting take effect at once."""
+
+    @functools.wraps(view)
+    def wrapped(*args, **kwargs):
+        if current_user() is None:
+            return "Sign in required.", 401
+        g.device_id = paired_device_id()
+        if g.device_id is None:
             return redirect(url_for("pages.pair"))
         return view(*args, **kwargs)
 

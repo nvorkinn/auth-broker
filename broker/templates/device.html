@@ -12,7 +12,6 @@
 
 <!-- Lives outside the settings form because forms can't nest; the Disconnect button points at it. -->
 <form id="spotifyDisconnectForm" method="POST" action="{{ url_for('pages.spotify_disconnect') }}"></form>
-<form id="linkBrowserForm" method="POST" action="{{ url_for('pages.link_browser') }}"></form>
 <form id="displayUnlinkForm" method="POST" action="{{ url_for('pages.display_unlink') }}"></form>
 
 <form method="POST">
@@ -149,24 +148,6 @@
             <span class="card-subtitle">Screen: {{ 'attached' if display_attached else 'not attached' }}</span>
             {% if display_attached %}
                 <button type="submit" form="displayUnlinkForm" class="btn-action btn-delete">Unlink screen</button>
-            {% endif %}
-        </div>
-    </div>
-
-    <!-- Other browsers -->
-    <div class="card">
-        <div class="card-header">
-            <h2 class="card-title">Other browsers</h2>
-        </div>
-        <div class="status-row">
-            {% if pairing_code %}
-                <p style="margin: 0;">
-                    Enter <code>{{ pairing_code }}</code> at <code>{{ url_for('pages.pair', _external=True) }}</code>
-                    on the other browser within 10 minutes. It's also on the device's screen.
-                </p>
-            {% else %}
-                <span class="card-subtitle">Use these settings from another phone or computer too.</span>
-                <button type="submit" form="linkBrowserForm" class="btn-action">Link another browser</button>
             {% endif %}
         </div>
     </div>

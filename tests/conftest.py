@@ -32,8 +32,21 @@ def app(tmp_path, monkeypatch):
         db.engine.dispose()
 
 
+USER = "user-1"
+
+
 @pytest.fixture
 def client(app):
+    """A browser signed in as USER: the header the login proxy sets (see auth.current_user). Device API
+    calls ignore it."""
+    client = app.test_client()
+    client.environ_base["HTTP_X_AUTHENTIK_UID"] = USER
+    return client
+
+
+@pytest.fixture
+def anonymous_client(app):
+    """A request that didn't come through the login proxy."""
     return app.test_client()
 
 
@@ -82,7 +95,7 @@ def split_device(register_pending):
 
 @pytest.fixture
 def paired_client(client, register_device):
-    """A test client whose session is already paired with a freshly-registered device."""
+    """A test client whose user is already paired with a freshly-registered device."""
     device_id, device_secret = register_device()
 
     code_response = client.post(

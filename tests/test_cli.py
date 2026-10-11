@@ -104,7 +104,7 @@ def test_forget_leaves_other_devices_alone(app, client, register_device, cli):
     assert _config(client, kept, kept_secret)["pairing_code"] is not None
 
 
-def test_code_links_a_new_browser_to_an_already_paired_device(app, client, register_device, cli):
+def test_code_hands_an_already_paired_device_to_another_user(app, client, register_device, cli):
     device_id, secret = _paired_device(client, register_device)
 
     result = cli("code", device_id)
@@ -112,20 +112,29 @@ def test_code_links_a_new_browser_to_an_already_paired_device(app, client, regis
     assert result.exit_code == 0
     code = result.output.split(":")[0]
     assert _config(client, device_id, secret)["pairing_code"] == code  # the device shows it too
-    new_browser = app.test_client()
-    new_browser.post("/pair", data={"code": code})
-    assert new_browser.get("/device").status_code == 200
-    assert client.get("/device").status_code == 200  # the first browser keeps its access
+    new_owner = app.test_client()
+    new_owner.environ_base["HTTP_X_AUTHENTIK_UID"] = "someone-else"
+    new_owner.post("/pair", data={"code": code})
+    assert new_owner.get("/device").status_code == 200
+    assert client.get("/device").status_code == 302  # one owner at a time
 
 
-def test_code_replaces_the_previous_code(app, client, register_device, cli):
+def test_owner_pairs_a_device_with_a_user(app, client, register_device, cli):
+    device_id, _ = register_device()
+
+    result = cli("owner", device_id, "user-1")
+
+    assert result.exit_code == 0
+    assert client.get("/device").status_code == 200
+    assert "owner=user-1" in cli("list").output
+
+
+def test_unpair_removes_the_owner(client, register_device, cli):
     device_id, _ = _paired_device(client, register_device)
-    first = cli("code", device_id).output.split(":")[0]
-    cli("code", device_id)
 
-    new_browser = app.test_client()
-    new_browser.post("/pair", data={"code": first})
-    assert new_browser.get("/device").status_code == 302
+    cli("unpair", device_id)
+
+    assert client.get("/device").status_code == 302
 
 
 def test_unknown_device_is_an_error(cli):

@@ -9,8 +9,12 @@ def load(app: Flask) -> None:
     app.secret_key = os.environ["FLASK_SECRET_KEY"]
     app.permanent_session_lifetime = timedelta(days=30)
     # Unset (the default) keeps the session cookie host-only. Set it to a parent domain, e.g.
-    # ".nikolaivorkinn.com", to share the pairing cookie with sibling subdomains.
+    # ".nikolaivorkinn.com", to share the cookie (it carries only the Spotify OAuth state) with sibling subdomains.
     app.config["SESSION_COOKIE_DOMAIN"] = os.environ.get("SESSION_COOKIE_DOMAIN") or None
+
+    # The request header the login proxy (Caddy forward auth to Authentik) puts the signed-in user's
+    # id in. Caddy overwrites it on every browser-facing request; see caddy/Caddyfile.
+    app.config["USER_HEADER"] = os.environ.get("AUTH_USER_HEADER", "X-Authentik-Uid")
 
     app.config["SPOTIFY_CLIENT_ID"] = os.environ["SPOTIFY_CLIENT_ID"]
     app.config["SPOTIFY_CLIENT_SECRET"] = os.environ["SPOTIFY_CLIENT_SECRET"]

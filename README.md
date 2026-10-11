@@ -14,20 +14,30 @@ a Spotify token.
 1. **First boot:** the Pi generates its own secret and calls
    `POST /api/devices/register` once, getting back its `device_id`. The server only ever stores a
    hash of the secret; the Pi is the only place the plaintext secret lives.
-2. **Pairing:** the Pi polls `GET /api/config`. While the
-   device is unpaired, the response carries a short-lived `pairing_code` (the
-   server issues a fresh one whenever the last expires), which the Pi shows on
-   its screen. The recipient enters it at `/pair`, which binds their browser
-   session to that device for `/device` (settings) and Spotify linking, and
-   marks the device paired (`devices.paired_at`): from then on `pairing_code`
-   is `null`. `setup_missing` in the same response lists what the device still
-   needs before it's worth showing (a weather location, a postcode, a bus or tube stop),
-   so the Pi can tell the recipient. To link another browser to an
-   already-paired device (or get back in after the 30-day session expires),
-   get a fresh code: "Link another browser" on `/device` from a browser that's
-   still paired, `flask devices code <device_id>` (below), or the Pi itself via
-   `POST /api/devices/pairing-code`. Any live code also appears on the
-   Pi's screen until it expires or is used.
+2. **Pairing:** a device is paired with an Authentik user, who becomes its owner
+   (`devices.owner`, the user id the login proxy passes in `X-Authentik-Uid`) and
+   sees its settings at `/device` after logging in. There are two ways in:
+   - **Token (main path).** After WiFi setup the device redirects its owner's
+     browser to `/pair#<token>`, where `token` is the hex SHA-256 of
+     `"pairing:" + hex SHA-256 of the device secret`. It's one-way, so it's safe
+     in a URL, and the fragment never reaches a server log (`/pair?t=<token>` also
+     works). The broker stores it when the device registers, so the device sends
+     nothing extra. The page logs the user in, then waits (polling
+     `POST /pair/token`) until the device has registered, which is normally
+     seconds, and goes to `/device`. It gives up after 90 seconds and offers the
+     code instead. Someone else's device is refused (409).
+   - **Code (fallback).** The Pi polls `GET /api/config`; while unpaired, the
+     response carries a short-lived `pairing_code` (a fresh one whenever the last
+     expires) for its screen. The user enters it at `/pair`. A code also hands a
+     device to a different user, since it proves they're at the device: get a
+     fresh one with `flask devices code <device_id>` (below) or from the Pi via
+     `POST /api/devices/pairing-code`.
+
+   Once paired, `pairing_code` is `null`. `setup_missing` in the same response
+   lists what the device still needs before it's worth showing (a weather
+   location, a postcode, a bus or tube stop), so the Pi can tell the recipient.
+   A user with several devices gets the one paired most recently. Devices paired
+   before owners existed need `flask devices owner <device_id> <user id>`.
 3. **Spotify:** from `/device`, "Connect Spotify" kicks off the OAuth flow.
    The server exchanges the code for tokens and keeps them — the Pi never
    sees a Spotify token, only its own device secret.
@@ -41,8 +51,9 @@ a Spotify token.
    `GET /api/spotify/top/<artists|tracks>` is served the same way.
 
 Every device-facing endpoint is authenticated with `Authorization: Bearer
-<secret>`; every browser-facing page is gated on the signed session
-cookie set at pairing time. Bearer secrets mean HTTPS is required for any
+<secret>`; every browser-facing page needs an Authentik login: Caddy
+forward-auths them and sets `X-Authentik-Uid` (setting `AUTH_USER_HEADER`
+changes the name), which the broker trusts, so the port must stay on loopback. Bearer secrets mean HTTPS is required for any
 non-local deployment (Caddy terminates TLS here; see [Caddy](#caddy)).
 
 ## Renderer and display roles
@@ -210,6 +221,7 @@ Then, in another terminal, simulate a Pi and walk through pairing yourself:
 python scripts/simulate_device.py
 # prints a device_id and a pairing code
 # -> open http://127.0.0.1:5000/pair and enter the code
+# (or `--token` to try the redirect flow instead)
 ```
 
 ## Resetting a device while developing
@@ -221,7 +233,8 @@ they work wherever the container runs, Compose or not:
 
 ```bash
 docker exec auth-broker flask --app wsgi devices list
-docker exec auth-broker flask --app wsgi devices code <device_id>              # a fresh code, e.g. for a new browser
+docker exec auth-broker flask --app wsgi devices code <device_id>              # a fresh code, e.g. to hand the device to another user
+docker exec auth-broker flask --app wsgi devices owner <device_id> <user id>   # pair a device with a user
 docker exec auth-broker flask --app wsgi devices unpair <device_id>            # show a pairing code again
 docker exec auth-broker flask --app wsgi devices unpair <device_id> --config   # ...and reset its settings and linked accounts
 docker exec auth-broker flask --app wsgi devices forget <device_id>            # delete it; it must register again

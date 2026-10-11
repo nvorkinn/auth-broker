@@ -2,6 +2,7 @@
 
 docker exec auth-broker flask --app wsgi devices list
 docker exec auth-broker flask --app wsgi devices code <device_id>
+docker exec auth-broker flask --app wsgi devices owner <device_id> <user id>
 docker exec auth-broker flask --app wsgi devices unpair <device_id> [--config]
 docker exec auth-broker flask --app wsgi devices forget <device_id>
 docker exec auth-broker flask --app wsgi devices pending
@@ -36,7 +37,7 @@ def _timestamp(value: datetime) -> str:
 
 @devices.command("list")
 def list_devices() -> None:
-    """Show every device and whether it's paired."""
+    """Show every device and whether it's paired, and to whom."""
     all_devices = db.session.scalars(select(Device).order_by(Device.created_at)).all()
     if not all_devices:
         click.echo("No devices.")
@@ -44,7 +45,7 @@ def list_devices() -> None:
         pairing_code = pairing.live_code(device.device_id)
         config = device.config
         name = device.device_name or "unnamed"
-        paired = f"paired {_timestamp(device.paired_at)}" if device.paired_at else "NOT paired"
+        paired = f"paired {_timestamp(device.paired_at)} owner={device.owner}" if device.paired_at else "NOT paired"
         code_field = f"  code {pairing_code}" if pairing_code else ""
         weather = (config.weather_location if config else "") or "-"
         stops = json.dumps(config.tfl_stop_ids) if config else None
@@ -56,11 +57,24 @@ def list_devices() -> None:
 @devices.command()
 @click.argument("device_id")
 def code(device_id: str) -> None:
-    """Issue a fresh pairing code, e.g. to link a new browser to an already-paired device."""
+    """Issue a fresh pairing code, e.g. to hand a device to a different user."""
     _get_device(device_id)
     new_code = pairing.issue_code(device_id)
     minutes = int(pairing.CODE_TTL.total_seconds() // 60)
     click.echo(f"{new_code}: enter it at /pair within {minutes} minutes (the device shows it too).")
+
+
+@devices.command()
+@click.argument("device_id")
+@click.argument("user")
+def owner(device_id: str, user: str) -> None:
+    """Make a user (their Authentik user id) the owner of a device, e.g. one paired before owners existed."""
+    device = _get_device(device_id)
+    device.owner = user
+    if device.paired_at is None:
+        device.paired_at = datetime.now(UTC)
+    db.session.commit()
+    click.echo(f"{device_id} now belongs to {user}.")
 
 
 @devices.command()
@@ -70,6 +84,7 @@ def unpair(device_id: str, wipe_config: bool) -> None:
     """Make a device show a pairing code again."""
     device = _get_device(device_id)
     device.paired_at = None
+    device.owner = None
     device.pairing_codes.clear()
     if wipe_config:
         # Reset to the model's defaults by replacing the row. The flush matters: without it SQLAlchemy
