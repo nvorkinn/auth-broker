@@ -403,6 +403,15 @@ in `authentik.env` before using recovery. The blueprint uses `!Env` tags, so
 generic YAML schema validators cannot parse it unchanged; the deploy job uses
 Authentik's own `ak apply_blueprint`, which applies changes, not just validates.
 
+Passkey login: the login screen's identification stage offers a passkey
+(Face ID / Touch ID) button, backed by the `default-authentication-passkey-validation`
+stage (WebAuthn only, user verification required). A passkey identifies the user
+and authenticates them in one step, with no username, password or second factor;
+the default flow's bindings skip those for `auth_webauthn_pwl` logins. Enroll a
+passkey from the user settings (`default-authenticator-webauthn-setup`, now
+requiring a discoverable credential and user verification). Passkeys enrolled
+before this change that aren't discoverable still work as a second factor only.
+
 One-time setup in the repo's **Settings**:
 
 - **Live blueprint validation** in the Tests workflow uses the repository-level
