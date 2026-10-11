@@ -19,6 +19,7 @@ pipeline:
     - name: opentelemetry
       listen: 127.0.0.1
       port: 4318
+    # Accepts a `service` and `host` per record from the sender (defaults: auth-broker, this host).
     - name: http
       tag: http_logs
       host: 127.0.0.1
@@ -34,24 +35,33 @@ pipeline:
       scrape_interval: 30
 
   filters:
-    # Docker's log files only carry the container ID, in the path; lift it into a field.
-    - name: lua
-      match: docker_logs
-      call: add_container_id
-      code: |
-        function add_container_id(tag, ts, record) local id = string.match(record["path"] or "", "/containers/(%x+)/"); if id then record["container_id"] = string.sub(id, 1, 12) end; record["path"] = nil; return 1, ts, record end
+    # The host name is picked up here and turned into `host` by normalize.lua, so a sender that
+    # already supplies its own `host` (e.g. a device posting to :9880) keeps it.
     - name: sysinfo
       match: '*'
       fluentbit_version_key: flb_ver
       os_name_key: os_name
-      hostname_key: hostname
+      hostname_key: _fb_host
+    # Docker app logs that are JSON (Caddy, Authentik, ...) get their fields lifted so the level
+    # can be read; non-JSON lines pass through untouched.
+    - name: parser
+      match: docker_logs
+      key_name: log
+      parser: json_log
+      reserve_data: on
+      preserve_key: on
+    # Standard fields on every log: service, host, level, _msg.
+    - name: lua
+      match_regex: '.*logs$'
+      script: /fluent-bit/etc/normalize.lua
+      call: normalize
 
   outputs:
     - name: http
       match: '*logs'
       host: 127.0.0.1
       port: 9428
-      uri: /insert/jsonline?_stream_fields=container_id&_msg_field=log&_time_field=date
+      uri: /insert/jsonline?_stream_fields=service,host&_msg_field=_msg&_time_field=date
       format: json_lines
       json_date_key: date
       json_date_format: iso8601

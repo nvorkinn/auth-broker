@@ -556,7 +556,23 @@ log and ships it to VictoriaLogs (`127.0.0.1:9428`). Its config
 (`fluent-bit/`) is baked into `ghcr.io/nvorkinn/auth-broker-fluent-bit:<tag>`,
 released alongside the other two images, so nothing needs copying to the host.
 The `deploy-config` job also deploys it, pinning `FLUENT_BIT_VERSION` in `.env`. Query in
-VictoriaLogs with e.g. `{container_id="abc123def456"}`; `docker ps` maps IDs to names.
+VictoriaLogs with e.g. `{service="caddy"}`.
+
+Every log line, from every source, carries the same fields (stream fields are `service,host`):
+
+| Field | Meaning |
+|---|---|
+| `service` | Source name: the compose service for container logs (set by the shared `x-logging` anchor, whose `tag: "{{.Name}}"` lands in each record's `attrs.tag`); whatever the sender supplies on the `:9880` HTTP input (default `auth-broker`) or OTLP input (default `otlp`) |
+| `host` | The machine's host name, unless the sender supplies its own (e.g. a device id) |
+| `level` | `trace`/`debug`/`info`/`warn`/`error`/`fatal`: from the JSON log's `level`, else a level word at the start of the line, else `info` |
+| `_msg` | The message |
+
+Senders to `:9880` (the broker, countdown devices) should include `service`, `host` and
+`level` in each record. The logic is in `fluent-bit/normalize.lua`.
+
+Container logs are rotated by Docker (10 MB x 3 files per container). The `tag` only applies to
+containers created after the change, so recreate them (`docker compose up -d`). Logs from before
+the change stay in the old `container_id` streams.
 
 The `victoria-logs` compose service is upstream's single-node VictoriaLogs
 (`ghcr.io/nvorkinn/auth-broker-victoria-logs:<tag>`). It keeps a week of logs
