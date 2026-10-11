@@ -386,10 +386,15 @@ applies it on its own. It takes the providers' client secrets with `!Env` from
 client (`BLUEPRINT_GOOGLE_CLIENT_ID`, `BLUEPRINT_GOOGLE_CLIENT_SECRET`; its
 redirect URI is `https://sso.nikolaivorkinn.com/source/oauth/callback/google/`); never commit them in the YAML. It leaves
 users alone: no users, tokens, TOTP or passkey devices, or group members are
-in it, so manage those in Authentik's UI, and strip them from any fresh
-export before committing it. Also strip the `authentik_blueprints.blueprintinstance`
-entries and the outpost's schedule (the one with a `rel_obj_id`): Authentik
-manages those itself, and both fail validation. Entries are applied in order,
+in it, so manage those in Authentik's UI. It holds only what this repo owns
+(the recovery flow, passkey login, the brands, the Logs and Metrics proxy
+providers and apps, the embedded outpost's providers, the Google source).
+Authentik's own default and system blueprints own the stock flows, stages,
+policies, mappings and groups: look those up with `!Find` by name or slug, and
+patch the few this file customises, and never paste in a UI export, whose exported
+pks exist only on one instance and clash with the stock objects' names. Blueprints
+only create and update, so removing an entry doesn't delete the object; add a
+`state: absent` entry or delete it in the UI. Entries are applied in order,
 so an object has to come before anything that points at it. Re-running
 a job redeploys the same tag; to roll back, re-run the deploy jobs of the older
 release's workflow run, which deploys that release's own bundle. Old releases
@@ -416,21 +421,17 @@ before this change that aren't discoverable still work as a second factor only.
 
 One-time setup in the repo's **Settings**:
 
-- **Live blueprint validation** in the Tests workflow uses the repository-level
-  SSH secrets listed below. It streams the candidate YAML into a temporary file
-  in a private `/tmp` directory inside the running Authentik worker and runs
-  `ak apply_blueprint --dry-run`. `AUTHENTIK_BLUEPRINTS_DIR` points to that
-  directory for the dry-run process only, leaving the deployed configuration
-  and the worker's normal blueprint discovery unchanged. It supplies
-  validation-only values for the two `!Env` client-secret tags; the dry-run
-  checks the blueprint against the live database without validating the actual
-  production secret values, and rolls back its database transaction.
-  The temporary file is removed when the worker command exits. Missing SSH
-  credentials, connection failures, and invalid blueprints fail the check;
-  fork PRs skip this credential-bearing job. No Authentik API token is needed.
-  Locally, set `DEPLOY_TARGET=user@host` and
-  `DEPLOY_SSH_IDENTITY_FILE=/path/to/key`, ensure the host is in SSH's
-  `known_hosts`, and run `python scripts/validate_authentik_config.py`.
+- **Blueprint validation** in the Authentik config workflow (which only runs when
+  `authentik/`, its validator or `docker-compose.yml` changes) needs no secrets.
+  `scripts/validate_authentik_config.py` starts a throwaway Authentik and
+  Postgres with Docker Compose (`scripts/authentik-validate/`, on the
+  `AUTHENTIK_VERSION` that `docker-compose.yml` defaults to), migrates it, applies
+  Authentik's default and system blueprints, then applies the candidate with
+  `ak apply_blueprint`, with validation-only values for the `!Env` tags, and tears
+  everything down. It is a real apply, not `--dry-run`: the dry run can't resolve
+  `!KeyOf` references to objects the blueprint is about to create. It takes about
+  2 to 4 minutes, so run it locally with `python scripts/validate_authentik_config.py`
+  (it needs Docker).
 - **Environments**: create `deploy-caddy`, `deploy-config`, `deploy-authentik`
   and `deploy-authentik-config`, and on each tick
   **Required reviewers** and add yourself. That rule is what keeps the jobs
