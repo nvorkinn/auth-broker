@@ -2869,7 +2869,7 @@ entries:
 - attrs:
     expression: |
       return bool(request.context.get('is_restored', True))
-    name: default-recovery-skip-if-restored
+    name: broker-recovery-skip-if-restored
   conditions: []
   identifiers:
     pk: 0a83e1b6-36e2-4c64-ab2f-8620dada36e3
