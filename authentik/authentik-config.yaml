@@ -93,7 +93,7 @@ entries:
     key: employee_job_title
     label: Title
     managed: goauthentik.io/object-attrs/user/employee/job_title
-    object_type: authentik Core | User
+    object_type: authentik_core.user
     regex: ''
     type: text
   conditions: []
@@ -110,7 +110,7 @@ entries:
     key: employee_department
     label: Departement
     managed: goauthentik.io/object-attrs/user/employee/department
-    object_type: authentik Core | User
+    object_type: authentik_core.user
     regex: ''
     type: text
   conditions: []
@@ -127,7 +127,7 @@ entries:
     key: given_name
     label: Given Name
     managed: goauthentik.io/object-attrs/user/identity/given_name
-    object_type: authentik Core | User
+    object_type: authentik_core.user
     regex: ''
     type: text
   conditions: []
@@ -144,7 +144,7 @@ entries:
     key: family_name
     label: Family Name
     managed: goauthentik.io/object-attrs/user/identity/family_name
-    object_type: authentik Core | User
+    object_type: authentik_core.user
     regex: ''
     type: text
   conditions: []
@@ -161,7 +161,7 @@ entries:
     key: settings.locale
     label: Locale
     managed: goauthentik.io/object-attrs/user/settings/locale
-    object_type: authentik Core | User
+    object_type: authentik_core.user
     regex: ''
     type: text
   conditions: []
@@ -178,7 +178,7 @@ entries:
     key: address_street
     label: Street
     managed: goauthentik.io/object-attrs/user/address/street
-    object_type: authentik Core | User
+    object_type: authentik_core.user
     regex: ''
     type: text
   conditions: []
@@ -195,7 +195,7 @@ entries:
     key: address_region
     label: Region
     managed: goauthentik.io/object-attrs/user/address/region
-    object_type: authentik Core | User
+    object_type: authentik_core.user
     regex: ''
     type: text
   conditions: []
@@ -212,7 +212,7 @@ entries:
     key: address_locality
     label: Location
     managed: goauthentik.io/object-attrs/user/address/locality
-    object_type: authentik Core | User
+    object_type: authentik_core.user
     regex: ''
     type: text
   conditions: []
@@ -229,7 +229,7 @@ entries:
     key: address_postal_code
     label: Postal code
     managed: goauthentik.io/object-attrs/user/address/postal_code
-    object_type: authentik Core | User
+    object_type: authentik_core.user
     regex: ''
     type: text
   conditions: []
@@ -246,7 +246,7 @@ entries:
     key: phone_number
     label: Phone number(s)
     managed: goauthentik.io/object-attrs/user/contact/phone_number
-    object_type: authentik Core | User
+    object_type: authentik_core.user
     regex: ''
     type: text
   conditions: []
@@ -263,7 +263,7 @@ entries:
     key: unix_shell
     label: Shell
     managed: goauthentik.io/object-attrs/user/unix/shell
-    object_type: authentik Core | User
+    object_type: authentik_core.user
     regex: ''
     type: text
   conditions: []
@@ -280,7 +280,7 @@ entries:
     key: employee_number
     label: Employee Number
     managed: goauthentik.io/object-attrs/user/employee/number
-    object_type: authentik Core | User
+    object_type: authentik_core.user
     regex: ''
     type: text
   conditions: []

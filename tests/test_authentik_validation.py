@@ -6,6 +6,16 @@ import pytest
 from scripts import validate_authentik_config as validator
 
 
+def test_blueprint_object_types_use_fully_qualified_model():
+    object_types = [
+        line.strip().partition(": ")[2]
+        for line in validator.BLUEPRINT.read_text().splitlines()
+        if line.strip().startswith("object_type:")
+    ]
+    assert object_types
+    assert set(object_types) == {"authentik_core.user"}
+
+
 def test_validates_candidate_over_ssh(monkeypatch):
     def run(command, **kwargs):
         assert command[:3] == ["ssh", "-i", "/key"]
