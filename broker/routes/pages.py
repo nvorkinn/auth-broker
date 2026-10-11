@@ -1,16 +1,18 @@
-"""The recipient-facing site: pairing a browser with a device, and the device's settings page."""
+"""The recipient-facing site: pairing the signed-in user with a device, and the device's settings page."""
 
 import re
 
-from flask import Blueprint, current_app, redirect, render_template, request, session, url_for
+from flask import Blueprint, current_app, g, jsonify, redirect, render_template, request, url_for
 
-from ..auth import require_paired_session
+from ..auth import current_user, paired_device_id, require_paired_user, require_user
 from ..clients import tfl, weather
 from ..db import db
 from ..models import Device, DeviceConfig, GlowmarktCredentials, SpotifyToken
 from ..services import pairing
 
 bp = Blueprint("pages", __name__)
+
+PAIRING_TOKEN_RE = re.compile(r"^[0-9a-f]{64}$")
 
 # UK postcode shape: outward code (e.g. SW1A, N1, EC2V) then inward code (digit + two letters).
 UK_POSTCODE_RE = re.compile(r"^([A-Z]{1,2}[0-9][A-Z0-9]?)([0-9][A-Z]{2})$")
@@ -27,13 +29,18 @@ def normalize_postcode(value: str) -> str | None:
 
 @bp.get("/")
 def index():
-    return redirect(url_for("pages.device_config") if "device_id" in session else url_for("pages.pair"))
+    return redirect(url_for("pages.device_config") if paired_device_id() else url_for("pages.pair"))
 
 
 @bp.route("/pair", methods=["GET", "POST"])
+@require_user
 def pair():
+    """Pairs the signed-in user with a device. A device that has just finished WiFi setup sends its
+    owner's browser here with a pairing token in the URL fragment (or, if it can't set one, ?t=):
+    the page waits for the device to register, then goes to its settings. Without a token it asks for
+    the code the device shows."""
     if request.method == "GET":
-        return render_template("pair.html", error=None)
+        return render_template("pair.html", error=None, token=request.args.get("t", ""))
 
     # Codes are guessable given enough tries, so wrong ones are throttled per IP; a locked-out IP is
     # refused even with the right code, or the lockout wouldn't slow guessing down.
@@ -43,18 +50,15 @@ def pair():
     if retry_after is not None:
         return _too_many_attempts(retry_after)
 
-    device_id = pairing.redeem_code(request.form.get("code", "").strip().upper())
+    device_id = pairing.redeem_code(request.form.get("code", "").strip().upper(), current_user())
     if device_id is None:
         lockout = throttle.record_failure(ip)
         current_app.logger.warning("Wrong pairing code from %s", ip)
         if lockout is not None:
             current_app.logger.warning("Too many wrong pairing codes from %s; locked out for %ss", ip, lockout)
             return _too_many_attempts(lockout)
-        return render_template("pair.html", error="That code is invalid or has expired.")
+        return render_template("pair.html", error="That code is invalid or has expired.", token="")
 
-    session.clear()
-    session.permanent = True
-    session["device_id"] = device_id
     return redirect(url_for("pages.device_config"))
 
 
@@ -62,13 +66,26 @@ def _too_many_attempts(retry_after: int):
     minutes = -(-retry_after // 60)
     wait = "a minute" if minutes == 1 else f"{minutes} minutes"
     error = f"Too many incorrect codes. Please wait {wait} and try again."
-    return render_template("pair.html", error=error), 429, {"Retry-After": str(retry_after)}
+    return render_template("pair.html", error=error, token=""), 429, {"Retry-After": str(retry_after)}
+
+
+@bp.post("/pair/token")
+@require_user
+def pair_by_token():
+    """Polled by the pairing page: 200 once the user is paired, 202 while the device hasn't
+    registered yet, 409 if someone else owns it. The token is 256 random-looking bits, so there's
+    nothing to throttle."""
+    token = (request.get_json(silent=True) or {}).get("token", "")
+    if not isinstance(token, str) or not PAIRING_TOKEN_RE.match(token):
+        return jsonify(status="invalid"), 400
+    status = pairing.pair_by_token(current_user(), token)
+    return jsonify(status=status), {"paired": 200, "waiting": 202, "taken": 409}[status]
 
 
 @bp.route("/device", methods=["GET", "POST"])
-@require_paired_session
+@require_paired_user
 def device_config():
-    device_id = session["device_id"]
+    device_id = g.device_id
 
     if request.method == "POST":
         raw_stops = request.form.get("stops_order", "")
@@ -137,23 +154,14 @@ def _render_device_config(device_id: str, errors: list[str] | None = None):
         stops=tfl.resolve_stops(config.tfl_stop_ids),
         spotify_linked=db.session.get(SpotifyToken, device_id) is not None,
         glowmarkt=glowmarkt,
-        pairing_code=pairing.live_code(device_id),
         errors=errors or [],
     )
 
 
-@bp.post("/device/pairing-code")
-@require_paired_session
-def link_browser():
-    """A code for this device that another browser can enter at /pair; the device shows it too."""
-    pairing.issue_code(session["device_id"])
-    return redirect(url_for("pages.device_config"))
-
-
 @bp.post("/device/spotify/disconnect")
-@require_paired_session
+@require_paired_user
 def spotify_disconnect():
-    token = db.session.get(SpotifyToken, session["device_id"])
+    token = db.session.get(SpotifyToken, g.device_id)
     if token is not None:
         db.session.delete(token)
         db.session.commit()
@@ -161,10 +169,10 @@ def spotify_disconnect():
 
 
 @bp.post("/device/display/unlink")
-@require_paired_session
+@require_paired_user
 def display_unlink():
     """Forgets the screen's secret, so it gets a 401 from then on: for a screen that's lost, stolen or
     retired. Registering again puts it in the pending pool as a new device."""
-    db.session.get(Device, session["device_id"]).display_secret_hash = None
+    db.session.get(Device, g.device_id).display_secret_hash = None
     db.session.commit()
     return redirect(url_for("pages.device_config"))

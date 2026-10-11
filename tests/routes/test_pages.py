@@ -187,7 +187,7 @@ def _redirects_to_pair(response):
     return response.status_code == 302 and response.headers["Location"] == "/pair"
 
 
-def test_unpairing_a_device_revokes_the_browser_that_paired_it(paired_client, cli):
+def test_unpairing_a_device_revokes_the_user_that_paired_it(paired_client, cli):
     client, device_id, _ = paired_client
     assert client.get("/device").status_code == 200
 
@@ -195,8 +195,7 @@ def test_unpairing_a_device_revokes_the_browser_that_paired_it(paired_client, cl
 
     assert _redirects_to_pair(client.get("/device"))
     assert _redirects_to_pair(client.post("/device/spotify/disconnect"))
-    assert _redirects_to_pair(client.post("/device/pairing-code"))
-    assert _redirects_to_pair(client.get("/"))  # the stale session was cleared, not just refused
+    assert _redirects_to_pair(client.get("/"))
 
 
 def test_a_forgotten_device_sends_the_browser_to_pair_instead_of_erroring(paired_client, cli):
@@ -218,26 +217,29 @@ def test_pairing_again_after_an_unpair_restores_access(paired_client, cli):
     assert client.get("/device").status_code == 200
 
 
-def test_device_config_offers_to_link_another_browser_when_no_code_is_live(paired_client):
-    client, _, _ = paired_client
-    page = client.get("/device").data
-    assert b"Link another browser" in page
+def test_another_user_cannot_see_the_settings(app, paired_client):
+    other = app.test_client()
+    other.environ_base["HTTP_X_AUTHENTIK_UID"] = "someone-else"
+
+    assert _redirects_to_pair(other.get("/device"))
 
 
-def test_linking_another_browser_shows_a_code_it_can_pair_with(app, paired_client):
+def test_pages_need_the_login_proxy_header(anonymous_client, paired_client):
+    assert anonymous_client.get("/device").status_code == 401
+    assert anonymous_client.get("/pair").status_code == 401
+    assert anonymous_client.post("/pair", data={"code": "ABC234"}).status_code == 401
+
+
+def test_a_code_hands_a_device_to_the_user_who_enters_it(app, paired_client):
     client, device_id, secret = paired_client
+    code = client.post("/api/devices/pairing-code", headers={"Authorization": f"Bearer {secret}"}).get_json()["code"]
+    new_owner = app.test_client()
+    new_owner.environ_base["HTTP_X_AUTHENTIK_UID"] = "someone-else"
 
-    response = client.post("/device/pairing-code")
+    assert new_owner.post("/pair", data={"code": code}).status_code == 302
 
-    assert response.status_code == 302 and response.headers["Location"] == "/device"
-    code = client.get("/api/config", headers={"Authorization": f"Bearer {secret}"}).get_json()["pairing_code"]
-    page = client.get("/device").data
-    assert code.encode() in page and b"Link another browser" not in page
-
-    new_browser = app.test_client()
-    assert new_browser.post("/pair", data={"code": code}).status_code == 302
-    assert new_browser.get("/device").status_code == 200
-    assert client.get("/device").status_code == 200  # the first browser keeps its access
+    assert new_owner.get("/device").status_code == 200
+    assert _redirects_to_pair(client.get("/device"))
 
 
 @pytest.mark.parametrize(
@@ -359,7 +361,7 @@ def test_a_locked_out_ip_is_refused_even_with_the_right_code(client, register_de
     response = client.post("/pair", data={"code": code}, headers={"X-Forwarded-For": "203.0.113.7"})
 
     assert response.status_code == 429
-    assert _redirects_to_pair(client.get("/device"))  # no session was set
+    assert _redirects_to_pair(client.get("/device"))  # not paired
     # The code wasn't used up: the same browser can pair with it from a different IP.
     assert client.post("/pair", data={"code": code}, headers={"X-Forwarded-For": "198.51.100.2"}).status_code == 302
 

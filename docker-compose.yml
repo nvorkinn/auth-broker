@@ -35,9 +35,6 @@ services:
     # Secrets, decrypted from secrets/broker.env by deploy.sh.
     env_file: broker.env
     environment:
-      # The leading dot shares the pairing cookie with every subdomain (e.g. for
-      # /api/logging_ui/verify behind logs.).
-      SESSION_COOKIE_DOMAIN: .nikolaivorkinn.com
       SESSION_COOKIE_SECURE: "true"
       SESSION_COOKIE_SAMESITE: Lax
       SPOTIFY_REDIRECT_URI: https://auth.nikolaivorkinn.com/auth/spotify/callback

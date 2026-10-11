@@ -12,6 +12,7 @@ from sqlalchemy import delete, func, or_, select
 
 from ..db import db
 from ..models import Device, DeviceConfig, PendingRegistration
+from . import pairing
 
 # Bounds on the pool, which anyone can add to: how many may wait at once, and for how long before a
 # waiting client has to register again.
@@ -103,5 +104,12 @@ def pending() -> list[PendingRegistration]:
 
 def _new_device(**secret_hashes: str) -> str:
     device_id = secrets.token_hex(6)
-    db.session.add(Device(device_id=device_id, created_at=datetime.now(UTC), config=DeviceConfig(), **secret_hashes))
+    device = Device(
+        device_id=device_id,
+        created_at=datetime.now(UTC),
+        config=DeviceConfig(),
+        pairing_token=pairing.token_for(secret_hashes["renderer_secret_hash"]),
+        **secret_hashes,
+    )
+    db.session.add(device)
     return device_id

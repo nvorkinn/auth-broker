@@ -1,16 +1,16 @@
 """Stop search for the settings page's stop picker. It spends the broker's TfL key, so only a
-browser paired with a device may use it."""
+user paired with a device may use it."""
 
 from flask import Blueprint, current_app, jsonify, request
 
-from ..auth import require_paired_session
+from ..auth import require_paired_user
 from ..clients import tfl
 
 bp = Blueprint("tfl_search", __name__, url_prefix="/api/tfl")
 
 
 @bp.get("/search")
-@require_paired_session
+@require_paired_user
 def search_stops():
     """Selectable Tube stations and bus stops matching ?q=, as JSON."""
     query = request.args.get("q", "").strip()
