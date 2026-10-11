@@ -93,7 +93,7 @@ entries:
     key: employee_job_title
     label: Title
     managed: goauthentik.io/object-attrs/user/employee/job_title
-    object_type: authentik Core | User
+    object_type: authentik_core.user
     regex: ''
     type: text
   conditions: []
@@ -110,7 +110,7 @@ entries:
     key: employee_department
     label: Departement
     managed: goauthentik.io/object-attrs/user/employee/department
-    object_type: authentik Core | User
+    object_type: authentik_core.user
     regex: ''
     type: text
   conditions: []
@@ -127,7 +127,7 @@ entries:
     key: given_name
     label: Given Name
     managed: goauthentik.io/object-attrs/user/identity/given_name
-    object_type: authentik Core | User
+    object_type: authentik_core.user
     regex: ''
     type: text
   conditions: []
@@ -144,7 +144,7 @@ entries:
     key: family_name
     label: Family Name
     managed: goauthentik.io/object-attrs/user/identity/family_name
-    object_type: authentik Core | User
+    object_type: authentik_core.user
     regex: ''
     type: text
   conditions: []
@@ -161,7 +161,7 @@ entries:
     key: settings.locale
     label: Locale
     managed: goauthentik.io/object-attrs/user/settings/locale
-    object_type: authentik Core | User
+    object_type: authentik_core.user
     regex: ''
     type: text
   conditions: []
@@ -178,7 +178,7 @@ entries:
     key: address_street
     label: Street
     managed: goauthentik.io/object-attrs/user/address/street
-    object_type: authentik Core | User
+    object_type: authentik_core.user
     regex: ''
     type: text
   conditions: []
@@ -195,7 +195,7 @@ entries:
     key: address_region
     label: Region
     managed: goauthentik.io/object-attrs/user/address/region
-    object_type: authentik Core | User
+    object_type: authentik_core.user
     regex: ''
     type: text
   conditions: []
@@ -212,7 +212,7 @@ entries:
     key: address_locality
     label: Location
     managed: goauthentik.io/object-attrs/user/address/locality
-    object_type: authentik Core | User
+    object_type: authentik_core.user
     regex: ''
     type: text
   conditions: []
@@ -229,7 +229,7 @@ entries:
     key: address_postal_code
     label: Postal code
     managed: goauthentik.io/object-attrs/user/address/postal_code
-    object_type: authentik Core | User
+    object_type: authentik_core.user
     regex: ''
     type: text
   conditions: []
@@ -246,7 +246,7 @@ entries:
     key: phone_number
     label: Phone number(s)
     managed: goauthentik.io/object-attrs/user/contact/phone_number
-    object_type: authentik Core | User
+    object_type: authentik_core.user
     regex: ''
     type: text
   conditions: []
@@ -263,7 +263,7 @@ entries:
     key: unix_shell
     label: Shell
     managed: goauthentik.io/object-attrs/user/unix/shell
-    object_type: authentik Core | User
+    object_type: authentik_core.user
     regex: ''
     type: text
   conditions: []
@@ -280,7 +280,7 @@ entries:
     key: employee_number
     label: Employee Number
     managed: goauthentik.io/object-attrs/user/employee/number
-    object_type: authentik Core | User
+    object_type: authentik_core.user
     regex: ''
     type: text
   conditions: []
@@ -645,6 +645,20 @@ entries:
   conditions: []
   identifiers:
     pk: 804688a8-efbb-4218-9470-9891019ceba0
+  model: authentik_flows.flow
+  permissions: []
+  state: present
+- attrs:
+    authentication: require_unauthenticated
+    designation: recovery
+    layout: stacked
+    name: Default recovery flow
+    policy_engine_mode: any
+    slug: default-recovery-flow
+    title: Reset your password
+  conditions: []
+  identifiers:
+    pk: 02b1cbf6-2b86-4966-b0ba-bc1ac0374597
   model: authentik_flows.flow
   permissions: []
   state: present
@@ -2604,16 +2618,6 @@ entries:
   permissions: []
   state: present
 - attrs:
-    crontab: 59 */4 * * *
-    paused: false
-    rel_obj_id: 28881e81-c557-4676-97d7-70b2f85284f7
-  conditions: []
-  identifiers:
-    pk: f9b1d5d7-96f3-4cd9-a56d-6b9da3b597c9
-  model: authentik_tasks_schedules.schedule
-  permissions: []
-  state: present
-- attrs:
     crontab: 51 * * * *
     paused: false
     rel_obj_id: null
@@ -2750,378 +2754,6 @@ entries:
   permissions: []
   state: present
 - attrs:
-    content: ''
-    context: {}
-    enabled: true
-    name: Default - Brand
-    path: default/default-brand.yaml
-  conditions: []
-  identifiers:
-    pk: 22a575a2-92db-4651-9299-dce56d8ded29
-  model: authentik_blueprints.blueprintinstance
-  permissions: []
-  state: present
-- attrs:
-    content: ''
-    context: {}
-    enabled: true
-    name: Default - Authentication flow
-    path: default/flow-default-authentication-flow.yaml
-  conditions: []
-  identifiers:
-    pk: e7ae687a-5e16-4921-ad47-b2be7b6ea46d
-  model: authentik_blueprints.blueprintinstance
-  permissions: []
-  state: present
-- attrs:
-    content: ''
-    context: {}
-    enabled: true
-    name: Default - Events Transport & Rules
-    path: default/events-default.yaml
-  conditions: []
-  identifiers:
-    pk: 72ade0a8-1451-45f3-a149-14e02ca108d8
-  model: authentik_blueprints.blueprintinstance
-  permissions: []
-  state: present
-- attrs:
-    content: ''
-    context: {}
-    enabled: true
-    name: Default - Source enrollment flow
-    path: default/flow-default-source-enrollment.yaml
-  conditions: []
-  identifiers:
-    pk: 4d355ac2-ad7c-414b-b112-a0bff54ccd99
-  model: authentik_blueprints.blueprintinstance
-  permissions: []
-  state: present
-- attrs:
-    content: ''
-    context: {}
-    enabled: false
-    name: Default - Out-of-box-experience flow
-    path: default/flow-oobe.yaml
-  conditions: []
-  identifiers:
-    pk: 8509239b-1fef-4a96-9181-5375915fa7b8
-  model: authentik_blueprints.blueprintinstance
-  permissions: []
-  state: present
-- attrs:
-    content: ''
-    context: {}
-    enabled: true
-    name: Default - Provider authorization flow (explicit consent)
-    path: default/flow-default-provider-authorization-explicit-consent.yaml
-  conditions: []
-  identifiers:
-    pk: 3c74faa4-cd62-4c2b-8e26-00f9eb5a42c0
-  model: authentik_blueprints.blueprintinstance
-  permissions: []
-  state: present
-- attrs:
-    content: ''
-    context: {}
-    enabled: true
-    name: Default - Source pre-authentication flow
-    path: default/flow-default-source-pre-authentication.yaml
-  conditions: []
-  identifiers:
-    pk: c8eb4bc7-a3f1-44d5-8562-0cad8f412027
-  model: authentik_blueprints.blueprintinstance
-  permissions: []
-  state: present
-- attrs:
-    content: ''
-    context: {}
-    enabled: true
-    name: Default - RBAC - Read-only
-    path: default/rbac-role-read-only.yaml
-  conditions: []
-  identifiers:
-    pk: 7f149a30-41fc-43e5-bf38-c6f009891450
-  model: authentik_blueprints.blueprintinstance
-  permissions: []
-  state: present
-- attrs:
-    content: ''
-    context: {}
-    enabled: true
-    name: Default - Request flow
-    path: default/flow-default-request-flow.yaml
-  conditions: []
-  identifiers:
-    pk: fde26e93-7c70-4d21-a43b-54a82b121796
-  model: authentik_blueprints.blueprintinstance
-  permissions: []
-  state: present
-- attrs:
-    content: ''
-    context: {}
-    enabled: true
-    name: Default - Static MFA setup flow
-    path: default/flow-default-authenticator-static-setup.yaml
-  conditions: []
-  identifiers:
-    pk: 066a6660-db02-44f3-aeac-1cd5727ac828
-  model: authentik_blueprints.blueprintinstance
-  permissions: []
-  state: present
-- attrs:
-    content: ''
-    context: {}
-    enabled: true
-    name: System - SAML Provider - Mappings
-    path: system/providers-saml.yaml
-  conditions: []
-  identifiers:
-    pk: fe7c3e0a-0a64-4cd5-a4ea-aa65fd12bffd
-  model: authentik_blueprints.blueprintinstance
-  permissions: []
-  state: present
-- attrs:
-    content: ''
-    context: {}
-    enabled: true
-    name: System - Object Attributes - User
-    path: system/object-attributes-user.yaml
-  conditions: []
-  identifiers:
-    pk: 21945728-fc1c-4206-a5a7-2835857ce3bb
-  model: authentik_blueprints.blueprintinstance
-  permissions: []
-  state: present
-- attrs:
-    content: ''
-    context: {}
-    enabled: true
-    name: Default - User settings flow
-    path: default/flow-default-user-settings-flow.yaml
-  conditions: []
-  identifiers:
-    pk: 06566ab4-6f9d-48a4-8f20-8143f4fcd403
-  model: authentik_blueprints.blueprintinstance
-  permissions: []
-  state: present
-- attrs:
-    content: ''
-    context: {}
-    enabled: true
-    name: System - RAC Provider - Mappings
-    path: system/providers-rac.yaml
-  conditions: []
-  identifiers:
-    pk: 6c17302c-cc20-4062-b990-b13ad480b80b
-  model: authentik_blueprints.blueprintinstance
-  permissions: []
-  state: present
-- attrs:
-    content: ''
-    context: {}
-    enabled: true
-    name: Default - WebAuthn MFA setup flow
-    path: default/flow-default-authenticator-webauthn-setup.yaml
-  conditions: []
-  identifiers:
-    pk: afd51f56-313b-429c-80db-29f0327613f2
-  model: authentik_blueprints.blueprintinstance
-  permissions: []
-  state: present
-- attrs:
-    content: ''
-    context: {}
-    enabled: true
-    name: System - Proxy Provider - Scopes
-    path: system/providers-proxy.yaml
-  conditions: []
-  identifiers:
-    pk: 8b70683f-aba7-454c-8445-fdbfb52d03bb
-  model: authentik_blueprints.blueprintinstance
-  permissions: []
-  state: present
-- attrs:
-    content: ''
-    context: {}
-    enabled: true
-    name: Default - RBAC - Agent Users
-    path: default/rbac-role-agents.yaml
-  conditions: []
-  identifiers:
-    pk: 2abf0ebb-408c-4bc2-bdb9-3c06e278bef6
-  model: authentik_blueprints.blueprintinstance
-  permissions: []
-  state: present
-- attrs:
-    content: ''
-    context: {}
-    enabled: true
-    name: System - Google Workspace Provider - Mappings
-    path: system/providers-google-workspace.yaml
-  conditions: []
-  identifiers:
-    pk: fb8bb7e2-4764-49fa-8e15-0bc7caaa2a99
-  model: authentik_blueprints.blueprintinstance
-  permissions: []
-  state: present
-- attrs:
-    content: ''
-    context: {}
-    enabled: true
-    name: System - SCIM Provider - Mappings
-    path: system/providers-scim.yaml
-  conditions: []
-  identifiers:
-    pk: 0652e26d-d4b2-4886-9665-1ec4b16972bd
-  model: authentik_blueprints.blueprintinstance
-  permissions: []
-  state: present
-- attrs:
-    content: ''
-    context: {}
-    enabled: true
-    name: Default - TOTP MFA setup flow
-    path: default/flow-default-authenticator-totp-setup.yaml
-  conditions: []
-  identifiers:
-    pk: ce8121c7-c43a-403b-9f6a-edf53c2de96b
-  model: authentik_blueprints.blueprintinstance
-  permissions: []
-  state: present
-- attrs:
-    content: ''
-    context: {}
-    enabled: true
-    name: System - Microsoft Entra Provider - Mappings
-    path: system/providers-microsoft-entra.yaml
-  conditions: []
-  identifiers:
-    pk: 2825af13-7ede-49bd-9b90-a8fb90b73c56
-  model: authentik_blueprints.blueprintinstance
-  permissions: []
-  state: present
-- attrs:
-    content: ''
-    context: {}
-    enabled: true
-    name: Default - Invalidation flow
-    path: default/flow-default-invalidation-flow.yaml
-  conditions: []
-  identifiers:
-    pk: 645d5e14-105b-4ce7-ada2-246ee33eec17
-  model: authentik_blueprints.blueprintinstance
-  permissions: []
-  state: present
-- attrs:
-    content: ''
-    context: {}
-    enabled: true
-    name: Default - Provider authorization flow (implicit consent)
-    path: default/flow-default-provider-authorization-implicit-consent.yaml
-  conditions: []
-  identifiers:
-    pk: fb3524d4-5490-454b-9a15-c31624964d62
-  model: authentik_blueprints.blueprintinstance
-  permissions: []
-  state: present
-- attrs:
-    content: ''
-    context: {}
-    enabled: true
-    name: Default - Provider invalidation flow
-    path: default/flow-default-provider-invalidation.yaml
-  conditions: []
-  identifiers:
-    pk: 92f62f77-2073-4888-a5c8-6fc821629edd
-  model: authentik_blueprints.blueprintinstance
-  permissions: []
-  state: present
-- attrs:
-    content: ''
-    context: {}
-    enabled: true
-    name: System - OAuth2 Provider - Scopes
-    path: system/providers-oauth2.yaml
-  conditions: []
-  identifiers:
-    pk: 42fcbdac-a56f-4f26-a73e-05724d4f8ca5
-  model: authentik_blueprints.blueprintinstance
-  permissions: []
-  state: present
-- attrs:
-    content: ''
-    context: {}
-    enabled: true
-    name: Default - Source authentication flow
-    path: default/flow-default-source-authentication.yaml
-  conditions: []
-  identifiers:
-    pk: e6c6ab3c-2bd3-49b0-a337-cf832494b24b
-  model: authentik_blueprints.blueprintinstance
-  permissions: []
-  state: present
-- attrs:
-    content: ''
-    context: {}
-    enabled: true
-    name: authentik Bootstrap
-    path: system/bootstrap.yaml
-  conditions: []
-  identifiers:
-    pk: d8652af5-27a7-49fd-a361-04114cda9e65
-  model: authentik_blueprints.blueprintinstance
-  permissions: []
-  state: present
-- attrs:
-    content: ''
-    context: {}
-    enabled: true
-    name: System - LDAP Source - Mappings
-    path: system/sources-ldap.yaml
-  conditions: []
-  identifiers:
-    pk: a330b619-d039-49d0-96b9-12ecf64a6d6d
-  model: authentik_blueprints.blueprintinstance
-  permissions: []
-  state: present
-- attrs:
-    content: ''
-    context: {}
-    enabled: true
-    name: System - Kerberos Source - Mappings
-    path: system/sources-kerberos.yaml
-  conditions: []
-  identifiers:
-    pk: 1c37aa67-0ba6-44f7-8e9a-11e4c23602a8
-  model: authentik_blueprints.blueprintinstance
-  permissions: []
-  state: present
-- attrs:
-    content: ''
-    context: {}
-    enabled: true
-    name: Migration - Remove old prompt fields
-    path: migrations/migrate-prompt-name.yaml
-  conditions: []
-  identifiers:
-    pk: 8a1c2301-c34c-4ac7-baf5-e09cad05cc8a
-  model: authentik_blueprints.blueprintinstance
-  permissions: []
-  state: present
-- attrs:
-    content: ''
-    context: {}
-    enabled: true
-    name: Default - Password change flow
-    path: default/flow-password-change.yaml
-  conditions: []
-  identifiers:
-    pk: 0b564422-676e-42cb-8411-5a4247edfa12
-  model: authentik_blueprints.blueprintinstance
-  permissions: []
-  state: present
-- attrs:
     expression: "# Field reference:\n# https://developers.google.com/admin-sdk/directory/reference/rest/v1/users#User\n\
       # Google require givenName and familyName to be set\ngivenName, familyName =\
       \ request.user.name, \" \"\nformatted = request.user.name + \" \"\n# This default\
@@ -3184,20 +2816,6 @@ entries:
   identifiers:
     pk: a5add24c-8765-4b73-9c70-3cf396be6111
   model: authentik_providers_microsoft_entra.microsoftentraprovidermapping
-  permissions: []
-  state: present
-- attrs:
-    authentication: require_unauthenticated
-    designation: recovery
-    layout: stacked
-    name: Default recovery flow
-    policy_engine_mode: any
-    slug: default-recovery-flow
-    title: Reset your password
-  conditions: []
-  identifiers:
-    pk: 02b1cbf6-2b86-4966-b0ba-bc1ac0374597
-  model: authentik_flows.flow
   permissions: []
   state: present
 - attrs:
