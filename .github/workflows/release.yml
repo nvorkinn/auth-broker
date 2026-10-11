@@ -68,10 +68,11 @@ jobs:
             ${{ env.IMAGE }}:latest
 
   # The deploy bundle is what the host deploys from: this release's
-  # docker-compose.yml, deploy.sh and SOPS-encrypted secrets, attached to the
-  # GitHub Release.
+  # docker-compose.yml, deploy.sh, Authentik blueprint and SOPS-encrypted
+  # secrets, attached to the GitHub Release. It doesn't need the images, so it
+  # builds alongside them.
   package:
-    needs: [tag, images]
+    needs: tag
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -87,9 +88,10 @@ jobs:
       - name: Build deploy bundle
         id: bundle
         run: |
-          mkdir -p "deploy-$TAG/secrets"
+          mkdir -p "deploy-$TAG/secrets" "deploy-$TAG/authentik"
           cp docker-compose.yml scripts/deploy.sh "deploy-$TAG/"
           cp secrets/*.env "deploy-$TAG/secrets/"
+          cp authentik/authentik-config.yaml "deploy-$TAG/authentik/"
           # Fixed order, times and owners, so a re-run builds the same bytes.
           tar --sort=name --mtime=@0 --owner=0 --group=0 --numeric-owner -cf - "deploy-$TAG" \
             | gzip -n > "deploy-$TAG.tar.gz"
@@ -102,12 +104,12 @@ jobs:
 
   # Each deploy waits for manual approval through its environment's protection
   # rule (Settings > Environments), then has the host fetch this release's
-  # deploy bundle and run its deploy.sh once per service, which pins the
-  # container to this release's tag and restarts it. See "Deploying" in the
-  # README.
+  # deploy bundle and run its deploy.sh once per service. See "Deploying" in
+  # the README. These deploy this repo's images, so they wait for them; each
+  # pins its container to this release's tag and restarts it.
   deploy:
     name: ${{ matrix.environment }}
-    needs: [tag, package]
+    needs: [tag, images, package]
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -115,10 +117,6 @@ jobs:
         include:
           - environment: deploy-caddy
             services: caddy
-          # Installs this release's compose file, then brings up the three
-          # Authentik services on the AUTHENTIK_VERSION pinned in the host's .env.
-          - environment: deploy-authentik
-            services: authentik
           # Fluent Bit, VictoriaLogs and VictoriaMetrics only collect logs and
           # metrics, so they ride along with the config server rather than needing an
           # approval of their own.
@@ -128,13 +126,13 @@ jobs:
     concurrency:
       group: ${{ matrix.environment }}
       cancel-in-progress: false
-    env:
+    env: &deploy-env
       TAG: ${{ needs.tag.outputs.value }}
       SERVICES: ${{ matrix.services }}
       DEPLOY_TARGET: ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}
       BUNDLE_URL: ${{ github.server_url }}/${{ github.repository }}/releases/download/${{ needs.tag.outputs.value }}/deploy-${{ needs.tag.outputs.value }}.tar.gz
       BUNDLE_SHA256: ${{ needs.package.outputs.sha256 }}
-    steps:
+    steps: &deploy-steps
       - uses: actions/checkout@v7
 
       - name: Set up SSH
@@ -156,3 +154,28 @@ jobs:
             ssh -i ~/.ssh/id_deploy "$DEPLOY_TARGET" bash -s -- "$service" "$TAG" "$BUNDLE_URL" "$BUNDLE_SHA256" < scripts/fetch-release.sh
             echo "::endgroup::"
           done
+
+  # Authentik runs upstream's image, so these only need the bundle and can be
+  # approved while the images are still building. Same steps as deploy.
+  deploy-authentik:
+    name: ${{ matrix.environment }}
+    needs: [tag, package]
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Installs this release's compose file, then brings up the three
+          # Authentik services on the AUTHENTIK_VERSION pinned in the host's .env.
+          - environment: deploy-authentik
+            services: authentik
+          # The same, then installs authentik/authentik-config.yaml and applies
+          # it to the running Authentik with `ak apply_blueprint`.
+          - environment: deploy-authentik-config
+            services: authentik-config
+    environment: ${{ matrix.environment }}
+    concurrency:
+      group: ${{ matrix.environment }}
+      cancel-in-progress: false
+    env: *deploy-env
+    steps: *deploy-steps

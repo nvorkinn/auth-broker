@@ -133,6 +133,11 @@ services:
     <<: *authentik
     container_name: authentik-worker
     command: worker
+    volumes:
+      - authentik_media:/data
+      # authentik/authentik-config.yaml, installed here by the
+      # deploy-authentik-config job, which applies it from this worker.
+      - ./authentik:/blueprints/custom:ro
 
 volumes:
   # Fixed names so the volumes don't depend on the compose project (directory) name.

@@ -4,7 +4,7 @@
 # /opt/auth-broker/releases/<tag>/ and runs this copy, which installs the
 # bundled docker-compose.yml, pins one compose service to the tag in .env, then
 # pulls and restarts just that service.
-# Usage: deploy.sh <auth-broker|caddy|fluent-bit|victoria-logs|victoria-metrics|authentik> <tag>
+# Usage: deploy.sh <auth-broker|caddy|fluent-bit|victoria-logs|victoria-metrics|authentik|authentik-config> <tag>
 #
 # Secrets come from the bundle's SOPS-encrypted secrets/<name>.env, all of
 # them decrypted on every deploy with the host's age key into <name>.env next
@@ -15,6 +15,11 @@
 # by hand with AUTHENTIK_VERSION in .env (one minor version at a time), so
 # they aren't pinned to the release tag: this installs the compose file and
 # brings them up on whatever is pinned.
+#
+# authentik-config does the same, then installs the bundle's Authentik
+# blueprint (authentik/authentik-config.yaml) into authentik/, which the
+# worker mounts, and applies it with `ak apply_blueprint`. The blueprint reads
+# its secrets with !Env from authentik.env.
 set -euo pipefail
 
 service="$1"
@@ -40,7 +45,7 @@ case "$service" in
     var="${service^^}"
     var="${var//-/_}_VERSION"
     ;;
-  authentik) services=(authentik-postgresql authentik-server authentik-worker) ;;
+  authentik | authentik-config) services=(authentik-postgresql authentik-server authentik-worker) ;;
   *) echo "unknown service: $service" >&2; exit 1 ;;
 esac
 export SOPS_AGE_KEY_FILE="${SOPS_AGE_KEY_FILE:-$PWD/age.key}"
@@ -86,6 +91,13 @@ fi
   # Copy then mv, so compose never reads a half-written file.
   cp "$bundle/docker-compose.yml" docker-compose.yml.tmp
   mv docker-compose.yml.tmp docker-compose.yml
+  # The worker bind-mounts authentik/; made here so Docker doesn't create it
+  # root-owned. Only an authentik-config deploy changes what's in it.
+  mkdir -p authentik
+  if [ "$service" = authentik-config ]; then
+    cp "$bundle/authentik/authentik-config.yaml" authentik/.authentik-config.yaml.tmp
+    mv authentik/.authentik-config.yaml.tmp authentik/authentik-config.yaml
+  fi
   # The broker's secrets and settings used to live in .env; now they come
   # from broker.env and the compose file, so keep only the version pins.
   (umask 077 && grep -E '^[A-Z0-9_]+_VERSION=' .env > .env.tmp || true)
@@ -105,10 +117,20 @@ if [ -n "$var" ]; then
   docker compose up -d --no-deps --force-recreate "${services[@]}"
 else
   # Recreates only what changed, so a release that doesn't touch Authentik
-  # leaves its database running.
-  docker compose up -d --wait --wait-timeout 600 "${services[@]}"
+  # leaves its database running. The authentik and authentik-config jobs can
+  # run at once, so they take turns.
+  (
+    flock 9
+    docker compose up -d --wait --wait-timeout 600 "${services[@]}"
+  ) 9>authentik.lock
 fi
 docker compose ps "${services[@]}"
+
+if [ "$service" = authentik-config ]; then
+  # Validates the whole blueprint first and applies nothing if it's invalid.
+  docker compose exec -T authentik-worker ak apply_blueprint custom/authentik-config.yaml
+  echo "Applied authentik-config.yaml"
+fi
 
 if [ "$service" = auth-broker ]; then
   # A check that the database came through.
