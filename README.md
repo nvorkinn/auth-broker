@@ -382,7 +382,10 @@ which validates the whole blueprint before changing anything. The blueprint is
 labelled `blueprints.goauthentik.io/instantiate: 'false'`, so the worker never
 applies it on its own. It takes the providers' client secrets with `!Env` from
 `authentik.env` (`BLUEPRINT_LOGS_CLIENT_SECRET`,
-`BLUEPRINT_METRICS_CLIENT_SECRET`); never commit them in the YAML. Re-running
+`BLUEPRINT_METRICS_CLIENT_SECRET`); never commit them in the YAML. It leaves
+users alone: no users, tokens, TOTP or passkey devices, or group members are
+in it, so manage those in Authentik's UI, and strip them from any fresh
+export before committing it. Re-running
 a job redeploys the same tag; to roll back, re-run the deploy jobs of the older
 release's workflow run, which deploys that release's own bundle. Old releases
 stay under `releases/`; they're a few KB each.
