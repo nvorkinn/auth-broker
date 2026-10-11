@@ -344,12 +344,14 @@ service, name it: `docker compose up -d caddy`.
 
 ### Deploying a release from GitHub Actions
 
-After the images are pushed, `release.yml` packages the release's deploy bundle,
-`deploy-<tag>.tar.gz` (this release's `docker-compose.yml` and
-`scripts/deploy.sh`), and attaches it to the GitHub Release. Then it has three
-deploy jobs, one per environment: `deploy-caddy`, `deploy-authentik` and
-`deploy-config`. Each one waits, paused, until someone approves it on the
-workflow run page, and each is approved on its own.
+While the images build, `release.yml` packages the release's deploy bundle,
+`deploy-<tag>.tar.gz` (this release's `docker-compose.yml`,
+`scripts/deploy.sh`, `authentik/authentik-config.yaml` and encrypted secrets),
+and attaches it to the GitHub Release. Then it has four deploy jobs, one per
+environment: `deploy-caddy`, `deploy-config`, `deploy-authentik` and
+`deploy-authentik-config`. Each one waits, paused, until someone approves it on
+the workflow run page, and each is approved on its own. The two Authentik jobs
+run upstream's image, so they only wait for the bundle, not this repo's images.
 An approved job SSHes into the host and runs `scripts/fetch-release.sh`, which
 downloads the bundle from the release into `/opt/auth-broker/releases/<tag>/`
 (checking its SHA-256, and skipping the download when that release is already
@@ -369,19 +371,30 @@ there) and runs the bundle's own `deploy.sh`, which:
 
 Deploying the config server then lists the devices, as a check that the
 database came through. `deploy-config` goes on to deploy Fluent Bit,
-VictoriaLogs and VictoriaMetrics the same way. Re-running
+VictoriaLogs and VictoriaMetrics the same way. The Authentik jobs skip steps
+4–5: they bring the three Authentik services up on the pinned
+`AUTHENTIK_VERSION` (recreating only what changed). `deploy-authentik-config`
+then installs the bundle's `authentik/authentik-config.yaml` into
+`/opt/auth-broker/authentik/` (mounted into the worker at
+`/blueprints/custom/`) and applies it with
+`docker compose exec authentik-worker ak apply_blueprint custom/authentik-config.yaml`,
+which validates the whole blueprint before changing anything. The blueprint is
+labelled `blueprints.goauthentik.io/instantiate: 'false'`, so the worker never
+applies it on its own. It takes the providers' client secrets with `!Env` from
+`authentik.env` (`BLUEPRINT_LOGS_CLIENT_SECRET`,
+`BLUEPRINT_METRICS_CLIENT_SECRET`); never commit them in the YAML. Re-running
 a job redeploys the same tag; to roll back, re-run the deploy jobs of the older
 release's workflow run, which deploys that release's own bundle. Old releases
 stay under `releases/`; they're a few KB each.
 
 One-time setup in the repo's **Settings**:
 
-- **Environments**: create `deploy-caddy`, `deploy-authentik` and
-  `deploy-config`, and on each tick
+- **Environments**: create `deploy-caddy`, `deploy-config`, `deploy-authentik`
+  and `deploy-authentik-config`, and on each tick
   **Required reviewers** and add yourself. That rule is what keeps the jobs
   from running on their own. Optionally limit each to `v*` tags under
   **Deployment branches and tags**.
-- **Secrets**, either on both environments (so only an approved deploy can
+- **Secrets**, either on every environment (so only an approved deploy can
   read them) or once under **Secrets and variables > Actions**:
   - `DEPLOY_HOST`: the instance's public IP or hostname.
   - `DEPLOY_USER`: the SSH user, e.g. `ubuntu`. It must be able to run
