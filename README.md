@@ -385,7 +385,10 @@ applies it on its own. It takes the providers' client secrets with `!Env` from
 `BLUEPRINT_METRICS_CLIENT_SECRET`); never commit them in the YAML. It leaves
 users alone: no users, tokens, TOTP or passkey devices, or group members are
 in it, so manage those in Authentik's UI, and strip them from any fresh
-export before committing it. Re-running
+export before committing it. Also strip the `authentik_blueprints.blueprintinstance`
+entries and the outpost's schedule (the one with a `rel_obj_id`): Authentik
+manages those itself, and both fail validation. Entries are applied in order,
+so an object has to come before anything that points at it. Re-running
 a job redeploys the same tag; to roll back, re-run the deploy jobs of the older
 release's workflow run, which deploys that release's own bundle. Old releases
 stay under `releases/`; they're a few KB each.
