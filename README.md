@@ -402,6 +402,17 @@ Authentik's own `ak apply_blueprint`, which applies changes, not just validates.
 
 One-time setup in the repo's **Settings**:
 
+- **Live blueprint validation** in the Tests workflow uses the repository-level
+  SSH secrets listed below. It streams the candidate YAML into a temporary file
+  inside the running Authentik worker and runs `ak apply_blueprint --dry-run`.
+  This checks against the live database and resolves `!Env` in the container,
+  rolling back validation's database transaction without applying the blueprint.
+  The temporary file is removed when the worker command exits. Missing SSH
+  credentials, connection failures, and invalid blueprints fail the check;
+  fork PRs skip this credential-bearing job. No Authentik API token is needed.
+  Locally, set `DEPLOY_TARGET=user@host` and
+  `DEPLOY_SSH_IDENTITY_FILE=/path/to/key`, ensure the host is in SSH's
+  `known_hosts`, and run `python scripts/validate_authentik_config.py`.
 - **Environments**: create `deploy-caddy`, `deploy-config`, `deploy-authentik`
   and `deploy-authentik-config`, and on each tick
   **Required reviewers** and add yourself. That rule is what keeps the jobs
