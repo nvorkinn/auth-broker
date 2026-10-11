@@ -27,7 +27,9 @@ x-authentik: &authentik
       condition: service_healthy
   shm_size: 512mb
   volumes:
-    - authentik_media:/data
+    # Uploaded logos and backgrounds. Not /data: there, media is a symlink to /media in the
+    # image, so uploads land in the container layer and vanish on every recreate.
+    - authentik_media:/media
 
 services:
   auth-broker:
@@ -151,7 +153,7 @@ services:
     logging: *logging
     command: worker
     volumes:
-      - authentik_media:/data
+      - authentik_media:/media
       # authentik/authentik-config.yaml, installed here by the
       # deploy-authentik-config job, which applies it from this worker.
       - ./authentik:/blueprints/custom:ro
