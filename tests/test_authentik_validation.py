@@ -22,20 +22,23 @@ def test_validates_candidate_over_ssh(monkeypatch):
 
 
 def test_worker_command_is_dry_run_with_cleanup():
-    assert "mktemp /blueprints/.ci-validation-" in validator.WORKER_COMMAND
-    assert """trap 'rm -f "$blueprint"' EXIT""" in validator.WORKER_COMMAND
+    assert "mktemp -d /tmp/authentik-validation-" in validator.WORKER_COMMAND
+    assert """trap 'rm -f "$blueprint"; rmdir "$directory"' EXIT""" in validator.WORKER_COMMAND
     assert 'cat > "$blueprint"' in validator.WORKER_COMMAND
-    assert 'ak apply_blueprint --dry-run "$blueprint"' in validator.WORKER_COMMAND
+    assert (
+        'AUTHENTIK_BLUEPRINTS_DIR="$directory" ak apply_blueprint --dry-run candidate.yaml' in validator.WORKER_COMMAND
+    )
 
 
 @pytest.mark.parametrize("exit_code", [0, 1])
 def test_worker_cleans_up_after_validation(tmp_path, exit_code):
-    command = validator.WORKER_COMMAND.replace("/blueprints/", f"{tmp_path}/")
+    command = validator.WORKER_COMMAND.replace("/tmp/", f"{tmp_path}/")
     fake_ak = f"""
 ak() {{
     test "$1" = apply_blueprint
     test "$2" = --dry-run
-    test "$(cat "$3")" = candidate
+    test "$3" = candidate.yaml
+    test "$(cat "$AUTHENTIK_BLUEPRINTS_DIR/$3")" = candidate
     return {exit_code}
 }}
 """

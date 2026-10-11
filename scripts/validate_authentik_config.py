@@ -9,10 +9,11 @@ from pathlib import Path
 BLUEPRINT = Path(__file__).resolve().parents[1] / "authentik/authentik-config.yaml"
 WORKER_COMMAND = """
 set -eu
-blueprint=$(mktemp /blueprints/.ci-validation-XXXXXXXX.yaml)
-trap 'rm -f "$blueprint"' EXIT
+directory=$(mktemp -d /tmp/authentik-validation-XXXXXXXX)
+blueprint="$directory/candidate.yaml"
+trap 'rm -f "$blueprint"; rmdir "$directory"' EXIT
 cat > "$blueprint"
-ak apply_blueprint --dry-run "$blueprint"
+AUTHENTIK_BLUEPRINTS_DIR="$directory" ak apply_blueprint --dry-run candidate.yaml
 """
 REMOTE_COMMAND = "cd /opt/auth-broker && docker compose exec -T authentik-worker sh -c " + shlex.quote(WORKER_COMMAND)
 

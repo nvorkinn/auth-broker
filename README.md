@@ -404,7 +404,10 @@ One-time setup in the repo's **Settings**:
 
 - **Live blueprint validation** in the Tests workflow uses the repository-level
   SSH secrets listed below. It streams the candidate YAML into a temporary file
-  inside the running Authentik worker and runs `ak apply_blueprint --dry-run`.
+  in a private `/tmp` directory inside the running Authentik worker and runs
+  `ak apply_blueprint --dry-run`. `AUTHENTIK_BLUEPRINTS_DIR` points to that
+  directory for the dry-run process only, leaving the deployed configuration
+  and the worker's normal blueprint discovery unchanged.
   This checks against the live database and resolves `!Env` in the container,
   rolling back validation's database transaction without applying the blueprint.
   The temporary file is removed when the worker command exits. Missing SSH
