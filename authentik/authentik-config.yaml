@@ -249,6 +249,14 @@ entries:
     attrs:
       <<: *proxy-attrs
       external_host: https://metrics.nikolaivorkinn.com
+  - model: authentik_providers_proxy.proxyprovider
+    id: broker-proxy-provider
+    state: present
+    identifiers:
+      name: Provider for Broker
+    attrs:
+      <<: *proxy-attrs
+      external_host: https://auth.nikolaivorkinn.com
   - model: authentik_providers_oauth2.oauth2provider
     state: present
     identifiers:
@@ -286,6 +294,27 @@ entries:
         - matching_mode: strict
           redirect_uri_type: authorization
           url: https://metrics.nikolaivorkinn.com?X-authentik-auth-callback=true
+  - model: authentik_providers_oauth2.oauth2provider
+    state: present
+    identifiers:
+      name: Provider for Broker
+    attrs:
+      redirect_uris:
+        - matching_mode: strict
+          redirect_uri_type: authorization
+          url: https://auth.nikolaivorkinn.com/outpost.goauthentik.io/callback?X-authentik-auth-callback=true
+        - matching_mode: strict
+          redirect_uri_type: authorization
+          url: https://auth.nikolaivorkinn.com?X-authentik-auth-callback=true
+  # No group binding: any signed-in user may use the broker's pairing and config pages.
+  - model: authentik_core.application
+    state: present
+    identifiers:
+      slug: broker
+    attrs:
+      name: Broker
+      meta_icon: countdown-pill.svg
+      provider: !KeyOf broker-proxy-provider
   - model: authentik_core.application
     state: present
     identifiers:
@@ -325,6 +354,7 @@ entries:
       providers:
         - !KeyOf logs-proxy-provider
         - !KeyOf metrics-proxy-provider
+        - !KeyOf broker-proxy-provider
 
   # Google as a federated login source.
   - model: authentik_sources_oauth.oauthsource
