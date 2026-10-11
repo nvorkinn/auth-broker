@@ -4,6 +4,15 @@ x-release-image: &release-image
   pull_policy: always
   restart: unless-stopped
 
+# Shared by every service. Fluent Bit reads the log files directly and uses the tag (the container
+# name, which is the service name here) as the `service` field: it appears as attrs.tag in each record.
+x-logging: &logging
+  driver: json-file
+  options:
+    tag: "{{.Name}}"
+    max-size: 10m
+    max-file: "3"
+
 # Shared by the Authentik server and worker, which run the same image.
 x-authentik: &authentik
   image: ghcr.io/goauthentik/server:${AUTHENTIK_VERSION:-2026.8.3}
@@ -25,6 +34,7 @@ services:
     <<: *release-image
     image: ghcr.io/nvorkinn/auth-broker:${AUTH_BROKER_VERSION:-latest}
     container_name: auth-broker
+    logging: *logging
     # Host networking, so it can reach Fluent Bit (127.0.0.1:9880, logs) and VictoriaMetrics
     # (127.0.0.1:8428, metrics), like Caddy reaches it. That makes the image's 0.0.0.0 bind public,
     # so bind loopback.
@@ -43,6 +53,7 @@ services:
     <<: *release-image
     image: ghcr.io/nvorkinn/auth-broker-caddy:${CADDY_VERSION:-latest}
     container_name: caddy
+    logging: *logging
     # Caddy's own secrets, decrypted from secrets/caddy.env by deploy.sh.
     env_file: caddy.env
     # Host networking, so 127.0.0.1 in the Caddyfile is the host: the broker is
@@ -62,6 +73,7 @@ services:
     <<: *release-image
     image: ghcr.io/nvorkinn/auth-broker-fluent-bit:${FLUENT_BIT_VERSION:-latest}
     container_name: fluent-bit
+    logging: *logging
     network_mode: host
     volumes:
       - /var/lib/docker/containers:/var/lib/docker/containers:ro
@@ -74,6 +86,7 @@ services:
     <<: *release-image
     image: ghcr.io/nvorkinn/auth-broker-victoria-logs:${VICTORIA_LOGS_VERSION:-latest}
     container_name: victoria-logs
+    logging: *logging
     network_mode: host
     # Shares the host's 6 GB with Authentik, like VictoriaMetrics.
     mem_limit: 512m
@@ -88,6 +101,7 @@ services:
     <<: *release-image
     image: ghcr.io/nvorkinn/auth-broker-victoria-metrics:${VICTORIA_METRICS_VERSION:-latest}
     container_name: victoria-metrics
+    logging: *logging
     network_mode: host
     # The host's 6 GB is shared with Authentik. VictoriaMetrics sizes its caches
     # from this limit (60% of it by default).
@@ -102,6 +116,7 @@ services:
   authentik-postgresql:
     image: docker.io/library/postgres:18-alpine
     container_name: authentik-postgresql
+    logging: *logging
     restart: unless-stopped
     env_file: authentik.env
     environment:
@@ -123,6 +138,7 @@ services:
   authentik-server:
     <<: *authentik
     container_name: authentik-server
+    logging: *logging
     command: server
     # Loopback only: Caddy (host networking) is the one way in, at
     # sso.nikolaivorkinn.com.
@@ -132,6 +148,7 @@ services:
   authentik-worker:
     <<: *authentik
     container_name: authentik-worker
+    logging: *logging
     command: worker
     volumes:
       - authentik_media:/data
