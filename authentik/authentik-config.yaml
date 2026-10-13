@@ -181,11 +181,14 @@ entries:
       negate: false
       timeout: 30
 
-  # Sign-up (username, email, password, no email verification while this is in QA). Only offered to a
-  # visitor who reached the login from the broker (the pairing flow): the gate checks the sign-in's
-  # redirect_uri. That hides the sign-up from the Logs and Metrics logins, but it isn't a security
-  # boundary, as anyone can forge the query. What keeps a new account out of those is their group
-  # bindings. A new user is a plain internal user in no group, which the broker accepts.
+  # Sign-up: username, email and password (no email verification while this is in QA), then a
+  # second factor that has to be set up (a passkey or an authenticator app) before the account logs
+  # in. A passkey also lets that user sign in later without typing a username. Only offered to a
+  # visitor who was sent to sign in from the broker's /pair page: the gate reads where the login
+  # will return to. That keeps the sign-up off the Logs and Metrics logins and off the login page
+  # in general, but it isn't a security boundary, as anyone can forge the query. What keeps a new
+  # account out of Logs and Metrics is their group bindings. A new user is a plain internal user
+  # in no group, which the broker accepts.
   - model: authentik_flows.flow
     id: broker-enrollment-flow
     state: present
@@ -205,12 +208,21 @@ entries:
       name: broker-enrollment-from-broker
     attrs:
       expression: |
+        import base64
+        import json
         from urllib.parse import parse_qs, urlparse
 
+        # The sign-in's `state` is a token from the proxy that carries the page to return to.
         http_request = request.http_request
         query = parse_qs(http_request.GET.get("query", "")) if http_request else {}
-        redirect_uri = (query.get("redirect_uri") or [""])[0]
-        return urlparse(redirect_uri).hostname == "auth.nikolaivorkinn.com"
+        state = (query.get("state") or [""])[0]
+        try:
+            payload = state.split(".")[1]
+            claims = json.loads(base64.urlsafe_b64decode(payload + "=" * (-len(payload) % 4)))
+            target = urlparse(claims.get("redirect", ""))
+        except (IndexError, ValueError, TypeError, AttributeError):
+            return False
+        return target.hostname == "auth.nikolaivorkinn.com" and target.path == "/pair"
   - model: authentik_policies.policybinding
     state: present
     identifiers:
@@ -291,6 +303,23 @@ entries:
       user_creation_mode: always_create
       user_type: internal
       create_users_as_inactive: false
+  # A second factor is mandatory: with none set up, the user has to set up a passkey or an authenticator
+  # app now (the stock setup stages), and can't carry on without one.
+  - model: authentik_stages_authenticator_validate.authenticatorvalidatestage
+    id: enrollment-mfa
+    state: present
+    identifiers:
+      name: broker-enrollment-mfa
+    attrs:
+      device_classes:
+        - webauthn
+        - totp
+      not_configured_action: configure
+      last_auth_threshold: seconds=0
+      webauthn_user_verification: required
+      configuration_stages:
+        - !Find [authentik_stages_authenticator_webauthn.authenticatorwebauthnstage, [name, default-authenticator-webauthn-setup]]
+        - !Find [authentik_stages_authenticator_totp.authenticatortotpstage, [name, default-authenticator-totp-setup]]
   - model: authentik_stages_user_login.userloginstage
     id: enrollment-user-login
     state: present
@@ -311,6 +340,15 @@ entries:
       target: !KeyOf broker-enrollment-flow
       stage: !KeyOf enrollment-user-write
       order: 20
+    attrs:
+      evaluate_on_plan: true
+      re_evaluate_policies: false
+  - model: authentik_flows.flowstagebinding
+    state: present
+    identifiers:
+      target: !KeyOf broker-enrollment-flow
+      stage: !KeyOf enrollment-mfa
+      order: 30
     attrs:
       evaluate_on_plan: true
       re_evaluate_policies: false
