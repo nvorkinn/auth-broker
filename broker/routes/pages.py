@@ -4,7 +4,7 @@ import re
 
 from flask import Blueprint, current_app, g, jsonify, redirect, render_template, request, url_for
 
-from ..auth import current_user, paired_device_id, require_paired_user, require_user
+from ..auth import current_user, current_username, paired_device_id, require_paired_user, require_user
 from ..clients import tfl, weather
 from ..db import db
 from ..models import Device, DeviceConfig, GlowmarktCredentials, SpotifyToken
@@ -153,15 +153,24 @@ def name_screen():
     slug = request.form.get("slug", "").strip().lower()
     if request.method == "POST":
         try:
-            assignments.create(device, slug)
+            assignments.create(device, slug, current_username())
             return redirect(url_for("pages.device_config"))
         except assignments.InvalidSlug:
-            error = "Use 2 to 32 lowercase letters, numbers, dashes or underscores, starting with a letter or number."
+            error = (
+                f"Use up to {assignments.max_suffix_length(current_username())} lowercase letters, numbers, "
+                "dashes or underscores, starting with a letter or number."
+            )
         except assignments.SlugTaken:
             error = "That name is taken. Try another."
         except assignments.NotNeeded:
             return redirect(url_for("pages.device_config"))
-    return render_template("name_screen.html", slug=slug, error=error), 400 if error else 200
+    return render_template(
+        "name_screen.html",
+        slug=slug,
+        prefix=assignments.slug_prefix(current_username()),
+        max_length=assignments.max_suffix_length(current_username()),
+        error=error,
+    ), 400 if error else 200
 
 
 @bp.post("/api/displays/<device_id>/renderer")
@@ -175,9 +184,9 @@ def request_renderer(device_id):
         return jsonify(error="not found"), 404
     slug = (request.get_json(silent=True) or {}).get("slug", "")
     try:
-        assignment = assignments.create(device, slug if isinstance(slug, str) else "")
+        assignment = assignments.create(device, slug if isinstance(slug, str) else "", current_username())
     except assignments.InvalidSlug:
-        return jsonify(error="slug must match [a-z0-9][a-z0-9_-]{1,31}"), 400
+        return jsonify(error="slug must match [a-z0-9][a-z0-9_-]* and fit in 32 characters with the prefix"), 400
     except (assignments.SlugTaken, assignments.NotNeeded) as e:
         return jsonify(error="slug is taken" if isinstance(e, assignments.SlugTaken) else "already has a renderer"), 409
     return jsonify(id=assignment.id, slug=assignment.slug, status=assignment.status), 201

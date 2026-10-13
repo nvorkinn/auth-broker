@@ -11,12 +11,16 @@
 <div class="card">
     <div class="card-header">
         <h2 class="card-title">One last thing</h2>
-        <p class="card-subtitle">Pick a short name for this screen, like the room it's in or who it's for. It can't be changed later.</p>
+        <p class="card-subtitle">Pick a short name for this screen, like the room it's in or who it's for. It starts with your username and can't be changed later.</p>
     </div>
     <form method="POST">
-        <input type="text" name="slug" class="pairing-input" value="{{ slug }}" minlength="2" maxlength="32"
-               pattern="[a-z0-9][a-z0-9_\-]{1,31}" title="2 to 32 lowercase letters, numbers, dashes or underscores"
-               autocomplete="off" autocapitalize="none" placeholder="e.g. kitchen" required autofocus>
+        <div style="display: flex; align-items: center; gap: 4px; margin-bottom: 12px;">
+            <span class="card-subtitle" style="margin: 0; white-space: nowrap;">{{ prefix }}-</span>
+            <input type="text" name="slug" class="pairing-input" value="{{ slug }}" maxlength="{{ max_length }}"
+                   pattern="[a-z0-9][a-z0-9_\-]*" title="Up to {{ max_length }} lowercase letters, numbers, dashes or underscores"
+                   autocomplete="off" autocapitalize="none" placeholder="e.g. kitchen" required autofocus
+                   style="margin: 0;">
+        </div>
         <button type="submit" class="btn-save">Continue</button>
     </form>
 </div>

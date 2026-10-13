@@ -13,6 +13,12 @@ x-logging: &logging
     max-size: 10m
     max-file: "3"
 
+# QA tracing of every request's headers, by the broker (broker/request_log.py) and by Caddy (the
+# access_log snippet in caddy/Caddyfile). "true" turns both on, anything else leaves both off.
+# Read at start, so it takes a restart of the two containers (`docker compose up -d`).
+x-request-logging: &request-logging
+  LOG_REQUEST_HEADERS: "false"
+
 # Shared by the Authentik server and worker, which run the same image.
 x-authentik: &authentik
   image: ghcr.io/goauthentik/server:${AUTHENTIK_VERSION:-2026.8.3}
@@ -47,8 +53,7 @@ services:
     # Secrets, decrypted from secrets/broker.env by deploy.sh.
     env_file: broker.env
     environment:
-      # QA: logs every request's headers (see broker/request_log.py). Remove before going live.
-      LOG_REQUEST_HEADERS: "true"
+      <<: *request-logging
       SESSION_COOKIE_SECURE: "true"
       SESSION_COOKIE_SAMESITE: Lax
       SPOTIFY_REDIRECT_URI: https://auth.nikolaivorkinn.com/auth/spotify/callback
@@ -60,6 +65,8 @@ services:
     logging: *logging
     # Caddy's own secrets, decrypted from secrets/caddy.env by deploy.sh.
     env_file: caddy.env
+    environment:
+      <<: *request-logging
     # Host networking, so 127.0.0.1 in the Caddyfile is the host: the broker is
     # published on 127.0.0.1:5000, and VictoriaLogs and VictoriaMetrics listen
     # on 127.0.0.1:9428 and 127.0.0.1:8428. Caddy binds 80/443 (and UDP 443) on

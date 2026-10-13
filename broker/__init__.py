@@ -24,8 +24,10 @@ def create_app() -> Flask:
     db_module.init_app(app)
 
     from . import request_log
+    from .auth import current_username
 
     request_log.init_app(app)
+    app.context_processor(lambda: {"username": current_username()})
 
     from .services.pair_throttle import REGISTRATIONS_PER_MINUTE, PairThrottle
 

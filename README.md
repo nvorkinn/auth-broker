@@ -53,6 +53,11 @@ a Spotify token.
    upcoming Spotify queue as a JSON list of the same track shape.
    `GET /api/spotify/top/<artists|tracks>` is served the same way.
 
+Every browser page shows the signed-in user's username at the top, from the
+`X-Authentik-Username` header the login proxy sets next to `X-Authentik-Uid` (set
+`AUTH_USERNAME_HEADER` to change the name). It is only shown and used to name their
+screens; the user's identity stays the uid.
+
 Every device-facing endpoint is authenticated with `Authorization: Bearer
 <secret>`; every browser-facing page needs an Authentik login: Caddy
 forward-auths them and sets `X-Authentik-Uid` (setting `AUTH_USER_HEADER`
@@ -136,11 +141,15 @@ single-writer lock makes it safe across threads, workers and the CLI.
 ### Naming a screen
 
 A new screen's owner is sent to `/device/name` right after pairing, because the
-screen's renderer is started per screen and named after it. They pick a **slug**
-(`[a-z0-9][a-z0-9_-]{1,31}`, unique across the broker, fixed once set), which
-creates a *renderer assignment* (also `POST /api/displays/<device_id>/renderer
-{"slug": ...}` for a signed-in owner: 201, 400 bad slug, 404 not theirs, 409 taken
-or already assigned). `/device` shows nothing else until then. The slug lives in the
+screen's renderer is started per screen and named after it. They pick the end of a
+**slug**; the broker puts their username in front, as `<username>-<their choice>`
+(the username lowercased, anything but `a-z 0-9 _ -` turned into a dash, and cut to
+16 characters, or `user` if nothing is left). The whole slug is at most 32
+characters (`[a-z0-9][a-z0-9_-]{1,31}`), unique across the broker, and fixed once
+set, even if their username changes later. It creates a *renderer assignment* (also
+`POST /api/displays/<device_id>/renderer {"slug": ...}` for a signed-in owner, where
+the slug is again just their part: 201 with the full slug, 400 bad slug, 404 not
+theirs, 409 taken or already assigned). `/device` shows nothing else until then. The slug lives in the
 broker, not Authentik: it belongs to a screen, and a user can have several.
 
 The [orchestrator](https://github.com/nvorkinn/pi-dashboard/blob/main/countdown/orchestrator/README.md)
@@ -183,6 +192,20 @@ A wrong or missing secret gets 401. A valid secret for the wrong role gets
 "Unlink screen" on `/device` revokes the screen's secret. Bringing a
 replacement screen back to an existing device isn't built yet: registering
 it creates a new device.
+
+## Tracing requests (QA)
+
+`LOG_REQUEST_HEADERS` in `docker-compose.yml` (shared by the broker and Caddy through one
+setting) turns on logging of every request's headers, off by default. With `"true"`:
+
+- the broker logs one JSON line per request (method, path, query, every header, the
+  response's status and `Location`), see `broker/request_log.py`;
+- Caddy writes its JSON access log for `auth.` and `sso.`, with the request and
+  response headers, which is where each sign-in redirect's `Location` shows.
+
+`Authorization` and `Cookie` values are never logged (Caddy also redacts `Set-Cookie`). Edit the
+setting and run `docker compose up -d` to restart both. The pairing token is in the request URL
+while it's on.
 
 ## Monitoring devices
 

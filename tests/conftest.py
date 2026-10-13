@@ -33,6 +33,7 @@ def app(tmp_path, monkeypatch):
 
 
 USER = "user-1"
+USERNAME = "tester"
 
 
 @pytest.fixture
@@ -41,6 +42,7 @@ def client(app):
     calls ignore it."""
     client = app.test_client()
     client.environ_base["HTTP_X_AUTHENTIK_UID"] = USER
+    client.environ_base["HTTP_X_AUTHENTIK_USERNAME"] = USERNAME
     return client
 
 

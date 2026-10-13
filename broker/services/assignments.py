@@ -19,6 +19,11 @@ from ..models import Device, RendererAssignment
 
 # What the orchestrator accepts; it also names the container and its volumes, so it never changes.
 SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{1,31}$")
+SLUG_MAX = 32
+# What a screen's name is made of: the owner's username (cut down to fit) and what they choose.
+PREFIX_MAX = 16
+PREFIX_FALLBACK = "user"
+SUFFIX_RE = re.compile(r"^[a-z0-9][a-z0-9_-]*$")
 
 # How long a screen may go unseen before its renderer is stopped (and, on its return, started again).
 SUSPEND_AFTER = timedelta(hours=24)
@@ -42,15 +47,36 @@ class NotNeeded(ValueError):
     """The device already has a renderer or an assignment."""
 
 
+def slug_prefix(username: str | None) -> str:
+    """The first part of every slug the user makes: their username lowercased, anything the orchestrator
+    doesn't accept turned into a dash, and cut to PREFIX_MAX. Fixed when the screen is named, so a later
+    change of username doesn't rename it. Falls back to "user" when nothing usable is left."""
+    cleaned = re.sub(r"[^a-z0-9_-]+", "-", (username or "").lower())
+    cleaned = re.sub(r"-{2,}", "-", cleaned).strip("-_")[:PREFIX_MAX].rstrip("-_")
+    return cleaned or PREFIX_FALLBACK
+
+
+def full_slug(username: str | None, suffix: str) -> str:
+    """The slug for what the user chose, "<prefix>-<suffix>", or InvalidSlug if it's not allowed or too long."""
+    prefix = slug_prefix(username)
+    slug = f"{prefix}-{suffix}"
+    if not SUFFIX_RE.match(suffix) or len(slug) > SLUG_MAX or not SLUG_RE.match(slug):
+        raise InvalidSlug(suffix)
+    return slug
+
+
+def max_suffix_length(username: str | None) -> int:
+    return SLUG_MAX - len(slug_prefix(username)) - 1
+
+
 def needs_renderer(device: Device) -> bool:
     return device.renderer_secret_hash is None and device.assignment is None
 
 
-def create(device: Device, slug: str) -> RendererAssignment:
-    """Names the device's screen, which asks the orchestrator for a renderer. Raises InvalidSlug,
-    SlugTaken (unique across the whole broker) or NotNeeded."""
-    if not SLUG_RE.match(slug):
-        raise InvalidSlug(slug)
+def create(device: Device, suffix: str, username: str | None) -> RendererAssignment:
+    """Names the device's screen "<owner's username>-<suffix>", which asks the orchestrator for a renderer.
+    Raises InvalidSlug, SlugTaken (unique across the whole broker) or NotNeeded."""
+    slug = full_slug(username, suffix)
     if not needs_renderer(device):
         raise NotNeeded(device.device_id)
     if db.session.scalar(select(RendererAssignment.id).where(RendererAssignment.slug == slug)):
