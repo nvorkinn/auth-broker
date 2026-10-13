@@ -28,6 +28,15 @@ x-authentik: &authentik
     AUTHENTIK_POSTGRESQL__HOST: authentik-postgresql
     AUTHENTIK_POSTGRESQL__NAME: authentik
     AUTHENTIK_POSTGRESQL__USER: authentik
+    # Outgoing email (the sign-up's confirmation link, password recovery) through Resend's SMTP. The API
+    # key is the password, AUTHENTIK_EMAIL__PASSWORD, in secrets/authentik.env.
+    AUTHENTIK_EMAIL__HOST: smtp.resend.com
+    AUTHENTIK_EMAIL__PORT: "587"
+    AUTHENTIK_EMAIL__USERNAME: resend
+    AUTHENTIK_EMAIL__USE_TLS: "true"
+    AUTHENTIK_EMAIL__USE_SSL: "false"
+    AUTHENTIK_EMAIL__TIMEOUT: "30"
+    AUTHENTIK_EMAIL__FROM: noreply@nikolaivorkinn.com
   depends_on:
     authentik-postgresql:
       condition: service_healthy
