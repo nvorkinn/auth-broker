@@ -122,6 +122,7 @@ def get_config(device_id):
     return jsonify(
         device_id=device_id,
         interval=config.interval,
+        orientation=config.orientation,
         weather={"api_key": current_app.config["WEATHER_API_KEY"], "location": config.weather_location},
         notice_board={"postcode": config.postcode or None},
         tfl={"app_key": current_app.config["TFL_APP_KEY"], "stop_ids": config.tfl_stop_ids},
