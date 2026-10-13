@@ -64,13 +64,10 @@ class DeviceConfig(db.Model):
     postcode: Mapped[str] = mapped_column(String, default="", server_default=text("''"))
     spotify_enabled: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("0"))
     tfl_stop_ids: Mapped[list[str]] = mapped_column(JSON, default=list, server_default=text("'[]'"))
+    # How the screen is mounted, one of ORIENTATIONS.
+    orientation: Mapped[str] = mapped_column(String, default="vertical", server_default=text("'vertical'"))
 
     device: Mapped[Device] = relationship(back_populates="config")
-
-    @property
-    def orientation(self) -> str:
-        """How the screen is mounted, one of ORIENTATIONS. Fixed for now, so it isn't stored."""
-        return "vertical"
 
 
 class SpotifyToken(db.Model):

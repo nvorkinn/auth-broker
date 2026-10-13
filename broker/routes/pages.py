@@ -125,6 +125,9 @@ def device_config():
         raw_postcode = request.form.get("postcode", "")
         postcode = normalize_postcode(raw_postcode)
 
+        config = db.session.get(DeviceConfig, device_id)
+        orientation = request.form.get("orientation", config.orientation)
+
         errors = []
         # Only a location Open-Meteo resolves is ever stored, so a stored one is one the device can use;
         # if it can't be checked right now, that's refused too rather than saved unverified.
@@ -138,15 +141,17 @@ def device_config():
             errors.append("We couldn't check the weather location just now. Please try again in a minute.")
         if postcode is None:
             errors.append(f'"{raw_postcode.strip()}" isn\'t a valid UK postcode.')
+        if orientation not in ORIENTATIONS:
+            errors.append(f"Orientation must be one of {', '.join(ORIENTATIONS)}.")
         if errors:
             return _render_device_config(device_id, errors=[*errors, "Nothing was saved."]), 400
 
-        config = db.session.get(DeviceConfig, device_id)
         config.interval = interval
         config.weather_location = weather_location
         config.postcode = postcode
         config.spotify_enabled = spotify_enabled
         config.tfl_stop_ids = stop_ids
+        config.orientation = orientation
 
         # A blank password field keeps the stored password.
         glowmarkt_password = request.form.get("glowmarkt_password", "")
@@ -216,6 +221,10 @@ def request_renderer(device_id):
     return jsonify(id=assignment.id, slug=assignment.slug, status=assignment.status), 201
 
 
+# The page always sets this orientation and doesn't let it be changed, whatever is stored.
+PAGE_ORIENTATION = "vertical"
+
+
 def _render_device_config(device_id: str, errors: list[str] | None = None):
     config = db.session.get(DeviceConfig, device_id)
     creds = db.session.get(GlowmarktCredentials, device_id)
@@ -232,6 +241,7 @@ def _render_device_config(device_id: str, errors: list[str] | None = None):
         assignment=device.assignment,
         config=config,
         orientations=ORIENTATIONS,
+        page_orientation=PAGE_ORIENTATION,
         stops=tfl.resolve_stops(config.tfl_stop_ids),
         spotify_linked=db.session.get(SpotifyToken, device_id) is not None,
         glowmarkt=glowmarkt,
