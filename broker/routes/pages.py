@@ -16,7 +16,7 @@ from ..auth import (
 from ..clients import tfl, weather
 from ..db import db
 from ..models import ORIENTATIONS, Device, DeviceConfig, GlowmarktCredentials, SpotifyToken
-from ..services import assignments, pairing
+from ..services import assignments, geoip, pairing
 
 bp = Blueprint("pages", __name__)
 
@@ -234,12 +234,16 @@ def _render_device_config(device_id: str, errors: list[str] | None = None):
     }
 
     device = db.session.get(Device, device_id)
+    # An empty weather location is prefilled with a guess from the visitor's IP, shown as one; it's
+    # only stored if they save it.
+    weather_suggestion = None if config.weather_location else geoip.suggest_weather_location(request.remote_addr)
     return render_template(
         "device.html",
         device_id=device_id,
         display_attached=device.display_secret_hash is not None,
         assignment=device.assignment,
         config=config,
+        weather_suggestion=weather_suggestion,
         orientations=ORIENTATIONS,
         page_orientation=PAGE_ORIENTATION,
         stops=tfl.resolve_stops(config.tfl_stop_ids),

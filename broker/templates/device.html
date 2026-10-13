@@ -51,8 +51,8 @@
         <div class="form-grid">
             <div class="form-group">
                 <label for="weather_location">Weather location</label>
-                <input type="text" id="weather_location" name="weather_location" value="{{ config.weather_location }}" placeholder="e.g. London" aria-describedby="weather_location_hint">
-                <p id="weather_location_hint" class="form-hint">Used for the forecast on your screen.</p>
+                <input type="text" id="weather_location" name="weather_location" value="{{ config.weather_location or weather_suggestion or '' }}" placeholder="e.g. London" aria-describedby="weather_location_hint">
+                <p id="weather_location_hint" class="form-hint">Used for the forecast on your screen.{% if weather_suggestion %} Suggested from your location.{% endif %}</p>
             </div>
         </div>
     </div>
