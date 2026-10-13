@@ -78,6 +78,29 @@ def test_device_config_get_renders_settings(paired_client):
     assert b"Not connected" in response.data
 
 
+def test_device_config_prefills_an_empty_weather_location_from_the_ip(app, paired_client):
+    client, device_id, _ = paired_client
+    with patch("broker.services.geoip.suggest_weather_location", return_value="London") as suggest:
+        response = client.get("/device", environ_base={"REMOTE_ADDR": "81.2.69.1"})
+    suggest.assert_called_once_with("81.2.69.1")
+    assert b'name="weather_location" value="London"' in response.data
+    assert b"Suggested from your internet connection" in response.data
+
+    # Only shown: nothing is stored until it's saved.
+    with app.app_context():
+        assert db.session.get(DeviceConfig, device_id).weather_location == ""
+
+
+def test_device_config_keeps_a_saved_weather_location_over_a_suggestion(paired_client):
+    client, _, _ = paired_client
+    client.post("/device", data={"interval": "15", "weather_location": "Leeds"})
+    with patch("broker.services.geoip.suggest_weather_location", return_value="London") as suggest:
+        response = client.get("/device")
+    suggest.assert_not_called()
+    assert b'name="weather_location" value="Leeds"' in response.data
+    assert b"Suggested from your internet connection" not in response.data
+
+
 def test_device_config_post_persists_settings(app, paired_client):
     client, device_id, _ = paired_client
     response = client.post(

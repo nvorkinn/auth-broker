@@ -12,3 +12,5 @@ __pycache__/
 .coverage
 coverage.xml
 htmlcov/
+# IP location data, fetched into the image at build time (scripts/fetch_geodata.py).
+/geodata/

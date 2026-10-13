@@ -39,7 +39,13 @@
 
             <div class="form-group">
                 <label for="weather_location">Weather location</label>
-                <input type="text" id="weather_location" name="weather_location" value="{{ config.weather_location }}" placeholder="e.g. London">
+                <input type="text" id="weather_location" name="weather_location" value="{{ config.weather_location or weather_suggestion or '' }}" placeholder="e.g. London">
+                {% if weather_suggestion %}
+                    <p class="card-subtitle field-hint">
+                        Suggested from your internet connection, so check it's right before you save.
+                        Location by <a href="https://db-ip.com">DB-IP</a> and <a href="https://www.geonames.org">GeoNames</a>.
+                    </p>
+                {% endif %}
             </div>
 
             <div class="form-group">

@@ -1,5 +1,6 @@
 import os
 from datetime import timedelta
+from pathlib import Path
 
 from flask import Flask
 
@@ -23,6 +24,9 @@ def load(app: Flask) -> None:
     app.config["SPOTIFY_REDIRECT_URI"] = os.environ["SPOTIFY_REDIRECT_URI"]
     app.config["TFL_APP_KEY"] = os.environ.get("TFL_APP_KEY", "")
     app.config["WEATHER_API_KEY"] = os.environ.get("WEATHER_API_KEY", "")
+    # Where the IP location data for suggesting a weather location is (see services/geoip.py). The image
+    # has it in /app/geodata, which is the default.
+    app.config["GEODATA_DIR"] = os.environ.get("GEODATA_DIR", str(Path(__file__).resolve().parent.parent / "geodata"))
     app.config["CREDENTIAL_ENCRYPTION_KEY"] = os.environ["CREDENTIAL_ENCRYPTION_KEY"]
     # Unset (the default) turns GET /api/status/devices off.
     app.config["STATUS_TOKEN"] = os.environ.get("STATUS_TOKEN", "")

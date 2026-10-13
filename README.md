@@ -46,6 +46,13 @@ a Spotify token.
    another. "Connect Spotify" is started for one screen (`/auth/spotify/login?device=<id>`), and the
    screen it was started for is remembered through the round trip to Spotify. Devices paired
    before owners existed need `flask devices owner <device_id> <user id>`.
+   While a screen has no weather location, `/device` prefills the field with the biggest town or city
+   near where the visitor's IP is, marked as a suggestion; it's stored only when they save. The lookup
+   is local, so no IP is sent anywhere: DB-IP's [IP to City Lite](https://db-ip.com/db/download/ip-to-city-lite)
+   database and [GeoNames](https://www.geonames.org)' towns of over 15,000 people (both CC BY 4.0, credited
+   under the field) are fetched into the image when it's built (`scripts/fetch_geodata.py`), so they're
+   as fresh as the release. Running locally without them there's no suggestion; run
+   `python scripts/fetch_geodata.py geodata` for one.
 3. **Spotify:** from `/device`, "Connect Spotify" kicks off the OAuth flow.
    The server exchanges the code for tokens and keeps them — the Pi never
    sees a Spotify token, only its own device secret.
