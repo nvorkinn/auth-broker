@@ -70,11 +70,14 @@ def test_concurrent_app_startup_serializes_migrations(app, monkeypatch):
         db.engine.dispose()
 
     first_upgrade_started = Event()
+    second_lock_attempted = Event()
     second_upgrade_started = Event()
     release_first_upgrade = Event()
     call_lock = Lock()
     calls = 0
+    lock_attempts = 0
     original_upgrade = db_module.command.upgrade
+    original_flock = db_module.fcntl.flock
 
     def pause_first_upgrade(config, revision):
         nonlocal calls
@@ -88,14 +91,24 @@ def test_concurrent_app_startup_serializes_migrations(app, monkeypatch):
             second_upgrade_started.set()
         return original_upgrade(config, revision)
 
+    def track_flock(file_descriptor, operation):
+        nonlocal lock_attempts
+        with call_lock:
+            lock_attempts += 1
+            if lock_attempts == 2:
+                second_lock_attempted.set()
+        return original_flock(file_descriptor, operation)
+
     monkeypatch.setattr(db_module.command, "upgrade", pause_first_upgrade)
+    monkeypatch.setattr(db_module.fcntl, "flock", track_flock)
 
     with ThreadPoolExecutor(max_workers=2) as executor:
         first = executor.submit(create_app)
         assert first_upgrade_started.wait(timeout=5)
         second = executor.submit(create_app)
         try:
-            assert not second_upgrade_started.wait(timeout=0.1)
+            assert second_lock_attempted.wait(timeout=5)
+            assert not second_upgrade_started.is_set()
         finally:
             release_first_upgrade.set()
         first_app = first.result(timeout=10)
