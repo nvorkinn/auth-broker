@@ -10,15 +10,13 @@ from broker.models import Device, DeviceConfig, PairingCode
 
 def test_register_creates_device(client):
     secret = "a-very-long-device-secret-value"
-    response = client.post(
-        "/api/devices/register", json={"role": "display", "secret": secret, "width": 800, "height": 480}
-    )
+    response = client.post("/api/devices/register", json={"secret": secret, "width": 480, "height": 800})
     assert response.status_code == 201
     assert "device_id" in response.get_json()
 
 
 def test_register_rejects_short_secret(client):
-    response = client.post("/api/devices/register", json={"role": "display", "secret": "short"})
+    response = client.post("/api/devices/register", json={"secret": "short"})
     assert response.status_code == 400
 
 
@@ -75,7 +73,7 @@ def test_get_config_returns_defaults_and_shared_keys(client, register_device):
     assert body == {
         "device_id": device_id,
         "interval": 15,
-        "screen": {"orientation": "vertical", "width": 800, "height": 480},
+        "screen": {"orientation": "vertical", "width": 480, "height": 800},
         "weather": {"api_key": "test-weather-key", "location": ""},
         "notice_board": {"postcode": None},
         "tfl": {"app_key": "test-tfl-key", "stop_ids": []},
@@ -340,46 +338,6 @@ def test_get_config_returns_the_saved_orientation(app, client, register_device):
     assert response.get_json()["screen"]["orientation"] == "horizontal"
 
 
-def test_get_config_returns_the_size_the_screen_registered_with(client):
-    screen = client.post(
-        "/api/devices/register",
-        json={"role": "display", "secret": "display-secret-0123456789", "width": 1080, "height": 1920},
-    )
-    assert screen.status_code == 201
-    renderer = client.post("/api/devices/register", json={"role": "renderer", "secret": "renderer-secret-0123456789"})
-    assert renderer.status_code == 201
-
-    response = client.get("/api/config", headers={"Authorization": "Bearer renderer-secret-0123456789"})
-    assert response.get_json()["screen"] == {"orientation": "vertical", "width": 1080, "height": 1920}
-
-
-@pytest.mark.parametrize(
-    "extra",
-    [
-        {},
-        {"width": 100},
-        {"height": 100},
-        {"width": 100, "height": 0},
-        {"width": "100", "height": 100},
-        {"width": True, "height": 100},
-        {"width": 1.5, "height": 100},
-    ],
-)
-def test_register_rejects_a_bad_screen_size(client, extra):
-    response = client.post(
-        "/api/devices/register", json={"role": "display", "secret": "display-secret-0123456789", **extra}
-    )
-    assert response.status_code == 400
-
-
-def test_register_rejects_a_size_from_a_renderer(client):
-    response = client.post(
-        "/api/devices/register",
-        json={"role": "renderer", "secret": "renderer-secret-0123456789", "width": 100, "height": 100},
-    )
-    assert response.status_code == 400
-
-
 def test_a_blank_weather_location_still_counts_as_missing(app, client, register_device):
     device_id, secret = register_device()
     with app.app_context():
@@ -387,3 +345,22 @@ def test_a_blank_weather_location_still_counts_as_missing(app, client, register_
         db.session.commit()
 
     assert "a weather location" in _setup_missing(client, device_id, secret)
+
+
+def test_register_stores_the_size_it_is_given(app, client):
+    response = client.post(
+        "/api/devices/register", json={"secret": "display-secret-0123456789", "width": 1080, "height": 1920}
+    )
+    with app.app_context():
+        config = db.session.get(DeviceConfig, response.get_json()["device_id"])
+        assert (config.width, config.height) == (1080, 1920)
+
+
+@pytest.mark.parametrize(
+    "extra",
+    [{}, {"width": 100}, {"height": 100}, {"width": 100, "height": 0}, {"width": "100", "height": 100}]
+    + [{"width": True, "height": 100}, {"width": 1.5, "height": 100}],
+)
+def test_register_rejects_a_missing_or_bad_screen_size(client, extra):
+    response = client.post("/api/devices/register", json={"secret": "display-secret-0123456789", **extra})
+    assert response.status_code == 400

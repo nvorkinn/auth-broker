@@ -18,31 +18,29 @@ def _bearer(secret):
     return {"Authorization": f"Bearer {secret}"}
 
 
-def _pair(client, secret):
+def _pair(client, claim_renderer, secret):
     """Registers a screen and its renderer (as the shared register_device fixture does) and pairs the client's
     user with them: returns the device's id."""
-    client.post(
-        "/api/devices/register", json={"role": "display", "secret": "display-" + secret, "width": 800, "height": 480}
-    )
-    registered = client.post("/api/devices/register", json={"role": "renderer", "secret": secret})
+    client.post("/api/devices/register", json={"secret": "display-" + secret, "width": 480, "height": 800})
+    registered = claim_renderer("display-" + secret, secret)
     code = client.post("/api/devices/pairing-code", headers=_bearer(secret)).get_json()["code"]
     assert client.post("/pair", data={"code": code}).status_code == 302
     return registered.get_json()["device_id"]
 
 
 @pytest.fixture
-def two_screens(client):
+def two_screens(client, claim_renderer):
     """The signed-in user's two screens: returns (first_id, second_id), the second paired most recently."""
-    return _pair(client, FIRST_SECRET), _pair(client, SECOND_SECRET)
+    return _pair(client, claim_renderer, FIRST_SECRET), _pair(client, claim_renderer, SECOND_SECRET)
 
 
 @pytest.fixture
-def other_screen(app):
+def other_screen(app, claim_renderer):
     """A screen that belongs to someone else: returns its id."""
     stranger = app.test_client()
     stranger.environ_base["HTTP_X_AUTHENTIK_UID"] = "user-2"
     stranger.environ_base["HTTP_X_AUTHENTIK_USERNAME"] = "stranger"
-    return _pair(stranger, OTHER_SECRET)
+    return _pair(stranger, claim_renderer, OTHER_SECRET)
 
 
 def _weather(app, device_id):
@@ -123,6 +121,7 @@ def test_disconnecting_spotify_and_unlinking_act_on_the_chosen_screen(app, clien
 def test_a_second_screen_is_named_on_its_own_page(app, client, two_screens):
     _, second = two_screens
     with app.app_context():
+        db.session.delete(db.session.get(Device, second).assignment)
         db.session.get(Device, second).renderer_secret_hash = None
         db.session.get(Device, second).display_secret_hash = "c" * 64
         db.session.commit()
@@ -185,6 +184,7 @@ def test_plain_device_marks_the_most_recent_screen_as_current(client, two_screen
 def test_the_switcher_uses_the_screens_name(app, client, two_screens):
     first, _ = two_screens
     with app.app_context():
+        db.session.delete(db.session.get(Device, first).assignment)
         db.session.get(Device, first).device_name = "kitchen-pi"
         db.session.commit()
 
@@ -274,6 +274,7 @@ def test_without_a_signed_in_user_there_are_no_screens(app):
 def test_a_screen_waiting_to_be_named_is_called_new_screen(app, client, two_screens):
     _, second = two_screens
     with app.app_context():
+        db.session.delete(db.session.get(Device, second).assignment)
         db.session.get(Device, second).renderer_secret_hash = None
         db.session.get(Device, second).display_secret_hash = "d" * 64
         db.session.commit()
@@ -284,6 +285,7 @@ def test_a_screen_waiting_to_be_named_is_called_new_screen(app, client, two_scre
 def test_the_name_input_is_not_styled_like_the_pairing_code(app, client, two_screens):
     _, second = two_screens
     with app.app_context():
+        db.session.delete(db.session.get(Device, second).assignment)
         db.session.get(Device, second).renderer_secret_hash = None
         db.session.get(Device, second).display_secret_hash = "e" * 64
         db.session.commit()

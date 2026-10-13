@@ -38,9 +38,7 @@ if args.token:
     input("then press Enter to bring the screen online... ")
 
 register = requests.post(
-    f"{base_url}/api/devices/register",
-    json={"role": "display", "secret": device_secret, "width": 800, "height": 480},
-    timeout=10,
+    f"{base_url}/api/devices/register", json={"secret": device_secret, "width": 480, "height": 800}, timeout=10
 )
 if register.status_code in (429, 503):
     sys.exit(f"register: {register.status_code}, try again in {register.headers.get('Retry-After')}s")

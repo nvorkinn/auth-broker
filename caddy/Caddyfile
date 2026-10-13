@@ -40,7 +40,7 @@ auth.nikolaivorkinn.com {
 	# the orchestrator's (its own too) is for browsers and needs an Authentik login. The stop search
 	# under /api/tfl is a browser call.
 	@browser {
-		not path /api/config /api/frame /api/frame/* /api/devices/* /api/spotify/* /api/status/* /api/orchestrator/*
+		not path /api/config /api/frame /api/frame/* /api/devices/* /api/renderers/* /api/spotify/* /api/status/* /api/orchestrator/*
 	}
 	handle @browser {
 		reverse_proxy /outpost.goauthentik.io/* 127.0.0.1:9000

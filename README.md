@@ -76,12 +76,12 @@ forward-auths them and sets `X-Authentik-Uid` (setting `AUTH_USER_HEADER`
 changes the name), which the broker trusts, so the port must stay on loopback. Bearer secrets mean HTTPS is required for any
 non-local deployment (Caddy terminates TLS here; see [Caddy](#caddy)).
 
-## Renderer and display roles
+## Renderer and display
 
 A device has up to two secrets, one per role:
 
 - **renderer**: whatever draws the frames. A renderer process on the server, started by the
-  orchestrator (or by hand).
+  orchestrator.
 - **display**: a thin screen (e.g. an ESP32) that only fetches finished frames.
 
 **The secret is the device's identity.** Each client generates its own long
@@ -91,24 +91,22 @@ unique per device, so the secret alone finds the device.
 
 ### Registering
 
-`POST /api/devices/register` is safe to call again with the same secret,
-e.g. on every boot. A repeat returns 200 `{device_id}` once the client is
-matched, or 202 while it's still waiting.
+A screen and a renderer register on different routes, since they do very different things.
 
-- **Screen:** `{"role": "display", "secret": ..., "width": ..., "height": ...}` (the screen's size in pixels, required) becomes a device at once (201
-  `{device_id}`) with no renderer. Its owner pairs with it and names it, which
-  asks the orchestrator for a renderer (see [Naming a screen](#naming-a-screen)).
-- **Renderer with a claim token:** `{"role": "renderer", "secret": ..., "claim_token": ...}`,
-  from a renderer the orchestrator started. The token belongs to one assignment;
-  the secret is attached to that assignment's device (201 `{device_id}`) and the
-  token is spent. An unknown or spent token is a 403.
-- **Renderer started by hand:** `{"role": "renderer", "secret": ...}` with no token
-  waits in a pending pool (202) until a screen with no renderer and no assignment
-  arrives (or is already there), and is matched with the longest-waiting one.
+**Screen: `POST /api/devices/register {"secret": ..., "width": ..., "height": ...}`.** Safe to call again with the same secret,
+e.g. on every boot. It becomes a device at once (201 `{device_id}`; a repeat is 200) with no renderer.
+Its owner pairs with it and names it, which asks the orchestrator for a renderer (see
+[Naming a screen](#naming-a-screen)). Anyone can call it, so it is throttled.
+
+**Renderer: `POST /api/renderers/claim {"secret": ..., "claim_token": ...}`.** From a renderer the
+orchestrator started. The token belongs to one assignment and is single-use; the secret is attached to
+that assignment's device (201 `{device_id}`) and the token is spent. A repeat with the same secret
+(e.g. after a restart) is 200. The unguessable token is the protection, so this route is not throttled.
+There is no other way to get a renderer: one started by hand has no assignment to claim.
 
 A screen therefore needs no logic beyond:
 
-1. On boot: `POST /api/devices/register {"role": "display", "secret": ..., "width": ..., "height": ...}`
+1. On boot: `POST /api/devices/register {"secret": ..., "width": ..., "height": ...}`
    (201 straight away; the screen has a device even before its renderer runs).
 2. Loop on `GET /api/frame` with `If-None-Match`, handling the status and then
    sleeping for the response's `Retry-After` seconds:
@@ -124,31 +122,26 @@ A screen therefore needs no logic beyond:
 | Code | Meaning | Client should |
 |---|---|---|
 | 201 / 200 | `{device_id}`: a new device, or a repeat of a registered secret | start polling |
-| 202 | a renderer waiting in the pool (`Retry-After: 30`) | poll `/api/config`, not `/register` |
-| 400 | bad role or secret, or a bad `claim_token` | fix the request; a firmware bug |
-| 403 | unknown or spent `claim_token` | log it and retry slowly |
-| 409 | secret already registered with the other role | generate a new secret |
+| 400 | bad secret | fix the request; a firmware bug |
+| 409 | secret already registered as a renderer | generate a new secret |
 | 429 | over 5 calls a minute from this IP | wait `Retry-After` (lockouts double, up to 1h) |
-| 503 | pool full, or too many unpaired screens | wait `Retry-After` (60s) |
+| 503 | too many unpaired screens | wait `Retry-After` (60s) |
 
-A renderer polls `GET /api/config`. Once it has a device, that response
-carries its `device_id` and a `pairing_code` to draw. From then on it can use
-the ID-less routes for everything (`PUT /api/frame`, `/api/spotify/...`), so it
+`/api/renderers/claim` answers 201 / 200 `{device_id}`, 400 for a bad secret or no `claim_token`,
+403 for an unknown or spent token, and 409 for a secret already registered as a screen.
+
+A renderer polls `GET /api/config`, which carries its `device_id` and a `pairing_code` to draw. From
+then on it can use the ID-less routes for everything (`PUT /api/frame`, `/api/spotify/...`), so it
 never has to handle its `device_id`. The broker still logs each request with
 the `device_id` it found from the secret. A screen can also ask for a pairing code
 (`POST /api/devices/pairing-code`), which a screen with no renderer yet has nothing
-else to show. `flask devices pending` (below) shows renderers started by hand that
-are waiting for a screen.
+else to show.
 
 What anyone can add is bounded:
 - `/register` allows 5 calls a minute per IP, every call counting (429 with
   `Retry-After`, lockouts doubling like `/pair`).
-- At most 20 renderers may wait in the pool, and at most 20 screens may sit
-  unpaired with no renderer or assignment at once (503).
-- A renderer unmatched, or a screen unpaired, after 24 hours is dropped.
-
-The matching runs in one transaction that starts with a write, so SQLite's
-single-writer lock makes it safe across threads, workers and the CLI.
+- At most 20 screens may sit unpaired with no renderer or assignment at once (503).
+- A screen unpaired after 24 hours is dropped.
 
 ### Naming a screen
 
@@ -199,7 +192,7 @@ device's id, and `logs` to Fluent Bit's HTTP input (`127.0.0.1:9880`), both in t
 best-effort: a destination being down is logged and never fails the poll.
 
 A wrong or missing secret gets 401. A valid secret for the wrong role gets
-403. A secret still waiting in the pool gets 202 on the ID-less routes.
+403.
 
 "Unlink screen" on `/device` revokes the screen's secret. Bringing a
 replacement screen back to an existing device isn't built yet: registering
@@ -335,8 +328,6 @@ docker exec auth-broker flask --app wsgi devices owner <device_id> <user id>   #
 docker exec auth-broker flask --app wsgi devices unpair <device_id>            # show a pairing code again
 docker exec auth-broker flask --app wsgi devices unpair <device_id> --config   # ...and reset its settings and linked accounts
 docker exec auth-broker flask --app wsgi devices forget <device_id>            # delete it; it must register again
-docker exec auth-broker flask --app wsgi devices pending                       # renderers started by hand, waiting for a screen
-docker exec auth-broker flask --app wsgi devices clear-pending                 # clear waiting registrations, keep matched devices
 ```
 
 `unpair` keeps the device's identity, so the Pi just shows a new code on its

@@ -7,7 +7,7 @@ from flask import current_app, g, jsonify, redirect, request, url_for
 from sqlalchemy import select
 
 from .db import db
-from .models import Device, PendingRegistration
+from .models import Device
 
 # How stale devices.last_seen_at may get before a request updates it. Some device endpoints are
 # polled every few seconds; this keeps that from being a database write each time.
@@ -17,10 +17,6 @@ LAST_SEEN_RESOLUTION = timedelta(minutes=1)
 # The roles a device's secrets can hold, in the order a presented secret is checked against them.
 # Each has its own column, devices.<role>_secret_hash.
 ROLES = ("renderer", "display")
-
-# Retry-After, in seconds, on a 202 to a client still waiting in the pending pool: how often it should
-# check back. Matching waits on a renderer being started, which can take a while.
-WAITING_RETRY_AFTER = 30
 
 
 def hash_secret(secret: str) -> str:
@@ -38,8 +34,8 @@ def with_retry_after(response, seconds):
 def require_device_auth(roles=frozenset(ROLES)):
     """Protects device-facing endpoints with one of the device's own bearer secrets, which alone
     finds the device. The secret that matches decides the caller's role: a valid secret
-    for a role not in `roles` is a 403, anything else a 401, except a secret still waiting in the
-    pending pool, which is a 202. Sets g.device_id and g.role, and passes device_id to the view."""
+    for a role not in `roles` is a 403, anything else a 401. Sets g.device_id and g.role, and passes device_id to
+    the view."""
 
     def decorator(view):
         @functools.wraps(view)
@@ -50,8 +46,6 @@ def require_device_auth(roles=frozenset(ROLES)):
                 return jsonify(error="unauthorized"), 401
 
             device, role = _find_by_secret(secret)
-            if device is None and db.session.get(PendingRegistration, hash_secret(secret)) is not None:
-                return with_retry_after(jsonify(status="waiting"), WAITING_RETRY_AFTER), 202
             if role is None:
                 return jsonify(error="unauthorized"), 401
             if role not in roles:

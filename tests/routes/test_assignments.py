@@ -29,9 +29,9 @@ def orchestrator(app, client):
 @pytest.fixture
 def screen(app, client):
     """A screen that registered and was paired by the signed-in user, which has no renderer yet: its device_id."""
-    device_id = client.post(
-        "/api/devices/register", json={"role": "display", "secret": DISPLAY, "width": 800, "height": 480}
-    ).get_json()["device_id"]
+    device_id = client.post("/api/devices/register", json={"secret": DISPLAY, "width": 480, "height": 800}).get_json()[
+        "device_id"
+    ]
     token = pairing.token_for(hash_secret(DISPLAY))
     assert client.post("/pair/token", json={"token": token}).status_code == 200
     return device_id
@@ -86,8 +86,7 @@ def test_a_slug_is_unique_across_the_whole_broker(app, client, screen):
     other.environ_base["HTTP_X_AUTHENTIK_UID"] = "user-2"
     other.environ_base["HTTP_X_AUTHENTIK_USERNAME"] = USERNAME
     other_id = other.post(
-        "/api/devices/register",
-        json={"role": "display", "secret": "another-display-0123456789", "width": 800, "height": 480},
+        "/api/devices/register", json={"secret": "another-display-0123456789", "width": 480, "height": 800}
     )
     other_id = other_id.get_json()["device_id"]
     token = pairing.token_for(hash_secret("another-display-0123456789"))
@@ -136,7 +135,7 @@ def test_the_api_is_only_for_the_screens_owner(app, anonymous_client, client, sc
 
 
 def test_a_screen_can_show_a_pairing_code_before_its_renderer_exists(client):
-    client.post("/api/devices/register", json={"role": "display", "secret": DISPLAY, "width": 800, "height": 480})
+    client.post("/api/devices/register", json={"secret": DISPLAY, "width": 480, "height": 800})
     response = client.post("/api/devices/pairing-code", headers=_bearer(DISPLAY))
     assert response.status_code == 200
     assert len(response.get_json()["code"]) == 6
@@ -174,16 +173,14 @@ def test_the_renderer_claims_its_screen_with_the_token(app, orchestrator, client
     client.post("/device/name", data={"slug": "lisa"})
     [item] = _list(orchestrator)
 
-    response = client.post(
-        "/api/devices/register", json={"role": "renderer", "secret": RENDERER, "claim_token": item["claim_token"]}
-    )
+    response = client.post("/api/renderers/claim", json={"secret": RENDERER, "claim_token": item["claim_token"]})
 
     assert (response.status_code, response.get_json()) == (201, {"device_id": screen})
     with app.app_context():
         assert db.session.get(Device, screen).renderer_secret_hash == hash_secret(RENDERER)
     assert _list(orchestrator)[0]["claim_token"] is None
     # Its own secret is its identity from here on, so a repeat doesn't need the token.
-    assert client.post("/api/devices/register", json={"role": "renderer", "secret": RENDERER}).status_code == 200
+    assert client.post("/api/renderers/claim", json={"secret": RENDERER, "claim_token": "x"}).status_code == 200
     assert client.get("/api/config", headers=_bearer(RENDERER)).get_json()["device_id"] == screen
     assert assignments.needs_renderer(_device(app, screen)) is False
 
@@ -198,24 +195,11 @@ def _device(app, device_id):
 def test_a_spent_or_unknown_claim_token_is_refused(app, orchestrator, client, screen):
     client.post("/device/name", data={"slug": "lisa"})
     token = _list(orchestrator)[0]["claim_token"]
-    client.post("/api/devices/register", json={"role": "renderer", "secret": RENDERER, "claim_token": token})
+    client.post("/api/renderers/claim", json={"secret": RENDERER, "claim_token": token})
 
     for secret, claim in [("second-renderer-0123456789", token), ("third-renderer-0123456789", "nonsense")]:
-        response = client.post(
-            "/api/devices/register", json={"role": "renderer", "secret": secret, "claim_token": claim}
-        )
+        response = client.post("/api/renderers/claim", json={"secret": secret, "claim_token": claim})
         assert response.status_code == 403
-
-
-@pytest.mark.parametrize(
-    "body",
-    [
-        {"role": "display", "claim_token": "x"},
-        {"role": "renderer", "claim_token": 5},
-    ],
-)
-def test_a_claim_token_is_only_for_a_renderer(client, body):
-    assert client.post("/api/devices/register", json={"secret": RENDERER, **body}).status_code == 400
 
 
 def test_the_orchestrator_reports_progress(app, orchestrator, client, screen):
@@ -308,8 +292,7 @@ def test_a_slug_taken_between_the_check_and_the_insert_is_refused(app, client, s
     other.environ_base["HTTP_X_AUTHENTIK_UID"] = "user-2"
     other.environ_base["HTTP_X_AUTHENTIK_USERNAME"] = USERNAME
     other_id = other.post(
-        "/api/devices/register",
-        json={"role": "display", "secret": "another-display-0123456789", "width": 800, "height": 480},
+        "/api/devices/register", json={"secret": "another-display-0123456789", "width": 480, "height": 800}
     )
     other_id = other_id.get_json()["device_id"]
     other.post("/pair/token", json={"token": pairing.token_for(hash_secret("another-display-0123456789"))})

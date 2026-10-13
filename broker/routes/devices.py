@@ -4,7 +4,7 @@ checks in with. Everything but /register needs one of the device's secrets."""
 from flask import Blueprint, current_app, jsonify, request
 from sqlalchemy.exc import IntegrityError
 
-from ..auth import ROLES, WAITING_RETRY_AFTER, hash_secret, require_device_auth, with_retry_after
+from ..auth import hash_secret, require_device_auth, with_retry_after
 from ..db import db
 from ..models import Device, DeviceConfig, GlowmarktCredentials
 from ..services import pairing, registration
@@ -16,19 +16,13 @@ config_bp = Blueprint("config", __name__, url_prefix="/api")
 
 @bp.post("/register")
 def register():
-    """How a device gets its identity. The client generates its own secret, keeps it locally forever
+    """How a screen gets its identity. The screen generates its own secret, keeps it locally forever
     after, and sends it with every request; only its hash is stored here, and that hash alone
     identifies the device. Safe to call again with the same secret, e.g. on every boot.
 
-    - {"role": "display", "secret": ..., "width": ..., "height": ...}: a screen, which must report its
-      size in pixels. Becomes a device at once (201), which its owner
-      pairs with and names a renderer for; the orchestrator then starts that renderer.
-    - {"role": "renderer", "secret": ..., "claim_token": ...}: a renderer the orchestrator started for
-      an assignment. Takes the secret into that assignment's device (201); an unknown or spent token
-      is a 403.
-    - {"role": "renderer", "secret": ...}: a renderer started by hand. Joins the pending pool and is
-      matched with the longest-waiting screen that has no renderer (201 {device_id}), or waits (202)
-      until one arrives. A waiting renderer polls /api/config, which also answers 202 until it's matched.
+    {"secret": ..., "width": ..., "height": ...}, the screen's size in pixels, becomes a device at once
+    (201 {device_id}), which its owner pairs with and names a renderer for; the orchestrator then starts
+    that renderer, which claims the device itself (see routes/renderers.py). A repeat is a 200.
 
     Throttled per IP, every call counting, as anyone can call it."""
     throttle = current_app.extensions["register_throttle"]
@@ -42,51 +36,27 @@ def register():
         current_app.logger.warning("Too many registrations from %s; locked out for %ss", ip, lockout)
 
     body = request.get_json(silent=True) or {}
-    role = body.get("role", "renderer")
     secret = body.get("secret", "")
-    claim_token = body.get("claim_token")
-    if role not in ROLES:
-        return jsonify(error=f"role must be one of {', '.join(ROLES)}"), 400
+    width, height = body.get("width"), body.get("height")
     if not isinstance(secret, str) or len(secret) < 16:
         return jsonify(error="secret must be a random string of at least 16 characters"), 400
-    if claim_token is not None and (role != "renderer" or not isinstance(claim_token, str)):
-        return jsonify(error="only a renderer sends a claim_token, as a string"), 400
-
-    width, height = body.get("width"), body.get("height")
-    if role == "display":
-        if not all(type(size) is int and size > 0 for size in (width, height)):
-            return jsonify(error="a screen must send its width and height, as positive integers"), 400
-    elif width is not None or height is not None:
-        return jsonify(error="only a screen sends width and height"), 400
+    if not all(type(size) is int and size > 0 for size in (width, height)):
+        return jsonify(error="width and height must be positive integers"), 400
 
     secret_hash = hash_secret(secret)
-    found = registration.existing(role, secret_hash)
-    if found is None:
-        try:
-            if claim_token is not None:
-                found = registration.claim(secret_hash, claim_token)
-                if found is None:
-                    return jsonify(error="unknown or spent claim token"), 403
-            elif role == "display":
-                found = registration.register_screen(secret_hash, width, height)
-            else:
-                found = registration.register_renderer(secret_hash)
-        except IntegrityError:
-            # The same secret registered by a simultaneous request (e.g. a quick retry) that got in
-            # first: answer as for any repeat.
-            db.session.rollback()
-            found = registration.existing(role, secret_hash)
-        else:
-            if found is None:
-                return with_retry_after(jsonify(error="too many devices waiting"), 60), 503
-            if found.device_id:
-                return jsonify(device_id=found.device_id), 201
+    try:
+        found = registration.register_screen(secret_hash, width, height)
+    except IntegrityError:
+        # The same secret registered by a simultaneous request (e.g. a quick retry) that got in
+        # first: answer as for any repeat.
+        db.session.rollback()
+        found = registration.register_screen(secret_hash, width, height)
 
+    if found is None:
+        return with_retry_after(jsonify(error="too many devices waiting"), 60), 503
     if found.role_conflict:
-        return jsonify(error="that secret is already registered with another role"), 409
-    if found.waiting:
-        return with_retry_after(jsonify(status="waiting"), WAITING_RETRY_AFTER), 202
-    return jsonify(device_id=found.device_id), 200
+        return jsonify(error="that secret is already registered as a renderer"), 409
+    return jsonify(device_id=found.device_id), 201 if found.created else 200
 
 
 @bp.post("/pairing-code")
@@ -114,8 +84,7 @@ def _update_device_name(device_id: str) -> None:
 def get_config(device_id):
     """Polled by the renderer, here or as /api/config with no device_id. Bundles the device's own
     settings together with the shared app-level API keys, so a key rotation doesn't require
-    re-flashing every gifted device. Carries the device_id, which is how a renderer matched through
-    the pending pool learns it."""
+    re-flashing every gifted device. Carries the device_id, so a renderer needn't keep it."""
     _update_device_name(device_id)
     config = db.session.get(DeviceConfig, device_id)
     if config is None:

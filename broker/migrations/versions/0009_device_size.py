@@ -2,8 +2,8 @@
 
 Existing devices are backfilled with 480x800 (vertical).
 
-Revision ID: 0008
-Revises: 0007
+Revision ID: 0009
+Revises: 0008
 Create Date: 2026-10-14 00:20:00.000000
 
 """
@@ -14,8 +14,8 @@ import sqlalchemy as sa
 from alembic import op
 
 # revision identifiers, used by Alembic.
-revision: str = "0008"
-down_revision: str | Sequence[str] | None = "0007"
+revision: str = "0009"
+down_revision: str | Sequence[str] | None = "0008"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
