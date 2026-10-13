@@ -193,6 +193,27 @@ A wrong or missing secret gets 401. A valid secret for the wrong role gets
 replacement screen back to an existing device isn't built yet: registering
 it creates a new device.
 
+## Email (Resend)
+
+Authentik sends two kinds of email: the confirmation link a new user has to follow to finish
+signing up (the account stays inactive until then), and the password-recovery link. Both use
+Authentik's global email settings, which this repo sets for [Resend](https://resend.com)'s SMTP:
+the host, port, username (`resend`), TLS and the From address (`noreply@nikolaivorkinn.com`) are
+`AUTHENTIK_EMAIL__*` in `docker-compose.yml`, and the password is Resend's API key,
+`AUTHENTIK_EMAIL__PASSWORD` in `secrets/authentik.env`.
+
+To set it up (once):
+
+1. In Resend, add the domain `nikolaivorkinn.com` and create the DNS records it shows (SPF and DKIM,
+   and DMARC if you want it) where the domain's DNS is hosted. Mail from the domain lands in spam
+   until they verify.
+2. Create an API key (sending access is enough) and put it in the encrypted file, without it
+   passing through anywhere else: `sops secrets/authentik.env`, add `AUTHENTIK_EMAIL__PASSWORD=<key>`,
+   commit the file. **Do it before releasing**: with no password nothing is sent, and no new user
+   can finish signing up.
+3. After the release is deployed, sign up with a real address and follow the link. To use another
+   provider, change the host, port and username in `docker-compose.yml`, and the password.
+
 ## Tracing requests (QA)
 
 `LOG_REQUEST_HEADERS` in `docker-compose.yml` (shared by the broker and Caddy through one
@@ -480,8 +501,8 @@ email or username, follow the emailed link (valid for 30 minutes), verify an
 already-enrolled TOTP authenticator or WebAuthn device, then enter and confirm
 a new password. Recovery uses the existing password-change policy and denies
 users without either supported second factor; it does not enroll new factors
-or reactivate disabled accounts. Configure Authentik's global SMTP settings
-in `authentik.env` before using recovery. The blueprint uses `!Env` tags, so
+or reactivate disabled accounts. Both recovery and the sign-up's email
+confirmation need working email: see [Email](#email-resend). The blueprint uses `!Env` tags, so
 generic YAML schema validators cannot parse it unchanged; the deploy job uses
 Authentik's own `ak apply_blueprint`, which applies changes, not just validates.
 

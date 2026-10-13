@@ -181,9 +181,9 @@ entries:
       negate: false
       timeout: 30
 
-  # Sign-up: username, email and password (no email verification while this is in QA), then a
-  # second factor that has to be set up (a passkey or an authenticator app) before the account logs
-  # in. A passkey also lets that user sign in later without typing a username. Only offered to a
+  # Sign-up: username, email and password, then a link emailed to that address that has to be followed,
+  # then a second factor that has to be set up (a passkey or an authenticator app) before the account
+  # logs in. A passkey also lets that user sign in later without typing a username. Only offered to a
   # visitor who was sent to sign in from the broker's /pair page: the gate reads where the login
   # will return to. That keeps the sign-up off the Logs and Metrics logins and off the login page
   # in general, but it isn't a security boundary, as anyone can forge the query. What keeps a new
@@ -302,7 +302,22 @@ entries:
     attrs:
       user_creation_mode: always_create
       user_type: internal
-      create_users_as_inactive: false
+      # Inactive until the emailed link is followed (the email stage activates it).
+      create_users_as_inactive: true
+  # Email verification: a link goes to the address given, and the account only becomes active when it is
+  # followed. The SMTP settings are Authentik's global ones (AUTHENTIK_EMAIL__* in docker-compose.yml,
+  # with the password in secrets/authentik.env), the same ones the recovery flow uses.
+  - model: authentik_stages_email.emailstage
+    id: enrollment-email
+    state: present
+    identifiers:
+      name: broker-enrollment-email
+    attrs:
+      use_global_settings: true
+      subject: Confirm your email
+      template: email/account_confirmation.html
+      token_expiry: minutes=30
+      activate_user_on_success: true
   # A second factor is mandatory: with none set up, the user has to set up a passkey or an authenticator
   # app now (the stock setup stages), and can't carry on without one.
   - model: authentik_stages_authenticator_validate.authenticatorvalidatestage
@@ -340,6 +355,15 @@ entries:
       target: !KeyOf broker-enrollment-flow
       stage: !KeyOf enrollment-user-write
       order: 20
+    attrs:
+      evaluate_on_plan: true
+      re_evaluate_policies: false
+  - model: authentik_flows.flowstagebinding
+    state: present
+    identifiers:
+      target: !KeyOf broker-enrollment-flow
+      stage: !KeyOf enrollment-email
+      order: 25
     attrs:
       evaluate_on_plan: true
       re_evaluate_policies: false
