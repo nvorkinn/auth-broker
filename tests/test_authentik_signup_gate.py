@@ -1,0 +1,67 @@
+"""The sign-up gate in authentik/authentik-config.yaml, run here the way Authentik does: its text is the body of a
+function of `request`. It offers the sign-up only to a login that will return to the broker's /pair page."""
+
+import base64
+import json
+import textwrap
+from types import SimpleNamespace
+from urllib.parse import urlencode
+
+import pytest
+
+BLUEPRINT = "authentik/authentik-config.yaml"
+
+
+def _gate():
+    text = open(BLUEPRINT).read()
+    start = text.index("      name: broker-enrollment-from-broker")
+    body = text[text.index("      expression: |\n", start) + len("      expression: |\n") :]
+    body = body[: body.index("\n  - model:")]
+    namespace = {}
+    exec("def gate(request):\n" + textwrap.indent(textwrap.dedent(body), "    "), namespace)  # noqa: S102
+    return namespace["gate"]
+
+
+def _state(redirect):
+    def part(data):
+        return base64.urlsafe_b64encode(json.dumps(data).encode()).decode().rstrip("=")
+
+    return f"{part({'typ': 'JWT'})}.{part({'redirect': redirect})}.signature"
+
+
+def _request(**query):
+    inner = urlencode(query)
+    return SimpleNamespace(http_request=SimpleNamespace(GET={"query": inner}))
+
+
+@pytest.mark.parametrize(
+    ("redirect", "allowed"),
+    [
+        ("https://auth.nikolaivorkinn.com/pair", True),
+        ("https://auth.nikolaivorkinn.com/pair?t=" + "a" * 64, True),
+        ("https://auth.nikolaivorkinn.com/device", False),
+        ("https://auth.nikolaivorkinn.com/", False),
+        ("https://auth.nikolaivorkinn.com/pair/token", False),
+        ("https://logs.nikolaivorkinn.com/pair", False),
+        ("https://evil.example/pair", False),
+        ("", False),
+    ],
+)
+def test_only_a_login_returning_to_pair_gets_the_sign_up(redirect, allowed):
+    assert _gate()(_request(state=_state(redirect))) is allowed
+
+
+@pytest.mark.parametrize(
+    "request_",
+    [
+        SimpleNamespace(http_request=None),
+        SimpleNamespace(http_request=SimpleNamespace(GET={})),
+        _request(client_id="x"),
+        _request(state="not-a-token"),
+        _request(state="a.b.c"),
+        _request(state="a." + base64.urlsafe_b64encode(b"[1, 2]").decode() + ".c"),
+        _request(state="a." + base64.urlsafe_b64encode(b"not json").decode() + ".c"),
+    ],
+)
+def test_anything_unreadable_is_refused_rather_than_raising(request_):
+    assert _gate()(request_) is False

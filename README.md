@@ -430,8 +430,17 @@ client (`BLUEPRINT_GOOGLE_CLIENT_ID`, `BLUEPRINT_GOOGLE_CLIENT_SECRET`; its
 redirect URI is `https://sso.nikolaivorkinn.com/source/oauth/callback/google/`); never commit them in the YAML. It leaves
 users alone: no users, tokens, TOTP or passkey devices, or group members are
 in it, so manage those in Authentik's UI. It holds only what this repo owns
-(the recovery flow, passkey login, the brands, the Logs and Metrics proxy
+(the recovery flow, the sign-up flow, passkey login, the brands, the Logs and Metrics proxy
 providers and apps, the embedded outpost's providers, the Google source).
+The sign-up flow (`broker-enrollment`) takes a username, email and password, then
+**requires a second factor**, a passkey or an authenticator app, before logging the new user in
+(no email verification yet). A passkey also lets that user sign in later without typing a username.
+It's only offered to a login that came from the broker's `/pair` page, which a policy checks in
+the login's `state` token. That keeps it off the Logs and Metrics logins and off the login page,
+so the way in is to open `/pair` (or enter the pairing code there) and sign up when sent to the
+login. The check isn't a security boundary, as the query can be forged: a new account is an
+internal user in no group, so it can't reach Logs or Metrics, which stay admin-only. The login
+flow itself still asks for a second factor only from users who have one.
 Authentik's own default and system blueprints own the stock flows, stages,
 policies, mappings and groups: look those up with `!Find` by name or slug, and
 patch the few this file customises, and never paste in a UI export, whose exported
