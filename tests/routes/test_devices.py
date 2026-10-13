@@ -1,6 +1,7 @@
 from datetime import UTC, datetime, timedelta
 from unittest.mock import patch
 
+import pytest
 from sqlalchemy import func, select, update
 
 from broker.db import db
@@ -72,7 +73,7 @@ def test_get_config_returns_defaults_and_shared_keys(client, register_device):
     assert body == {
         "device_id": device_id,
         "interval": 15,
-        "orientation": "vertical",
+        "screen": {"orientation": "vertical", "width": None, "height": None},
         "weather": {"api_key": "test-weather-key", "location": ""},
         "notice_board": {"postcode": None},
         "tfl": {"app_key": "test-tfl-key", "stop_ids": []},
@@ -334,7 +335,45 @@ def test_get_config_returns_the_saved_orientation(app, client, register_device):
         db.session.commit()
 
     response = client.get("/api/config", headers={"Authorization": f"Bearer {secret}"})
-    assert response.get_json()["orientation"] == "horizontal"
+    assert response.get_json()["screen"]["orientation"] == "horizontal"
+
+
+def test_get_config_returns_the_size_the_screen_registered_with(client):
+    screen = client.post(
+        "/api/devices/register",
+        json={"role": "display", "secret": "display-secret-0123456789", "width": 1080, "height": 1920},
+    )
+    assert screen.status_code == 201
+    renderer = client.post("/api/devices/register", json={"role": "renderer", "secret": "renderer-secret-0123456789"})
+    assert renderer.status_code == 201
+
+    response = client.get("/api/config", headers={"Authorization": "Bearer renderer-secret-0123456789"})
+    assert response.get_json()["screen"] == {"orientation": "vertical", "width": 1080, "height": 1920}
+
+
+@pytest.mark.parametrize(
+    "extra",
+    [
+        {"width": 100},
+        {"width": 100, "height": 0},
+        {"width": "100", "height": 100},
+        {"width": True, "height": 100},
+        {"width": 1.5, "height": 100},
+    ],
+)
+def test_register_rejects_a_bad_screen_size(client, extra):
+    response = client.post(
+        "/api/devices/register", json={"role": "display", "secret": "display-secret-0123456789", **extra}
+    )
+    assert response.status_code == 400
+
+
+def test_register_rejects_a_size_from_a_renderer(client):
+    response = client.post(
+        "/api/devices/register",
+        json={"role": "renderer", "secret": "renderer-secret-0123456789", "width": 100, "height": 100},
+    )
+    assert response.status_code == 400
 
 
 def test_a_blank_weather_location_still_counts_as_missing(app, client, register_device):

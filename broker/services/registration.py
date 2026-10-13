@@ -51,7 +51,7 @@ def existing(role: str, secret_hash: str) -> Registered | None:
     return None
 
 
-def register_screen(secret_hash: str) -> Registered | None:
+def register_screen(secret_hash: str, width: int | None = None, height: int | None = None) -> Registered | None:
     """A screen becomes a device at once, so its owner can pair with it and name its renderer. If a
     renderer is waiting in the pool, the longest-waiting one is taken into the device. Returns None
     when too many screens are already waiting to be paired.
@@ -71,7 +71,7 @@ def register_screen(secret_hash: str) -> Registered | None:
         .where(PendingRegistration.secret_hash == oldest)
         .returning(PendingRegistration.secret_hash)
     )
-    device_id = _new_device(display_secret_hash=secret_hash, renderer_secret_hash=renderer_hash)
+    device_id = _new_device(width, height, display_secret_hash=secret_hash, renderer_secret_hash=renderer_hash)
     db.session.commit()
     return Registered(device_id=device_id)
 
@@ -146,14 +146,14 @@ def pending() -> list[PendingRegistration]:
     return db.session.scalars(select(PendingRegistration).order_by(PendingRegistration.created_at)).all()
 
 
-def _new_device(**secret_hashes: str | None) -> str:
+def _new_device(width: int | None = None, height: int | None = None, **secret_hashes: str | None) -> str:
     device_id = secrets.token_hex(6)
     # A screen, not its renderer, is what sends its owner's browser to /pair, so its secret makes the token.
     token_source = secret_hashes["display_secret_hash"]
     device = Device(
         device_id=device_id,
         created_at=datetime.now(UTC),
-        config=DeviceConfig(),
+        config=DeviceConfig(width=width, height=height),
         pairing_token=pairing.token_for(token_source),
         **secret_hashes,
     )

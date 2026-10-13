@@ -20,7 +20,8 @@ def register():
     after, and sends it with every request; only its hash is stored here, and that hash alone
     identifies the device. Safe to call again with the same secret, e.g. on every boot.
 
-    - {"role": "display", "secret": ...}: a screen. Becomes a device at once (201), which its owner
+    - {"role": "display", "secret": ..., "width": ..., "height": ...}: a screen, which may report its
+      size in pixels (both or neither). Becomes a device at once (201), which its owner
       pairs with and names a renderer for; the orchestrator then starts that renderer.
     - {"role": "renderer", "secret": ..., "claim_token": ...}: a renderer the orchestrator started for
       an assignment. Takes the secret into that assignment's device (201); an unknown or spent token
@@ -51,6 +52,13 @@ def register():
     if claim_token is not None and (role != "renderer" or not isinstance(claim_token, str)):
         return jsonify(error="only a renderer sends a claim_token, as a string"), 400
 
+    width, height = body.get("width"), body.get("height")
+    for size in (width, height):
+        if size is not None and (role != "display" or type(size) is not int or size <= 0):
+            return jsonify(error="only a screen sends width and height, as positive integers"), 400
+    if (width is None) != (height is None):
+        return jsonify(error="width and height must be sent together"), 400
+
     secret_hash = hash_secret(secret)
     found = registration.existing(role, secret_hash)
     if found is None:
@@ -60,7 +68,7 @@ def register():
                 if found is None:
                     return jsonify(error="unknown or spent claim token"), 403
             elif role == "display":
-                found = registration.register_screen(secret_hash)
+                found = registration.register_screen(secret_hash, width, height)
             else:
                 found = registration.register_renderer(secret_hash)
         except IntegrityError:
@@ -122,7 +130,7 @@ def get_config(device_id):
     return jsonify(
         device_id=device_id,
         interval=config.interval,
-        orientation=config.orientation,
+        screen={"orientation": config.orientation, "width": config.width, "height": config.height},
         weather={"api_key": current_app.config["WEATHER_API_KEY"], "location": config.weather_location},
         notice_board={"postcode": config.postcode or None},
         tfl={"app_key": current_app.config["TFL_APP_KEY"], "stop_ids": config.tfl_stop_ids},

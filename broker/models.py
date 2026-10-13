@@ -66,6 +66,9 @@ class DeviceConfig(db.Model):
     tfl_stop_ids: Mapped[list[str]] = mapped_column(JSON, default=list, server_default=text("'[]'"))
     # How the screen is mounted, one of ORIENTATIONS.
     orientation: Mapped[str] = mapped_column(String, default="vertical", server_default=text("'vertical'"))
+    # The screen's size in pixels as it reported at registration; None if it didn't say.
+    width: Mapped[int | None] = mapped_column(Integer)
+    height: Mapped[int | None] = mapped_column(Integer)
 
     device: Mapped[Device] = relationship(back_populates="config")
 
