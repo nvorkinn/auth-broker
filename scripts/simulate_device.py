@@ -10,7 +10,8 @@ page wait.
 there is no login proxy, so send the user header yourself (e.g. a ModHeader extension:
 X-Authentik-Uid: me).
 
-Each run is a new screen unless you pass --secret with one printed by an earlier run.
+Each run is a new screen with a random secret, unless you pass --secret (any random string of 16+
+characters, e.g. from `openssl rand -hex 16`); pass the same one to be that screen again.
 
 Usage: python scripts/simulate_device.py [--token] [--secret SECRET] [base_url]
 """
@@ -25,7 +26,7 @@ import requests
 parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
 parser.add_argument("base_url", nargs="?", default="http://127.0.0.1:5000")
 parser.add_argument("--token", action="store_true", help="pair by the redirect token instead of a code")
-parser.add_argument("--secret", help="reuse the secret of a screen from an earlier run")
+parser.add_argument("--secret", help="the screen's secret, to be the same screen across runs")
 args = parser.parse_args()
 base_url = args.base_url.rstrip("/")
 device_secret = args.secret or secrets.token_urlsafe(24)
@@ -44,7 +45,6 @@ if register.status_code in (429, 503):
 register.raise_for_status()
 
 print(f"device_id:      {register.json()['device_id']}")
-print(f"secret:         {device_secret}  (pass as --secret to be this screen again)")
 
 if args.token:
     print("\nThe /pair page should now pair and move on.")

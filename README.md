@@ -279,9 +279,9 @@ Then, in another terminal, simulate a screen and walk through pairing yourself:
 
 ```bash
 python scripts/simulate_device.py
-# prints a device_id, its secret and a pairing code
+# prints a device_id and a pairing code
 # -> open http://127.0.0.1:5000/pair and enter the code
-# (or `--token` to try the redirect flow instead, `--secret <secret>` to be the same screen again)
+# (or `--token` to try the redirect flow instead, `--secret <random string>` to be the same screen across runs)
 ```
 
 It works against the deployed broker too, with no hardware
