@@ -837,9 +837,9 @@ def test_post_on_the_id_less_route_uses_the_secrets_own_device(client, register_
 
 
 def test_post_on_the_id_less_route_ships_nothing_while_the_secret_waits_in_the_pool(client, register_pending, shipped):
-    assert register_pending("display", "display-secret-0123456789").status_code == 202
+    assert register_pending("renderer", "renderer-secret-0123456789").status_code == 202
 
-    response = _post(client, {"metrics": LINES, "logs": ["x"]}, secret="display-secret-0123456789", path="/api/frame")
+    response = _post(client, {"metrics": LINES, "logs": ["x"]}, secret="renderer-secret-0123456789", path="/api/frame")
 
     assert response.status_code == 202
     assert shipped == []

@@ -85,11 +85,14 @@ def register_pending(client):
 
 @pytest.fixture
 def split_device(register_pending):
-    """A device matched through the pool, screen first: returns (device_id, renderer_secret, display_secret)."""
+    """A device whose screen registered and then had a renderer started by hand: returns (device_id,
+    renderer_secret, display_secret)."""
     renderer_secret, display_secret = "renderer-secret-0123456789", "display-secret-0123456789"
-    assert register_pending("display", display_secret).status_code == 202
+    screen = register_pending("display", display_secret)
+    assert screen.status_code == 201
     response = register_pending("renderer", renderer_secret)
     assert response.status_code == 201
+    assert response.get_json() == screen.get_json()
     return response.get_json()["device_id"], renderer_secret, display_secret
 
 

@@ -1,4 +1,3 @@
-import pytest
 from sqlalchemy import func, select
 
 from broker.db import db
@@ -152,8 +151,8 @@ def test_clear_pending_with_empty_queue(cli):
     assert result.output == "Cleared 0 pending devices.\n"
 
 
-@pytest.mark.parametrize("role", ["renderer", "display"])
-def test_clear_pending_removes_all_waiting_registrations(app, register_pending, cli, role):
+def test_clear_pending_removes_all_waiting_registrations(app, register_pending, cli):
+    role = "renderer"
     secrets = ["pending-device-one-0123456789", "pending-device-two-0123456789"]
     for secret in secrets:
         assert register_pending(role, secret).status_code == 202
@@ -185,7 +184,7 @@ def test_clear_pending_preserves_registered_devices(app, client, register_device
             for table in db.metadata.sorted_tables
             if table.name != PendingRegistration.__tablename__
         }
-    assert register_pending("display", "pending-display-secret-0123456789").status_code == 202
+    assert register_pending("renderer", "pending-renderer-secret-0123456789").status_code == 202
 
     result = cli("clear-pending")
 

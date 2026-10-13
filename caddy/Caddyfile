@@ -17,10 +17,11 @@ auth.nikolaivorkinn.com {
 	# get through: strip it from every request, and let forward auth set it on the browser pages.
 	request_header -X-Authentik-Uid
 
-	# Everything but the device API (Bearer secrets, no login) and the status endpoint (its own token)
-	# is for browsers and needs an Authentik login. The stop search under /api/tfl is a browser call.
+	# Everything but the device API (Bearer secrets, no login), the status endpoint (its own token) and
+	# the orchestrator's (its own too) is for browsers and needs an Authentik login. The stop search
+	# under /api/tfl is a browser call.
 	@browser {
-		not path /api/config /api/frame /api/frame/* /api/devices/* /api/spotify/* /api/status/*
+		not path /api/config /api/frame /api/frame/* /api/devices/* /api/spotify/* /api/status/* /api/orchestrator/*
 	}
 	handle @browser {
 		reverse_proxy /outpost.goauthentik.io/* 127.0.0.1:9000

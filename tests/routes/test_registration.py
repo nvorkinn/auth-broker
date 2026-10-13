@@ -15,6 +15,7 @@ from broker.routes.frames import FRAME_BYTES, NO_FRAME_RETRY_AFTER
 from broker.services import registration
 from broker.services.pair_throttle import REGISTRATIONS_PER_MINUTE, PairThrottle
 
+USER = "user-1"
 RENDERER = "renderer-secret-0123456789"
 DISPLAY = "display-secret-0123456789"
 
@@ -71,46 +72,73 @@ def test_register_rejects_a_non_string_secret(client):
 # --- the pending pool -----------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("first", ["renderer", "display"])
-def test_a_renderer_and_a_display_are_matched_in_either_order(app, register_pending, first):
-    secrets_by_role = {"renderer": RENDERER, "display": DISPLAY}
-    second = "display" if first == "renderer" else "renderer"
+def test_a_screen_becomes_a_device_at_once(app, register_pending):
+    response = register_pending("display", DISPLAY)
 
-    waiting = register_pending(first, secrets_by_role[first])
-    matched = register_pending(second, secrets_by_role[second])
-
-    assert waiting.status_code == 202
-    assert waiting.get_json() == {"status": "waiting"}
-    assert matched.status_code == 201
-    device = _device(app, matched.get_json()["device_id"])
-    assert device.renderer_secret_hash == hash_secret(RENDERER)
+    assert response.status_code == 201
+    device = _device(app, response.get_json()["device_id"])
     assert device.display_secret_hash == hash_secret(DISPLAY)
+    assert device.renderer_secret_hash is None
     with app.app_context():
         assert db.session.get(DeviceConfig, device.device_id) is not None
     assert _pending(app) == []
 
 
-def test_clients_of_the_same_role_wait_for_the_other(app, register_pending):
-    assert register_pending("display", "display-one-0123456789").status_code == 202
-    assert register_pending("display", "display-two-0123456789").status_code == 202
+def test_a_renderer_started_by_hand_takes_a_screen_that_has_none(app, register_pending):
+    screen = register_pending("display", DISPLAY)
+    matched = register_pending("renderer", RENDERER)
 
-    assert [role for role, _ in _pending(app)] == ["display", "display"]
+    assert matched.status_code == 201
+    assert matched.get_json() == screen.get_json()
+    device = _device(app, matched.get_json()["device_id"])
+    assert (device.renderer_secret_hash, device.display_secret_hash) == (hash_secret(RENDERER), hash_secret(DISPLAY))
+    assert _pending(app) == []
 
 
-def test_the_longest_waiting_client_is_matched_first(app, register_pending):
-    register_pending("display", "display-one-0123456789")
-    register_pending("display", "display-two-0123456789")
+def test_a_waiting_renderer_is_taken_by_the_next_screen(app, register_pending):
+    waiting = register_pending("renderer", RENDERER)
+    matched = register_pending("display", DISPLAY)
 
-    device_id = register_pending("renderer", RENDERER).get_json()["device_id"]
+    assert waiting.status_code == 202
+    assert waiting.get_json() == {"status": "waiting"}
+    assert matched.status_code == 201
+    device = _device(app, matched.get_json()["device_id"])
+    assert (device.renderer_secret_hash, device.display_secret_hash) == (hash_secret(RENDERER), hash_secret(DISPLAY))
+    assert _pending(app) == []
 
-    assert _device(app, device_id).display_secret_hash == hash_secret("display-one-0123456789")
-    assert _pending(app) == [("display", hash_secret("display-two-0123456789"))]
+
+def test_renderers_wait_while_there_is_no_screen_for_them(app, register_pending):
+    assert register_pending("renderer", "renderer-one-0123456789").status_code == 202
+    assert register_pending("renderer", "renderer-two-0123456789").status_code == 202
+
+    assert [role for role, _ in _pending(app)] == ["renderer", "renderer"]
+
+
+def test_the_longest_waiting_renderer_is_matched_first(app, register_pending):
+    register_pending("renderer", "renderer-one-0123456789")
+    register_pending("renderer", "renderer-two-0123456789")
+
+    device_id = register_pending("display", DISPLAY).get_json()["device_id"]
+
+    assert _device(app, device_id).renderer_secret_hash == hash_secret("renderer-one-0123456789")
+    assert _pending(app) == [("renderer", hash_secret("renderer-two-0123456789"))]
+
+
+def test_a_screen_with_an_assignment_is_not_given_a_renderer_by_hand(app, client, register_pending):
+    device_id = register_pending("display", DISPLAY).get_json()["device_id"]
+    with app.app_context():
+        device = db.session.get(Device, device_id)
+        device.owner, device.paired_at = USER, datetime.now(UTC)
+        db.session.commit()
+    assert client.post(f"/api/displays/{device_id}/renderer", json={"slug": "lisa"}).status_code == 201
+
+    assert register_pending("renderer", RENDERER).status_code == 202
 
 
 def test_registering_again_while_waiting_is_a_no_op(app, register_pending):
-    register_pending("display", DISPLAY)
+    register_pending("renderer", RENDERER)
 
-    response = register_pending("display", DISPLAY)
+    response = register_pending("renderer", RENDERER)
 
     assert response.status_code == 202
     assert len(_pending(app)) == 1
@@ -135,37 +163,67 @@ def test_registering_a_standalone_secret_again_returns_its_device(client, regist
 
 def test_a_secret_cannot_be_reused_for_the_other_role(app, split_device, register_pending):
     assert register_pending("renderer", DISPLAY).status_code == 409
-    assert register_pending("display", "waiting-renderer-0123456789").status_code == 202
-    assert register_pending("renderer", "waiting-renderer-0123456789").status_code == 409
+    assert register_pending("renderer", "waiting-renderer-0123456789").status_code == 202
+    assert register_pending("display", "waiting-renderer-0123456789").status_code == 409
 
 
 def test_unmatched_registrations_expire(app, client, register_pending):
-    register_pending("display", DISPLAY)
+    register_pending("renderer", RENDERER)
     with app.app_context():
-        row = db.session.get(PendingRegistration, hash_secret(DISPLAY))
+        row = db.session.get(PendingRegistration, hash_secret(RENDERER))
         row.created_at = datetime.now(UTC) - registration.PENDING_TTL - timedelta(seconds=1)
         db.session.commit()
 
-    # The next registration clears it out, after which the expired screen is a stranger again.
-    register_pending("display", "another-display-0123456789")
+    # The next registration clears it out, after which the expired renderer is a stranger again.
+    register_pending("renderer", "another-renderer-0123456789")
 
-    assert hash_secret(DISPLAY) not in [h for _, h in _pending(app)]
-    assert client.get("/api/frame", headers=_auth(DISPLAY)).status_code == 401
-    assert register_pending("display", DISPLAY).status_code == 202
+    assert hash_secret(RENDERER) not in [h for _, h in _pending(app)]
+    assert client.get("/api/config", headers=_auth(RENDERER)).status_code == 401
+    assert register_pending("renderer", RENDERER).status_code == 202
 
 
-def test_a_full_pool_refuses_new_clients_but_still_matches(app, register_pending, monkeypatch):
+def test_a_full_pool_refuses_new_renderers_but_a_screen_still_takes_one(app, register_pending, monkeypatch):
     monkeypatch.setattr(registration, "MAX_PENDING", 2)
-    register_pending("display", "display-one-0123456789")
+    register_pending("renderer", "renderer-one-0123456789")
+    register_pending("renderer", "renderer-two-0123456789")
+
+    full = register_pending("renderer", "renderer-three-0123456789")
+
+    assert full.status_code == 503
+    assert full.headers["Retry-After"] == "60"
+    assert len(_pending(app)) == 2
+    assert register_pending("display", DISPLAY).status_code == 201
+    assert len(_pending(app)) == 1
+
+
+def test_screens_nobody_has_paired_are_capped_and_expire(app, register_pending, monkeypatch):
+    monkeypatch.setattr(registration, "MAX_UNPAIRED_SCREENS", 2)
+    first = register_pending("display", "display-one-0123456789").get_json()["device_id"]
     register_pending("display", "display-two-0123456789")
 
     full = register_pending("display", "display-three-0123456789")
 
     assert full.status_code == 503
     assert full.headers["Retry-After"] == "60"
-    assert len(_pending(app)) == 2
-    # A renderer is refused too while the pool is full: the cap counts everyone waiting.
-    assert register_pending("renderer", RENDERER).status_code == 503
+    with app.app_context():
+        db.session.get(Device, first).created_at = datetime.now(UTC) - registration.PENDING_TTL - timedelta(seconds=1)
+        db.session.commit()
+    # The stale one is forgotten to make room, and a screen's next call is a 401 so it registers again.
+    assert register_pending("display", "display-three-0123456789").status_code == 201
+    assert _device(app, first) is None
+
+
+def test_a_paired_screen_never_expires(app, register_pending):
+    device_id = register_pending("display", DISPLAY).get_json()["device_id"]
+    with app.app_context():
+        device = db.session.get(Device, device_id)
+        device.owner, device.paired_at = USER, datetime.now(UTC)
+        device.created_at = datetime.now(UTC) - registration.PENDING_TTL * 10
+        db.session.commit()
+
+    register_pending("display", "another-display-0123456789")
+
+    assert _device(app, device_id) is not None
 
 
 def test_concurrent_registrations_never_share_a_partner(app, tmp_path):
@@ -211,10 +269,10 @@ def test_a_simultaneous_repeat_of_the_same_secret_is_answered_as_a_repeat(app, c
         calls.append(role)
         return None if len(calls) == 1 else real_existing(role, secret_hash)
 
-    client.post("/api/devices/register", json={"role": "display", "secret": DISPLAY})
+    client.post("/api/devices/register", json={"role": "renderer", "secret": RENDERER})
     monkeypatch.setattr(registration, "existing", existing_that_misses_once)
 
-    response = client.post("/api/devices/register", json={"role": "display", "secret": DISPLAY})
+    response = client.post("/api/devices/register", json={"role": "renderer", "secret": RENDERER})
 
     assert response.status_code == 202
     assert len(_pending(app)) == 1
@@ -233,9 +291,9 @@ def register_throttle(app):
 def test_register_is_throttled_per_ip_counting_every_call(client, register_pending):
     for _ in range(REGISTRATIONS_PER_MINUTE):
         # The same secret each time: repeats are no-ops but still count.
-        assert register_pending("display", DISPLAY).status_code == 202
+        assert register_pending("renderer", RENDERER).status_code == 202
 
-    response = register_pending("display", DISPLAY)
+    response = register_pending("renderer", RENDERER)
 
     assert response.status_code == 429
     assert int(response.headers["Retry-After"]) > 0
@@ -243,21 +301,18 @@ def test_register_is_throttled_per_ip_counting_every_call(client, register_pendi
 
 @pytest.mark.usefixtures("register_throttle")
 def test_polling_is_not_throttled(client, register_pending):
-    register_pending("display", DISPLAY)
+    register_pending("renderer", RENDERER)
     for _ in range(REGISTRATIONS_PER_MINUTE * 2):
-        assert client.get("/api/frame", headers=_auth(DISPLAY)).status_code == 202
+        assert client.get("/api/config", headers=_auth(RENDERER)).status_code == 202
 
 
 # --- the ID-less endpoints ------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize(
-    ("role", "secret", "path"), [("display", DISPLAY, "/api/frame"), ("renderer", RENDERER, "/api/config")]
-)
-def test_a_waiting_client_is_told_to_wait(client, register_pending, role, secret, path):
-    register_pending(role, secret)
+def test_a_waiting_renderer_is_told_to_wait(client, register_pending):
+    register_pending("renderer", RENDERER)
 
-    response = client.get(path, headers=_auth(secret))
+    response = client.get("/api/config", headers=_auth(RENDERER))
 
     assert response.status_code == 202
     assert response.get_json() == {"status": "waiting"}
@@ -307,14 +362,14 @@ def test_a_standalone_pi_can_use_the_id_less_config(client, register_device):
 # --- CLI ------------------------------------------------------------------------------------------
 
 
-def test_cli_pending_lists_waiting_clients_without_their_hashes(cli, register_pending):
+def test_cli_pending_lists_waiting_renderers_without_their_hashes(cli, register_pending):
     assert cli("pending").output == "Nothing waiting.\n"
-    register_pending("display", DISPLAY)
+    register_pending("renderer", RENDERER)
 
     output = cli("pending").output
 
-    assert output.startswith("display  waiting 0 min")
-    assert hash_secret(DISPLAY) not in output
+    assert output.startswith("renderer  waiting 0 min")
+    assert hash_secret(RENDERER) not in output
 
 
 # --- the renderer's ID-less routes ----------------------------------------------------------------
@@ -395,19 +450,16 @@ def test_id_less_requests_are_logged_with_the_device_id(client, split_device, ca
 # --- Retry-After: how often to poll -----------------------------------------------------------------
 
 
-def test_register_tells_a_waiting_client_how_long_to_wait(register_pending):
+def test_register_tells_a_waiting_renderer_how_long_to_wait(register_pending):
     for _ in range(2):  # the first registration and a repeat
-        response = register_pending("display", DISPLAY)
+        response = register_pending("renderer", RENDERER)
         assert response.status_code == 202
         assert response.headers["Retry-After"] == str(WAITING_RETRY_AFTER)
 
 
-@pytest.mark.parametrize(
-    ("role", "secret", "path"), [("display", DISPLAY, "/api/frame"), ("renderer", RENDERER, "/api/config")]
-)
-def test_a_waiting_poll_says_how_long_to_wait(client, register_pending, role, secret, path):
-    register_pending(role, secret)
-    assert client.get(path, headers=_auth(secret)).headers["Retry-After"] == str(WAITING_RETRY_AFTER)
+def test_a_waiting_poll_says_how_long_to_wait(client, register_pending):
+    register_pending("renderer", RENDERER)
+    assert client.get("/api/config", headers=_auth(RENDERER)).headers["Retry-After"] == str(WAITING_RETRY_AFTER)
 
 
 def test_no_frame_yet_is_a_json_404_with_a_short_retry(client, split_device):
