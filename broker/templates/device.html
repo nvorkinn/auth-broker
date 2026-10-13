@@ -52,13 +52,7 @@
             <div class="form-group">
                 <label for="weather_location">Weather location</label>
                 <input type="text" id="weather_location" name="weather_location" value="{{ config.weather_location or weather_suggestion or '' }}" placeholder="e.g. London" aria-describedby="weather_location_hint">
-                <p id="weather_location_hint" class="form-hint">
-                    Used for the forecast on your screen.
-                    {% if weather_suggestion %}
-                        Suggested from your internet connection, so check it's right before you save.
-                        Location by <a href="https://db-ip.com">DB-IP</a> and <a href="https://www.geonames.org">GeoNames</a>.
-                    {% endif %}
-                </p>
+                <p id="weather_location_hint" class="form-hint">Used for the forecast on your screen.{% if weather_suggestion %} Suggested from your location.{% endif %}</p>
             </div>
         </div>
     </div>

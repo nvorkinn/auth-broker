@@ -85,7 +85,7 @@ def test_device_config_prefills_an_empty_weather_location_from_the_ip(app, paire
         response = client.get("/device", environ_base={"REMOTE_ADDR": "81.2.69.1"})
     suggest.assert_called_once_with("81.2.69.1")
     assert b'name="weather_location" value="London"' in response.data
-    assert b"Suggested from your internet connection" in response.data
+    assert b"Suggested from your location" in response.data
 
     # Only shown: nothing is stored until it's saved.
     with app.app_context():
@@ -99,7 +99,7 @@ def test_device_config_keeps_a_saved_weather_location_over_a_suggestion(paired_c
         response = client.get("/device")
     suggest.assert_not_called()
     assert b'name="weather_location" value="Leeds"' in response.data
-    assert b"Suggested from your internet connection" not in response.data
+    assert b"Suggested from your location" not in response.data
 
 
 def test_device_config_shows_orientation_as_vertical_and_read_only(paired_client):
