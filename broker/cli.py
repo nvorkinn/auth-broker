@@ -5,8 +5,6 @@ docker exec auth-broker flask --app wsgi devices code <device_id>
 docker exec auth-broker flask --app wsgi devices owner <device_id> <user id>
 docker exec auth-broker flask --app wsgi devices unpair <device_id> [--config]
 docker exec auth-broker flask --app wsgi devices forget <device_id>
-docker exec auth-broker flask --app wsgi devices pending
-docker exec auth-broker flask --app wsgi devices clear-pending
 
 Like any `flask` command it loads the app, so it needs the app's env vars (the container has them).
 """
@@ -20,7 +18,7 @@ from sqlalchemy import select
 
 from .db import db
 from .models import Device, DeviceConfig
-from .services import assignments, pairing, registration
+from .services import assignments, pairing
 
 devices = AppGroup("devices", help="Manual device admin for development.")
 
@@ -111,24 +109,3 @@ def forget(device_id: str) -> None:
     db.session.delete(device)
     db.session.commit()
     click.echo(f"{device_id} forgotten; delete its credentials file so it registers again.")
-
-
-@devices.command()
-def pending() -> None:
-    """Show renderers started by hand that are waiting for a screen to take them."""
-    waiting = registration.pending()
-    if not waiting:
-        click.echo("Nothing waiting.")
-    now = datetime.now(UTC)
-    for entry in waiting:
-        minutes = int((now - entry.created_at).total_seconds() // 60)
-        click.echo(f"{entry.role}  waiting {minutes} min  since {_timestamp(entry.created_at)}")
-
-
-@devices.command()
-def clear_pending() -> None:
-    """Clear all pending devices, e.g. after a test run."""
-    waiting = registration.pending()
-    db.session.delete_all(waiting)
-    db.session.commit()
-    click.echo(f"Cleared {len(waiting)} pending devices.")

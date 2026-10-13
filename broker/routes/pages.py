@@ -269,7 +269,7 @@ def spotify_disconnect():
 @require_paired_user
 def display_unlink():
     """Forgets the screen's secret, so it gets a 401 from then on: for a screen that's lost, stolen or
-    retired. Registering again puts it in the pending pool as a new device."""
+    retired. Registering again makes it a new device."""
     db.session.get(Device, g.device_id).display_secret_hash = None
     db.session.commit()
     return redirect(url_for("pages.device_config", device_id=g.device_id))
