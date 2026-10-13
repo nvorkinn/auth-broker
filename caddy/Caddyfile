@@ -11,23 +11,30 @@
 	reverse_proxy {args[0]}
 }
 
-# QA: every request and response to the two hosts a sign-in passes through, with all headers (Caddy's JSON
-# access log has them; it redacts Authorization, Cookie and Set-Cookie unless `log_credentials` is set
-# in the global options). Drop the two `import access_log` lines before going live.
+# QA tracing: with LOG_REQUEST_HEADERS=true in Caddy's environment (set in docker-compose.yml, with the
+# broker's), every request to the two hosts a sign-in passes through is logged as JSON with all its
+# headers and the response's, which is where each redirect's Location shows. Caddy redacts
+# Authorization, Cookie and Set-Cookie unless `log_credentials` is set in the global options.
+# With anything else, `log_skip` drops the access log.
 (access_log) {
 	log {
 		output stdout
 		format json
 	}
+	@request_logging_off expression `'{$LOG_REQUEST_HEADERS:false}' != 'true'`
+	log_skip @request_logging_off
 }
 
 # Caddy uses host networking, so 127.0.0.1 is the host throughout.
 auth.nikolaivorkinn.com {
 	import access_log
 
-	# The broker trusts X-Authentik-Uid as the signed-in user, so nothing a visitor sends in it may
-	# get through: strip it from every request, and let forward auth set it on the browser pages.
+	# The broker trusts X-Authentik-Uid as the signed-in user (and shows the username and email), so
+	# nothing a visitor sends in them may get through: strip them from every request, and let forward
+	# auth set them on the browser pages.
 	request_header -X-Authentik-Uid
+	request_header -X-Authentik-Username
+	request_header -X-Authentik-Email
 
 	# Everything but the device API (Bearer secrets, no login), the status endpoint (its own token) and
 	# the orchestrator's (its own too) is for browsers and needs an Authentik login. The stop search
