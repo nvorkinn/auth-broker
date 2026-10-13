@@ -91,9 +91,13 @@ fi
   # Copy then mv, so compose never reads a half-written file.
   cp "$bundle/docker-compose.yml" docker-compose.yml.tmp
   mv docker-compose.yml.tmp docker-compose.yml
-  # Ensure only brand assets are served from the public countdown assets path.
-  if grep -qE '^\s*-\s*\./authentik:/web/dist/assets/countdown:ro\s*$' docker-compose.yml; then
-    sed -i -E 's|^(\s*-\s*)\./authentik:/web/dist/assets/countdown:ro(\s*)$|\1./authentik-assets:/web/dist/assets/countdown:ro\2|' docker-compose.yml
+  # Fail closed if compose still mounts the full authentik config directory into
+  # publicly served countdown assets. The compose file itself must use
+  # ./authentik-assets:/web/dist/assets/countdown:ro.
+  if grep -qE '^\s*-\s*["'\'']?\./authentik:/web/dist/assets/countdown:ro["'\'']?\s*$' docker-compose.yml; then
+    echo "ERROR: docker-compose.yml contains insecure mount ./authentik:/web/dist/assets/countdown:ro" >&2
+    echo "Please update the committed compose file to use ./authentik-assets:/web/dist/assets/countdown:ro" >&2
+    exit 1
   fi
   # The worker bind-mounts authentik/; made here so Docker doesn't create it
   # root-owned. Only an authentik-config deploy changes what's in it.
