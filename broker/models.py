@@ -52,6 +52,9 @@ class PairingCode(db.Model):
     device: Mapped[Device] = relationship(back_populates="pairing_codes")
 
 
+ORIENTATIONS = ("horizontal", "vertical")
+
+
 class DeviceConfig(db.Model):
     __tablename__ = "device_config"
 
@@ -63,6 +66,11 @@ class DeviceConfig(db.Model):
     tfl_stop_ids: Mapped[list[str]] = mapped_column(JSON, default=list, server_default=text("'[]'"))
 
     device: Mapped[Device] = relationship(back_populates="config")
+
+    @property
+    def orientation(self) -> str:
+        """How the screen is mounted, one of ORIENTATIONS. Fixed for now, so it isn't stored."""
+        return "vertical"
 
 
 class SpotifyToken(db.Model):

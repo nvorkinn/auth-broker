@@ -72,6 +72,7 @@ def test_get_config_returns_defaults_and_shared_keys(client, register_device):
     assert body == {
         "device_id": device_id,
         "interval": 15,
+        "orientation": "vertical",
         "weather": {"api_key": "test-weather-key", "location": ""},
         "notice_board": {"postcode": None},
         "tfl": {"app_key": "test-tfl-key", "stop_ids": []},

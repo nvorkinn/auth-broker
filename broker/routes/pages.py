@@ -15,7 +15,7 @@ from ..auth import (
 )
 from ..clients import tfl, weather
 from ..db import db
-from ..models import Device, DeviceConfig, GlowmarktCredentials, SpotifyToken
+from ..models import ORIENTATIONS, Device, DeviceConfig, GlowmarktCredentials, SpotifyToken
 from ..services import assignments, pairing
 
 bp = Blueprint("pages", __name__)
@@ -231,6 +231,7 @@ def _render_device_config(device_id: str, errors: list[str] | None = None):
         display_attached=device.display_secret_hash is not None,
         assignment=device.assignment,
         config=config,
+        orientations=ORIENTATIONS,
         stops=tfl.resolve_stops(config.tfl_stop_ids),
         spotify_linked=db.session.get(SpotifyToken, device_id) is not None,
         glowmarkt=glowmarkt,

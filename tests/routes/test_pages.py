@@ -1,3 +1,4 @@
+import re
 from unittest.mock import Mock, patch
 
 import pytest
@@ -76,6 +77,14 @@ def test_device_config_get_renders_settings(paired_client):
     response = client.get("/device")
     assert response.status_code == 200
     assert b"Not connected" in response.data
+
+
+def test_device_config_shows_orientation_as_vertical_and_read_only(paired_client):
+    client, _, _ = paired_client
+    html = client.get("/device").get_data(as_text=True)
+    assert '<fieldset class="form-group" disabled>' in html
+    assert re.search(r'id="orientation_vertical"[^>]*checked', html)
+    assert not re.search(r'id="orientation_horizontal"[^>]*checked', html)
 
 
 def test_device_config_post_persists_settings(app, paired_client):

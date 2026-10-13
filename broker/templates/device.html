@@ -46,6 +46,19 @@
                 <label for="interval">Refresh interval (seconds)</label>
                 <input type="number" id="interval" name="interval" value="{{ config.interval }}" min="5" max="300" required>
             </div>
+
+            <!-- Fixed to vertical for now, so shown but not editable (and not submitted). -->
+            <fieldset class="form-group" disabled>
+                <legend class="form-legend">Orientation</legend>
+                <div class="checkbox-group" style="gap: 20px;">
+                    {% for orientation in orientations %}
+                        <span class="checkbox-group">
+                            <input type="radio" id="orientation_{{ orientation }}" name="orientation" value="{{ orientation }}" {% if config.orientation == orientation %}checked{% endif %}>
+                            <label for="orientation_{{ orientation }}" style="margin: 0; font-size: 14px; font-weight: normal;">{{ orientation | capitalize }}</label>
+                        </span>
+                    {% endfor %}
+                </div>
+            </fieldset>
         </div>
     </div>
 
