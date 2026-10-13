@@ -1,43 +1,57 @@
-"""Stands in for a real Pi during local development: registers a device and
-shows its pairing code (as a real Pi would get it from /config), so you can test the /pair -> /device browser flow
-without real hardware.
+"""Stands in for a real screen (e.g. the ESP32) during development: registers as a display and shows
+its pairing code, as the real screen would, so you can test the /pair -> /device browser flow without
+the hardware. Works against a local broker or the deployed one.
 
-With --token it plays a device that has just finished WiFi setup instead: it prints the /pair URL its owner's
-browser would be redirected to, and registers only once you've opened it, so you can watch the page wait. Locally
-there is no login proxy, so send the user header yourself (e.g. a ModHeader extension: X-Authentik-Uid: me).
+With --token it plays a screen that has just finished WiFi setup instead: it prints the /pair URL its
+owner's browser would be redirected to, and registers only once you've opened it, so you can watch the
+page wait.
 
-Usage: python scripts/simulate_device.py [--token] [base_url]
+/pair itself needs a logged-in user. Deployed, that's your Authentik login in the browser; locally
+there is no login proxy, so send the user header yourself (e.g. a ModHeader extension:
+X-Authentik-Uid: me).
+
+Each run is a new screen unless you pass --secret with one printed by an earlier run.
+
+Usage: python scripts/simulate_device.py [--token] [--secret SECRET] [base_url]
 """
 
+import argparse
 import hashlib
 import secrets
 import sys
 
 import requests
 
-args = [arg for arg in sys.argv[1:] if arg != "--token"]
-use_token = "--token" in sys.argv[1:]
-base_url = args[0] if args else "http://127.0.0.1:5000"
-device_secret = secrets.token_urlsafe(24)
+parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+parser.add_argument("base_url", nargs="?", default="http://127.0.0.1:5000")
+parser.add_argument("--token", action="store_true", help="pair by the redirect token instead of a code")
+parser.add_argument("--secret", help="reuse the secret of a screen from an earlier run")
+args = parser.parse_args()
+base_url = args.base_url.rstrip("/")
+device_secret = args.secret or secrets.token_urlsafe(24)
 
-if use_token:
+if args.token:
     secret_hash = hashlib.sha256(device_secret.encode()).hexdigest()
     token = hashlib.sha256(f"pairing:{secret_hash}".encode()).hexdigest()
     print(f"Open {base_url}/pair#{token}")
-    input("then press Enter to bring the device online... ")
+    input("then press Enter to bring the screen online... ")
 
-register = requests.post(f"{base_url}/api/devices/register", json={"device_secret": device_secret})
-register.raise_for_status()
-device_id = register.json()["device_id"]
-
-config = requests.get(
-    f"{base_url}/api/devices/{device_id}/config",
-    headers={"Authorization": f"Bearer {device_secret}"},
+register = requests.post(
+    f"{base_url}/api/devices/register", json={"role": "display", "secret": device_secret}, timeout=10
 )
-config.raise_for_status()
+if register.status_code in (429, 503):
+    sys.exit(f"register: {register.status_code}, try again in {register.headers.get('Retry-After')}s")
+register.raise_for_status()
 
-print(f"device_id:      {device_id}")
-print(f"pairing code:   {config.json()['pairing_code']}")  # None if it was paired by token
-print(f"still needed:   {', '.join(config.json()['setup_missing'])}")
-if not use_token:
+print(f"device_id:      {register.json()['device_id']}")
+print(f"secret:         {device_secret}  (pass as --secret to be this screen again)")
+
+if args.token:
+    print("\nThe /pair page should now pair and move on.")
+else:
+    code = requests.post(
+        f"{base_url}/api/devices/pairing-code", headers={"Authorization": f"Bearer {device_secret}"}, timeout=10
+    )
+    code.raise_for_status()
+    print(f"pairing code:   {code.json()['code']}  (valid {code.json()['expires_in_seconds'] // 60} minutes)")
     print(f"\nEnter the pairing code at {base_url}/pair")
