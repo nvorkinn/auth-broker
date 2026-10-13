@@ -106,17 +106,6 @@ class Frame(db.Model):
     rendered_at: Mapped[datetime] = mapped_column(UTCDateTime)
 
 
-class PendingRegistration(db.Model):
-    """A renderer or screen that registered and is waiting to be matched with the other role
-    (see services/registration.py). Deleted once matched."""
-
-    __tablename__ = "pending_registrations"
-
-    secret_hash: Mapped[str] = mapped_column(String, primary_key=True)
-    role: Mapped[str] = mapped_column(String)
-    created_at: Mapped[datetime] = mapped_column(UTCDateTime)
-
-
 class RendererAssignment(db.Model):
     """The renderer a screen is to have, which the orchestrator turns into a running container (see
     services/assignments.py). Created when the screen's owner names it; the slug can't change after."""

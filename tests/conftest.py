@@ -64,14 +64,37 @@ def cli(app):
 
 
 @pytest.fixture
-def register_device(client):
+def claim_renderer(app, client):
+    """Gives a registered screen a renderer the way the orchestrator does: its owner names it (here the
+    assignment is made directly), then the renderer claims its device with the token. Returns the claim response."""
+
+    def _claim(display_secret: str, renderer_secret: str):
+        import secrets
+
+        from sqlalchemy import select
+
+        from broker.auth import hash_secret
+        from broker.db import db
+        from broker.models import Device
+        from broker.services import assignments
+
+        with app.app_context():
+            device = db.session.scalar(select(Device).where(Device.display_secret_hash == hash_secret(display_secret)))
+            token = assignments.create(device, secrets.token_hex(3), None).claim_token
+        return client.post("/api/renderers/claim", json={"secret": renderer_secret, "claim_token": token})
+
+    return _claim
+
+
+@pytest.fixture
+def register_device(client, claim_renderer):
     """Registers a screen (whose secret is "display-" plus the given one) and then a renderer with the given secret,
     returning (device_id, secret)."""
 
     def _register(secret: str = "a-very-long-device-secret-value"):
-        screen = client.post("/api/devices/register", json={"role": "display", "secret": "display-" + secret})
+        screen = client.post("/api/devices/register", json={"secret": "display-" + secret})
         assert screen.status_code == 201
-        response = client.post("/api/devices/register", json={"role": "renderer", "secret": secret})
+        response = claim_renderer("display-" + secret, secret)
         assert response.status_code == 201
         return response.get_json()["device_id"], secret
 
@@ -79,23 +102,13 @@ def register_device(client):
 
 
 @pytest.fixture
-def register_pending(client):
-    """Registers a renderer or display through the pending pool and returns the response."""
-
-    def _register(role: str, secret: str):
-        return client.post("/api/devices/register", json={"role": role, "secret": secret})
-
-    return _register
-
-
-@pytest.fixture
-def split_device(register_pending):
-    """A device whose screen registered and then had a renderer started by hand: returns (device_id,
+def split_device(client, claim_renderer):
+    """A device whose screen registered and then had a renderer claim it: returns (device_id,
     renderer_secret, display_secret)."""
     renderer_secret, display_secret = "renderer-secret-0123456789", "display-secret-0123456789"
-    screen = register_pending("display", display_secret)
+    screen = client.post("/api/devices/register", json={"secret": display_secret})
     assert screen.status_code == 201
-    response = register_pending("renderer", renderer_secret)
+    response = claim_renderer(display_secret, renderer_secret)
     assert response.status_code == 201
     assert response.get_json() == screen.get_json()
     return response.get_json()["device_id"], renderer_secret, display_secret
