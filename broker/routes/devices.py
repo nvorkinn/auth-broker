@@ -20,8 +20,6 @@ def register():
     after, and sends it with every request; only its hash is stored here, and that hash alone
     identifies the device. Safe to call again with the same secret, e.g. on every boot.
 
-    - {"role": "renderer", "standalone": true, "secret": ...}: a Pi that is its own screen. Becomes
-      a device at once (201). The old body, {"device_secret": ...} with no role, means the same.
     - {"role": "display", "secret": ...}: a screen. Becomes a device at once (201), which its owner
       pairs with and names a renderer for; the orchestrator then starts that renderer.
     - {"role": "renderer", "secret": ..., "claim_token": ...}: a renderer the orchestrator started for
@@ -43,26 +41,20 @@ def register():
         current_app.logger.warning("Too many registrations from %s; locked out for %ss", ip, lockout)
 
     body = request.get_json(silent=True) or {}
-    legacy = "role" not in body and "device_secret" in body
     role = body.get("role", "renderer")
-    standalone = legacy or body.get("standalone") is True
-    secret = body.get("secret", body.get("device_secret", ""))
+    secret = body.get("secret", "")
     claim_token = body.get("claim_token")
     if role not in ROLES:
         return jsonify(error=f"role must be one of {', '.join(ROLES)}"), 400
-    if standalone and role != "renderer":
-        return jsonify(error="only a renderer can be standalone"), 400
     if not isinstance(secret, str) or len(secret) < 16:
         return jsonify(error="secret must be a random string of at least 16 characters"), 400
-    if claim_token is not None and (role != "renderer" or standalone or not isinstance(claim_token, str)):
-        return jsonify(error="only a renderer (not a standalone one) sends a claim_token, as a string"), 400
+    if claim_token is not None and (role != "renderer" or not isinstance(claim_token, str)):
+        return jsonify(error="only a renderer sends a claim_token, as a string"), 400
 
     secret_hash = hash_secret(secret)
     found = registration.existing(role, secret_hash)
     if found is None:
         try:
-            if standalone:
-                return jsonify(device_id=registration.register_standalone(secret_hash)), 201
             if claim_token is not None:
                 found = registration.claim(secret_hash, claim_token)
                 if found is None:

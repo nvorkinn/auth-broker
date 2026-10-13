@@ -1,5 +1,5 @@
-"""Registering devices. A standalone Pi, which is its own screen, becomes a device straight away. So does
-a screen: it exists from its first call, so its owner can pair with it and name its renderer
+"""Registering devices. A screen becomes a device straight away: it exists from its first call, so its
+owner can pair with it and name its renderer
 (services/assignments.py) before any renderer is running. A renderer started by hand, with no claim
 token, waits in the pending pool until a screen without a renderer is there to take it.
 
@@ -49,13 +49,6 @@ def existing(role: str, secret_hash: str) -> Registered | None:
     if pending is not None:
         return Registered(role_conflict=pending.role != role)
     return None
-
-
-def register_standalone(secret_hash: str) -> str:
-    """A device with only a renderer secret: a Pi that renders and shows its own frames."""
-    device_id = _new_device(renderer_secret_hash=secret_hash)
-    db.session.commit()
-    return device_id
 
 
 def register_screen(secret_hash: str) -> Registered | None:
@@ -156,7 +149,7 @@ def pending() -> list[PendingRegistration]:
 def _new_device(**secret_hashes: str | None) -> str:
     device_id = secrets.token_hex(6)
     # A screen, not its renderer, is what sends its owner's browser to /pair, so its secret makes the token.
-    token_source = secret_hashes.get("display_secret_hash") or secret_hashes["renderer_secret_hash"]
+    token_source = secret_hashes["display_secret_hash"]
     device = Device(
         device_id=device_id,
         created_at=datetime.now(UTC),

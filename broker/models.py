@@ -16,8 +16,7 @@ class Device(db.Model):
     __tablename__ = "devices"
 
     device_id: Mapped[str] = mapped_column(String, primary_key=True)
-    # One secret per role (see auth.ROLES), each identifying the device on its own. A standalone Pi has
-    # no display secret. SHA-256 hex (see auth.hash_secret).
+    # One secret per role (see auth.ROLES), each identifying the device on its own. SHA-256 hex (see auth.hash_secret).
     renderer_secret_hash: Mapped[str | None] = mapped_column(String, index=True, unique=True)
     display_secret_hash: Mapped[str | None] = mapped_column(String, index=True, unique=True)
     # What the device's owner's browser presents to pair with it without a code (see

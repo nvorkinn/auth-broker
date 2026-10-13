@@ -200,7 +200,6 @@ def test_a_spent_or_unknown_claim_token_is_refused(app, orchestrator, client, sc
     "body",
     [
         {"role": "display", "claim_token": "x"},
-        {"role": "renderer", "standalone": True, "claim_token": "x"},
         {"role": "renderer", "claim_token": 5},
     ],
 )
