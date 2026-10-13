@@ -93,10 +93,14 @@ fi
   mv docker-compose.yml.tmp docker-compose.yml
   # The worker bind-mounts authentik/; made here so Docker doesn't create it
   # root-owned. Only an authentik-config deploy changes what's in it.
-  mkdir -p authentik
+  # authentik-assets/ is the server's public static mount (brand assets only),
+  # kept apart from authentik/ so the blueprint is never served.
+  mkdir -p authentik authentik-assets
   if [ "$service" = authentik-config ]; then
     cp "$bundle/authentik/authentik-config.yaml" authentik/.authentik-config.yaml.tmp
     mv authentik/.authentik-config.yaml.tmp authentik/authentik-config.yaml
+    cp "$bundle/authentik-assets/countdown-pill.svg" authentik-assets/.countdown-pill.svg.tmp
+    mv authentik-assets/.countdown-pill.svg.tmp authentik-assets/countdown-pill.svg
   fi
   # The broker's secrets and settings used to live in .env; now they come
   # from broker.env and the compose file, so keep only the version pins.

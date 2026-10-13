@@ -65,3 +65,12 @@ def test_reports_failure(monkeypatch, capsys, error, message):
     monkeypatch.setattr(validator, "validate_blueprint", Mock(side_effect=error))
     assert validator.main() == 1
     assert message in capsys.readouterr().err
+
+
+def test_public_asset_mount_exposes_only_brand_assets():
+    """Authentik serves /web/dist/assets unauthenticated; the blueprint must not be reachable there."""
+    compose = validator.ROOT.joinpath("docker-compose.yml").read_text()
+    mounts = re.findall(r"^\s*-\s*['\"]?(\S+?):/web/dist/\S*", compose, re.MULTILINE)
+    assert mounts == ["./authentik-assets"]
+    exposed = [p.name for p in validator.ROOT.joinpath("authentik-assets").iterdir()]
+    assert exposed == ["countdown-pill.svg"]

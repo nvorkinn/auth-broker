@@ -92,6 +92,8 @@ jobs:
           cp docker-compose.yml scripts/deploy.sh "deploy-$TAG/"
           cp secrets/*.env "deploy-$TAG/secrets/"
           cp authentik/authentik-config.yaml "deploy-$TAG/authentik/"
+          mkdir -p "deploy-$TAG/authentik-assets"
+          cp authentik-assets/countdown-pill.svg "deploy-$TAG/authentik-assets/"
           # Fixed order, times and owners, so a re-run builds the same bytes.
           tar --sort=name --mtime=@0 --owner=0 --group=0 --numeric-owner -cf - "deploy-$TAG" \
             | gzip -n > "deploy-$TAG.tar.gz"

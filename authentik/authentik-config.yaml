@@ -359,7 +359,7 @@ entries:
       domain: nikolaivorkinn.com
     attrs:
       branding_title: Countdown
-      branding_logo: countdown-pill.svg
+      branding_logo: /static/dist/assets/countdown/countdown-pill.svg
       branding_favicon: countdown-favicon.svg.svg
       branding_default_flow_background: 820461.jpg
       flow_recovery: !KeyOf recovery-flow
@@ -456,7 +456,7 @@ entries:
       slug: broker
     attrs:
       name: Broker
-      meta_icon: countdown-pill.svg
+      meta_icon: /static/dist/assets/countdown/countdown-pill.svg
       provider: !KeyOf broker-proxy-provider
   - model: authentik_core.application
     state: present
@@ -464,7 +464,7 @@ entries:
       slug: logs
     attrs:
       name: Logs
-      meta_icon: countdown-pill.svg
+      meta_icon: /static/dist/assets/countdown/countdown-pill.svg
       provider: !KeyOf logs-proxy-provider
   - model: authentik_core.application
     id: metrics-app
@@ -473,7 +473,7 @@ entries:
       slug: metrics
     attrs:
       name: Metrics
-      meta_icon: countdown-pill.svg
+      meta_icon: /static/dist/assets/countdown/countdown-pill.svg
       provider: !KeyOf metrics-proxy-provider
   - model: authentik_policies.policybinding
     state: present
