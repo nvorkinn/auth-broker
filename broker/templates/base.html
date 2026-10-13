@@ -43,6 +43,35 @@
             justify-content: space-between;
         }
 
+        .screens {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin: -8px 0 20px;
+        }
+
+        .screens a {
+            padding: 6px 12px;
+            border: 1px solid var(--border);
+            border-radius: 9999px;
+            background: var(--bg-card);
+            color: var(--text-main);
+            font-size: 14px;
+            font-weight: 600;
+            text-decoration: none;
+        }
+
+        .screens a.current {
+            background: var(--tfl-blue);
+            border-color: var(--tfl-blue);
+            color: #fff;
+        }
+
+        .screens a.add {
+            border-style: dashed;
+            color: var(--text-muted);
+        }
+
         .whoami {
             color: var(--text-muted);
             font-size: 14px;
@@ -398,6 +427,14 @@
             </div>
             {% if username %}<div class="whoami" title="Signed in as {{ username }}">{{ username }}</div>{% endif %}
         </header>
+        {% if screens %}
+        <nav class="screens" aria-label="Your screens">
+            {% for screen in screens %}
+                <a href="{{ url_for('pages.device_config', device_id=screen.id) }}"{% if screen.current %} class="current" aria-current="page"{% endif %}>{{ screen.label }}</a>
+            {% endfor %}
+            <a href="{{ url_for('pages.pair') }}" class="add">+ Add a screen</a>
+        </nav>
+        {% endif %}
         {% block content %}{% endblock %}
     </div>
 </body>

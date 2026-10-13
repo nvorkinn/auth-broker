@@ -13,7 +13,7 @@
         <h2 class="card-title">One last thing</h2>
         <p class="card-subtitle">Pick a short name for this screen, like the room it's in or who it's for. It starts with your username and can't be changed later.</p>
     </div>
-    <form method="POST">
+    <form method="POST" action="{{ url_for('pages.name_screen', device_id=device_id) }}">
         <div style="display: flex; align-items: center; gap: 4px; margin-bottom: 12px;">
             <span class="card-subtitle" style="margin: 0; white-space: nowrap;">{{ prefix }}-</span>
             <input type="text" name="slug" class="pairing-input" value="{{ slug }}" maxlength="{{ max_length }}"

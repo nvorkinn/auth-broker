@@ -55,7 +55,8 @@ def test_a_new_screen_is_sent_to_name_itself_first(client, screen):
     response = client.get("/device")
 
     assert response.status_code == 302
-    assert response.headers["Location"] == "/device/name"
+    assert response.headers["Location"] == f"/device/{screen}/name"
+    assert b"Name your screen" in client.get(response.headers["Location"]).data
     assert b"Name your screen" in client.get("/device/name").data
 
 
@@ -63,12 +64,12 @@ def test_naming_the_screen_creates_its_assignment_and_opens_the_settings(app, cl
     response = client.post("/device/name", data={"slug": "  Lisa "})
 
     assert response.status_code == 302
-    assert response.headers["Location"] == "/device"
+    assert response.headers["Location"] == f"/device/{screen}"
     assignment = _assignment(app, screen)
     assert (assignment.slug, assignment.status) == (f"{USERNAME}-lisa", "pending")
     assert assignment.claim_token
     assert client.get("/device").status_code == 200
-    assert client.get("/device/name").headers["Location"] == "/device"
+    assert client.get("/device/name").headers["Location"] == f"/device/{screen}"
 
 
 @pytest.mark.parametrize("slug", ["", "-lisa", "li sa", "Li$a", "x" * 33])
@@ -97,9 +98,9 @@ def test_a_slug_is_unique_across_the_whole_broker(app, client, screen):
 
 
 def test_a_device_with_its_own_renderer_is_never_asked_to_name_itself(paired_client):
-    client, _, _ = paired_client
+    client, device_id, _ = paired_client
     assert client.get("/device").status_code == 200
-    assert client.get("/device/name").headers["Location"] == "/device"
+    assert client.get("/device/name").headers["Location"] == f"/device/{device_id}"
 
 
 def test_the_device_page_says_the_renderer_is_starting(client, screen):
@@ -331,7 +332,7 @@ def test_naming_a_screen_that_got_its_renderer_meanwhile_goes_to_the_settings(cl
 
     response = client.post("/device/name", data={"slug": "lisa"})
 
-    assert (response.status_code, response.headers["Location"]) == (302, "/device")
+    assert (response.status_code, response.headers["Location"]) == (302, f"/device/{screen}")
 
 
 # --- the username prefix ------------------------------------------------------------------------------

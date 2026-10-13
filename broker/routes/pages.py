@@ -4,7 +4,15 @@ import re
 
 from flask import Blueprint, current_app, g, jsonify, redirect, render_template, request, url_for
 
-from ..auth import current_user, current_username, paired_device_id, require_paired_user, require_user
+from ..auth import (
+    current_user,
+    current_username,
+    paired_device_id,
+    require_paired_user,
+    require_user,
+    screen_label,
+    user_devices,
+)
 from ..clients import tfl, weather
 from ..db import db
 from ..models import Device, DeviceConfig, GlowmarktCredentials, SpotifyToken
@@ -25,6 +33,18 @@ def normalize_postcode(value: str) -> str | None:
         return ""
     match = UK_POSTCODE_RE.match(compact)
     return f"{match[1]} {match[2]}" if match else None
+
+
+@bp.app_context_processor
+def screens():
+    """The signed-in user's screens, for the switcher at the top of every page: [{id, label, current}]."""
+    devices = user_devices()
+    if not devices:
+        return {"screens": []}
+    current = g.get("device_id") or devices[0].device_id
+    return {
+        "screens": [{"id": d.device_id, "label": screen_label(d), "current": d.device_id == current} for d in devices]
+    }
 
 
 @bp.get("/")
@@ -82,13 +102,15 @@ def pair_by_token():
     return jsonify(status=status), {"paired": 200, "waiting": 202, "taken": 409}[status]
 
 
-@bp.route("/device", methods=["GET", "POST"])
+# Every page about a screen is at /device/<id>/..., and at /device/... for the user's most recently paired one.
+@bp.route("/device", methods=["GET", "POST"], defaults={"device_id": None})
+@bp.route("/device/<device_id>", methods=["GET", "POST"])
 @require_paired_user
 def device_config():
     device_id = g.device_id
     # A screen with no renderer yet is named first: nothing else on this page works until it has one.
     if assignments.needs_renderer(db.session.get(Device, device_id)):
-        return redirect(url_for("pages.name_screen"))
+        return redirect(url_for("pages.name_screen", device_id=device_id))
 
     if request.method == "POST":
         raw_stops = request.form.get("stops_order", "")
@@ -135,26 +157,27 @@ def device_config():
         db.session.add(creds)
 
         db.session.commit()
-        return redirect(url_for("pages.device_config"))
+        return redirect(url_for("pages.device_config", device_id=device_id))
 
     return _render_device_config(device_id)
 
 
-@bp.route("/device/name", methods=["GET", "POST"])
+@bp.route("/device/name", methods=["GET", "POST"], defaults={"device_id": None})
+@bp.route("/device/<device_id>/name", methods=["GET", "POST"])
 @require_paired_user
 def name_screen():
     """Where a new screen is named, which asks for its renderer to be started (see
     services/assignments.py). The user is sent here right after pairing, and never again once it's done."""
     device = db.session.get(Device, g.device_id)
     if not assignments.needs_renderer(device):
-        return redirect(url_for("pages.device_config"))
+        return redirect(url_for("pages.device_config", device_id=g.device_id))
 
     error = None
     slug = request.form.get("slug", "").strip().lower()
     if request.method == "POST":
         try:
             assignments.create(device, slug, current_username())
-            return redirect(url_for("pages.device_config"))
+            return redirect(url_for("pages.device_config", device_id=g.device_id))
         except assignments.InvalidSlug:
             error = (
                 f"Use up to {assignments.max_suffix_length(current_username())} lowercase letters, numbers, "
@@ -163,9 +186,10 @@ def name_screen():
         except assignments.SlugTaken:
             error = "That name is taken. Try another."
         except assignments.NotNeeded:
-            return redirect(url_for("pages.device_config"))
+            return redirect(url_for("pages.device_config", device_id=g.device_id))
     return render_template(
         "name_screen.html",
+        device_id=g.device_id,
         slug=slug,
         prefix=assignments.slug_prefix(current_username()),
         max_length=assignments.max_suffix_length(current_username()),
@@ -214,21 +238,23 @@ def _render_device_config(device_id: str, errors: list[str] | None = None):
     )
 
 
-@bp.post("/device/spotify/disconnect")
+@bp.post("/device/spotify/disconnect", defaults={"device_id": None})
+@bp.post("/device/<device_id>/spotify/disconnect")
 @require_paired_user
 def spotify_disconnect():
     token = db.session.get(SpotifyToken, g.device_id)
     if token is not None:
         db.session.delete(token)
         db.session.commit()
-    return redirect(url_for("pages.device_config"))
+    return redirect(url_for("pages.device_config", device_id=g.device_id))
 
 
-@bp.post("/device/display/unlink")
+@bp.post("/device/display/unlink", defaults={"device_id": None})
+@bp.post("/device/<device_id>/display/unlink")
 @require_paired_user
 def display_unlink():
     """Forgets the screen's secret, so it gets a 401 from then on: for a screen that's lost, stolen or
     retired. Registering again puts it in the pending pool as a new device."""
     db.session.get(Device, g.device_id).display_secret_hash = None
     db.session.commit()
-    return redirect(url_for("pages.device_config"))
+    return redirect(url_for("pages.device_config", device_id=g.device_id))

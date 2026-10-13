@@ -142,17 +142,27 @@ def current_username() -> str | None:
     return request.headers.get(current_app.config["USERNAME_HEADER"], "").strip() or None
 
 
-def paired_device_id() -> str | None:
-    """The device the signed-in user is paired with (the one paired most recently, if several)."""
+def user_devices() -> list[Device]:
+    """The devices the signed-in user is paired with, the one paired most recently first."""
     user = current_user()
     if user is None:
-        return None
-    return db.session.scalar(
-        select(Device.device_id)
-        .where(Device.owner == user, Device.paired_at.is_not(None))
-        .order_by(Device.paired_at.desc())
-        .limit(1)
+        return []
+    return list(
+        db.session.scalars(
+            select(Device).where(Device.owner == user, Device.paired_at.is_not(None)).order_by(Device.paired_at.desc())
+        )
     )
+
+
+def paired_device_id() -> str | None:
+    """The device the signed-in user is paired with (the one paired most recently, if several)."""
+    devices = user_devices()
+    return devices[0].device_id if devices else None
+
+
+def screen_label(device: Device) -> str:
+    """What a screen is called on the pages: its name (the slug), or what it reports, or a piece of its id."""
+    return (device.assignment and device.assignment.slug) or device.device_name or device.device_id[:6]
 
 
 def require_user(view):
@@ -169,16 +179,26 @@ def require_user(view):
 
 
 def require_paired_user(view):
-    """Protects browser pages that act on 'the signed-in user's device': a user with none goes to
-    /pair. Sets g.device_id. Looked up on every request, so unpairing and forgetting take effect at once."""
+    """Protects browser pages that act on one of 'the signed-in user's devices'. A page with a `device_id`
+    in its URL is for that device, and 404s unless it's the user's (never admits it exists); one without
+    is for the one paired most recently. A user with none goes to /pair. Sets g.device_id, and the
+    view doesn't get the URL's device_id. Looked up on every request, so unpairing and forgetting take
+    effect at once."""
 
     @functools.wraps(view)
     def wrapped(*args, **kwargs):
         if current_user() is None:
             return "Sign in required.", 401
-        g.device_id = paired_device_id()
-        if g.device_id is None:
-            return redirect(url_for("pages.pair"))
+        requested = kwargs.pop("device_id", None)
+        owned = [device.device_id for device in user_devices()]
+        if requested is None:
+            if not owned:
+                return redirect(url_for("pages.pair"))
+            g.device_id = owned[0]
+        elif requested in owned:
+            g.device_id = requested
+        else:
+            return jsonify(error="not found"), 404
         return view(*args, **kwargs)
 
     return wrapped

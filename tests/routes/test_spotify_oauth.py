@@ -55,7 +55,7 @@ def test_callback_exchanges_code_and_stores_tokens(app, paired_client):
         response = client.get(f"/auth/spotify/callback?code=abc123&state={state}")
 
     assert response.status_code == 302
-    assert response.headers["Location"] == "/device"
+    assert response.headers["Location"] == f"/device/{device_id}"
 
     with app.app_context():
         token = db.session.get(SpotifyToken, device_id)

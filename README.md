@@ -39,7 +39,12 @@ a Spotify token.
    Once paired, `pairing_code` is `null`. `setup_missing` in the same response
    lists what the device still needs before it's worth showing (a weather
    location, a postcode, a bus or tube stop), so the Pi can tell the recipient.
-   A user with several devices gets the one paired most recently. Devices paired
+   A user can own several screens. Each has its own pages at `/device/<id>` (settings),
+   `/device/<id>/name`, `/device/<id>/spotify/disconnect` and `/device/<id>/display/unlink`, and the
+   same paths without the id (`/device`, ...) are for the one paired most recently. A screen that isn't
+   theirs is a 404. Every page shows a switcher with their screens, named by the slug, and a link to pair
+   another. "Connect Spotify" is started for one screen (`/auth/spotify/login?device=<id>`), and the
+   screen it was started for is remembered through the round trip to Spotify. Devices paired
    before owners existed need `flask devices owner <device_id> <user id>`.
 3. **Spotify:** from `/device`, "Connect Spotify" kicks off the OAuth flow.
    The server exchanges the code for tokens and keeps them — the Pi never
