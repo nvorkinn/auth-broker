@@ -22,10 +22,14 @@ def register():
 
     - {"role": "renderer", "standalone": true, "secret": ...}: a Pi that is its own screen. Becomes
       a device at once (201). The old body, {"device_secret": ...} with no role, means the same.
-    - {"role": "renderer" | "display", "secret": ...}: one half of a split deployment. Joins the
-      pending pool and is matched with the longest-waiting client of the other role into one
-      device (201 {device_id}), or waits (202) until one arrives. A waiting client polls its usual
-      endpoint (/api/config, /api/frame), which also answers 202 until it's matched.
+    - {"role": "display", "secret": ...}: a screen. Becomes a device at once (201), which its owner
+      pairs with and names a renderer for; the orchestrator then starts that renderer.
+    - {"role": "renderer", "secret": ..., "claim_token": ...}: a renderer the orchestrator started for
+      an assignment. Takes the secret into that assignment's device (201); an unknown or spent token
+      is a 403.
+    - {"role": "renderer", "secret": ...}: a renderer started by hand. Joins the pending pool and is
+      matched with the longest-waiting screen that has no renderer (201 {device_id}), or waits (202)
+      until one arrives. A waiting renderer polls /api/config, which also answers 202 until it's matched.
 
     Throttled per IP, every call counting, as anyone can call it."""
     throttle = current_app.extensions["register_throttle"]
@@ -43,12 +47,15 @@ def register():
     role = body.get("role", "renderer")
     standalone = legacy or body.get("standalone") is True
     secret = body.get("secret", body.get("device_secret", ""))
+    claim_token = body.get("claim_token")
     if role not in ROLES:
         return jsonify(error=f"role must be one of {', '.join(ROLES)}"), 400
     if standalone and role != "renderer":
         return jsonify(error="only a renderer can be standalone"), 400
     if not isinstance(secret, str) or len(secret) < 16:
         return jsonify(error="secret must be a random string of at least 16 characters"), 400
+    if claim_token is not None and (role != "renderer" or standalone or not isinstance(claim_token, str)):
+        return jsonify(error="only a renderer (not a standalone one) sends a claim_token, as a string"), 400
 
     secret_hash = hash_secret(secret)
     found = registration.existing(role, secret_hash)
@@ -56,7 +63,14 @@ def register():
         try:
             if standalone:
                 return jsonify(device_id=registration.register_standalone(secret_hash)), 201
-            found = registration.register_pending(role, secret_hash)
+            if claim_token is not None:
+                found = registration.claim(secret_hash, claim_token)
+                if found is None:
+                    return jsonify(error="unknown or spent claim token"), 403
+            elif role == "display":
+                found = registration.register_screen(secret_hash)
+            else:
+                found = registration.register_renderer(secret_hash)
         except IntegrityError:
             # The same secret registered by a simultaneous request (e.g. a quick retry) that got in
             # first: answer as for any repeat.
@@ -64,7 +78,7 @@ def register():
             found = registration.existing(role, secret_hash)
         else:
             if found is None:
-                return with_retry_after(jsonify(error="too many devices waiting to be matched"), 60), 503
+                return with_retry_after(jsonify(error="too many devices waiting"), 60), 503
             if found.device_id:
                 return jsonify(device_id=found.device_id), 201
 
@@ -76,9 +90,10 @@ def register():
 
 
 @bp.post("/pairing-code")
-@require_device_auth(roles={"renderer"})
+@require_device_auth()
 def create_pairing_code(device_id):
-    """Forces a fresh code, e.g. to link a new browser to an already-paired device."""
+    """Forces a fresh code, e.g. to link a new browser to an already-paired device. A screen can ask
+    too, since a device that has no renderer yet has nothing else to show one."""
     code = pairing.issue_code(device_id)
     return jsonify(code=code, expires_in_seconds=int(pairing.CODE_TTL.total_seconds()))
 

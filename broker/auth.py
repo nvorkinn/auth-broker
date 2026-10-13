@@ -68,7 +68,7 @@ def require_device_auth(roles=frozenset(ROLES)):
                 device.device_id,
                 role,
             )
-            _mark_seen(device)
+            _mark_seen(device, role)
             return view(*args, device_id=device.device_id, **kwargs)
 
         return wrapped
@@ -88,30 +88,45 @@ def _find_by_secret(secret: str) -> tuple[Device | None, str | None]:
     return None, None
 
 
-def _mark_seen(device: Device) -> None:
+def _mark_seen(device: Device, role: str) -> None:
     now = datetime.now(UTC)
-    if device.last_seen_at is None or now - LAST_SEEN_RESOLUTION >= device.last_seen_at:
-        device.last_seen_at = now
+    stale = {"last_seen_at": device.last_seen_at}
+    if role == "display":
+        stale["display_last_seen_at"] = device.display_last_seen_at
+    changed = False
+    for column, seen in stale.items():
+        if seen is None or now - LAST_SEEN_RESOLUTION >= seen:
+            setattr(device, column, now)
+            changed = True
+    if changed:
         db.session.commit()
 
 
-def require_status_token(view):
-    """Protects the read-only status endpoint with STATUS_TOKEN from the environment. With no token
-    set the endpoint is off and answers 404, as if it didn't exist."""
+def _require_bearer_token(config_key: str):
+    """Protects an endpoint with the token in the broker's setting `config_key`. With none set the
+    endpoint is off and answers 404, as if it didn't exist."""
 
-    @functools.wraps(view)
-    def wrapped(*args, **kwargs):
-        expected = current_app.config["STATUS_TOKEN"]
-        if not expected:
-            return jsonify(error="not found"), 404
+    def decorator(view):
+        @functools.wraps(view)
+        def wrapped(*args, **kwargs):
+            expected = current_app.config[config_key]
+            if not expected:
+                return jsonify(error="not found"), 404
 
-        auth_header = request.headers.get("Authorization", "")
-        secret = auth_header.removeprefix("Bearer ")
-        if not auth_header.startswith("Bearer ") or not hmac.compare_digest(secret, expected):
-            return jsonify(error="unauthorized"), 401
-        return view(*args, **kwargs)
+            auth_header = request.headers.get("Authorization", "")
+            secret = auth_header.removeprefix("Bearer ")
+            if not auth_header.startswith("Bearer ") or not hmac.compare_digest(secret, expected):
+                return jsonify(error="unauthorized"), 401
+            return view(*args, **kwargs)
 
-    return wrapped
+        return wrapped
+
+    return decorator
+
+
+# The read-only status endpoint's own token, and the orchestrator's: neither is a device secret.
+require_status_token = _require_bearer_token("STATUS_TOKEN")
+require_orchestrator_token = _require_bearer_token("ORCHESTRATOR_TOKEN")
 
 
 def current_user() -> str | None:

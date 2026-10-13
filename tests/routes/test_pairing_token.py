@@ -35,10 +35,10 @@ def test_a_device_registering_stores_its_token(app, register_device):
         assert db.session.get(Device, device_id).pairing_token == token_for_secret()
 
 
-def test_a_device_matched_through_the_pool_stores_its_renderer_token(app, split_device):
-    device_id, renderer_secret, _ = split_device
+def test_a_screens_token_comes_from_its_own_secret(app, split_device):
+    device_id, _, display_secret = split_device
     with app.app_context():
-        assert db.session.get(Device, device_id).pairing_token == token_for_secret(renderer_secret)
+        assert db.session.get(Device, device_id).pairing_token == token_for_secret(display_secret)
 
 
 def test_the_token_pairs_the_user_with_a_registered_device(app, client, register_device):

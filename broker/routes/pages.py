@@ -8,7 +8,7 @@ from ..auth import current_user, paired_device_id, require_paired_user, require_
 from ..clients import tfl, weather
 from ..db import db
 from ..models import Device, DeviceConfig, GlowmarktCredentials, SpotifyToken
-from ..services import pairing
+from ..services import assignments, pairing
 
 bp = Blueprint("pages", __name__)
 
@@ -86,6 +86,9 @@ def pair_by_token():
 @require_paired_user
 def device_config():
     device_id = g.device_id
+    # A screen with no renderer yet is named first: nothing else on this page works until it has one.
+    if assignments.needs_renderer(db.session.get(Device, device_id)):
+        return redirect(url_for("pages.name_screen"))
 
     if request.method == "POST":
         raw_stops = request.form.get("stops_order", "")
@@ -137,6 +140,49 @@ def device_config():
     return _render_device_config(device_id)
 
 
+@bp.route("/device/name", methods=["GET", "POST"])
+@require_paired_user
+def name_screen():
+    """Where a new screen is named, which asks for its renderer to be started (see
+    services/assignments.py). The user is sent here right after pairing, and never again once it's done."""
+    device = db.session.get(Device, g.device_id)
+    if not assignments.needs_renderer(device):
+        return redirect(url_for("pages.device_config"))
+
+    error = None
+    slug = request.form.get("slug", "").strip().lower()
+    if request.method == "POST":
+        try:
+            assignments.create(device, slug)
+            return redirect(url_for("pages.device_config"))
+        except assignments.InvalidSlug:
+            error = "Use 2 to 32 lowercase letters, numbers, dashes or underscores, starting with a letter or number."
+        except assignments.SlugTaken:
+            error = "That name is taken. Try another."
+        except assignments.NotNeeded:
+            return redirect(url_for("pages.device_config"))
+    return render_template("name_screen.html", slug=slug, error=error), 400 if error else 200
+
+
+@bp.post("/api/displays/<device_id>/renderer")
+@require_user
+def request_renderer(device_id):
+    """{"slug": "lisa"}: names the signed-in user's screen, which asks for its renderer (the same as
+    the form above). 201 {id, slug, status}; 400 for a bad slug, 404 for a device that isn't the
+    user's, 409 for a slug that's taken or a screen that already has its renderer."""
+    device = db.session.get(Device, device_id)
+    if device is None or device.owner != current_user() or device.paired_at is None:
+        return jsonify(error="not found"), 404
+    slug = (request.get_json(silent=True) or {}).get("slug", "")
+    try:
+        assignment = assignments.create(device, slug if isinstance(slug, str) else "")
+    except assignments.InvalidSlug:
+        return jsonify(error="slug must match [a-z0-9][a-z0-9_-]{1,31}"), 400
+    except (assignments.SlugTaken, assignments.NotNeeded) as e:
+        return jsonify(error="slug is taken" if isinstance(e, assignments.SlugTaken) else "already has a renderer"), 409
+    return jsonify(id=assignment.id, slug=assignment.slug, status=assignment.status), 201
+
+
 def _render_device_config(device_id: str, errors: list[str] | None = None):
     config = db.session.get(DeviceConfig, device_id)
     creds = db.session.get(GlowmarktCredentials, device_id)
@@ -150,6 +196,7 @@ def _render_device_config(device_id: str, errors: list[str] | None = None):
         "device.html",
         device_id=device_id,
         display_attached=device.display_secret_hash is not None,
+        assignment=device.assignment,
         config=config,
         stops=tfl.resolve_stops(config.tfl_stop_ids),
         spotify_linked=db.session.get(SpotifyToken, device_id) is not None,

@@ -20,7 +20,7 @@ from sqlalchemy import select
 
 from .db import db
 from .models import Device, DeviceConfig
-from .services import pairing, registration
+from .services import assignments, pairing, registration
 
 devices = AppGroup("devices", help="Manual device admin for development.")
 
@@ -104,15 +104,18 @@ def unpair(device_id: str, wipe_config: bool) -> None:
 @click.argument("device_id")
 def forget(device_id: str) -> None:
     """Delete a device entirely (it must register again)."""
+    device = _get_device(device_id)
+    # Its renderer, if the orchestrator started one, is removed too; the assignment outlives the device for that.
+    assignments.mark_deleting(device)
     # The relationships cascade, so the device's codes, config, tokens and frame go with it.
-    db.session.delete(_get_device(device_id))
+    db.session.delete(device)
     db.session.commit()
     click.echo(f"{device_id} forgotten; delete its credentials file so it registers again.")
 
 
 @devices.command()
 def pending() -> None:
-    """Show renderers and screens waiting to be matched, e.g. a screen that needs a renderer started."""
+    """Show renderers started by hand that are waiting for a screen to take them."""
     waiting = registration.pending()
     if not waiting:
         click.echo("Nothing waiting.")

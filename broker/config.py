@@ -24,3 +24,6 @@ def load(app: Flask) -> None:
     app.config["CREDENTIAL_ENCRYPTION_KEY"] = os.environ["CREDENTIAL_ENCRYPTION_KEY"]
     # Unset (the default) turns GET /api/status/devices off.
     app.config["STATUS_TOKEN"] = os.environ.get("STATUS_TOKEN", "")
+    # Bearer token for the orchestrator that starts renderers (/api/orchestrator/...). Unset (the
+    # default) turns those endpoints off.
+    app.config["ORCHESTRATOR_TOKEN"] = os.environ.get("ORCHESTRATOR_TOKEN", "")
