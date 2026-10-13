@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 177 35" role="img" aria-label="Countdown">
+  <title>Countdown</title>
+  <rect width="177" height="35" rx="17.5" fill="#EE2E24"/>
+  <text x="16" y="25"
+        font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text', system-ui, Inter, 'Helvetica Neue', Arial, sans-serif"
+        font-size="20.8"
+        font-weight="900"
+        letter-spacing="1.04"
+        textLength="145"
+        lengthAdjust="spacing"
+        fill="#FFFFFF">COUNTDOWN</text>
+</svg>

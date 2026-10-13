@@ -420,7 +420,12 @@ then installs the bundle's `authentik/authentik-config.yaml` into
 `/opt/auth-broker/authentik/` (mounted into the worker at
 `/blueprints/custom/`) and applies it with
 `docker compose exec authentik-worker ak apply_blueprint custom/authentik-config.yaml`,
-which validates the whole blueprint before changing anything. The blueprint is
+which validates the whole blueprint before changing anything. It also installs
+`authentik-assets/countdown-pill.svg` (the brand logo) into
+`/opt/auth-broker/authentik-assets/`, which the server mounts read-only at
+`/web/dist/assets/countdown`, so it is public at
+`/static/dist/assets/countdown/`. Only brand assets belong there; the blueprint
+stays in `authentik/`. The blueprint is
 labelled `blueprints.goauthentik.io/instantiate: 'false'`, so the worker never
 applies it on its own. It takes the providers' client secrets with `!Env` from
 `authentik.env` (`BLUEPRINT_LOGS_CLIENT_SECRET`,

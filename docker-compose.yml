@@ -144,6 +144,11 @@ services:
     container_name: authentik-server
     logging: *logging
     command: server
+    volumes:
+      - authentik_media:/media
+      # Served unauthenticated at /static/dist/assets/countdown/, so this must
+      # hold brand assets only: never mount authentik/ (the blueprint) here.
+      - ./authentik-assets:/web/dist/assets/countdown:ro
     # Loopback only: Caddy (host networking) is the one way in, at
     # sso.nikolaivorkinn.com.
     ports:
