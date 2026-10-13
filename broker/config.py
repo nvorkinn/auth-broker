@@ -27,3 +27,6 @@ def load(app: Flask) -> None:
     # Bearer token for the orchestrator that starts renderers (/api/orchestrator/...). Unset (the
     # default) turns those endpoints off.
     app.config["ORCHESTRATOR_TOKEN"] = os.environ.get("ORCHESTRATOR_TOKEN", "")
+
+    # QA only: logs every request's headers and the response's status and Location (see request_log.py).
+    app.config["LOG_REQUEST_HEADERS"] = os.environ.get("LOG_REQUEST_HEADERS", "").lower() in ("1", "true")
