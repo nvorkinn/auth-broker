@@ -97,8 +97,10 @@ fi
   if [ "$service" = authentik-config ]; then
     cp "$bundle/authentik/authentik-config.yaml" authentik/.authentik-config.yaml.tmp
     mv authentik/.authentik-config.yaml.tmp authentik/authentik-config.yaml
-    cp "$bundle/authentik/countdown-pill.svg" authentik/.countdown-pill.svg.tmp
-    mv authentik/.countdown-pill.svg.tmp authentik/countdown-pill.svg
+    # Keep publicly served brand assets separate from blueprint/config files.
+    mkdir -p authentik-assets
+    cp "$bundle/authentik/countdown-pill.svg" authentik-assets/.countdown-pill.svg.tmp
+    mv authentik-assets/.countdown-pill.svg.tmp authentik-assets/countdown-pill.svg
   fi
   # The broker's secrets and settings used to live in .env; now they come
   # from broker.env and the compose file, so keep only the version pins.
