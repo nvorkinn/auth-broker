@@ -289,3 +289,39 @@ def test_forgetting_a_device_has_its_renderer_removed(app, orchestrator, client,
     # The slug is free again.
     with app.app_context():
         assert db.session.get(RendererAssignment, assignment_id) is None
+
+
+def test_a_slug_taken_between_the_check_and_the_insert_is_refused(app, client, screen, monkeypatch):
+    """Two owners naming their screens the same thing at once: both pass the check, the second insert hits
+    the unique index."""
+    other = app.test_client()
+    other.environ_base["HTTP_X_AUTHENTIK_UID"] = "user-2"
+    other_id = other.post("/api/devices/register", json={"role": "display", "secret": "another-display-0123456789"})
+    other_id = other_id.get_json()["device_id"]
+    other.post("/pair/token", json={"token": pairing.token_for(hash_secret("another-display-0123456789"))})
+    assert client.post("/device/name", data={"slug": "lisa"}).status_code == 302
+    real_scalar = assignments.db.session.scalar
+
+    def scalar_that_misses_the_slug_check(statement, *args, **kwargs):
+        if "renderer_assignments.id" in str(statement):
+            return None
+        return real_scalar(statement, *args, **kwargs)
+
+    monkeypatch.setattr(assignments.db.session, "scalar", scalar_that_misses_the_slug_check)
+
+    response = other.post("/device/name", data={"slug": "lisa"})
+
+    assert response.status_code == 400
+    assert b"taken" in response.data
+    assert _assignment(app, other_id) is None
+
+
+def test_naming_a_screen_that_got_its_renderer_meanwhile_goes_to_the_settings(client, screen, monkeypatch):
+    def already_has_one(device, slug):
+        raise assignments.NotNeeded(device.device_id)
+
+    monkeypatch.setattr(assignments, "create", already_has_one)
+
+    response = client.post("/device/name", data={"slug": "lisa"})
+
+    assert (response.status_code, response.headers["Location"]) == (302, "/device")
