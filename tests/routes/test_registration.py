@@ -1,4 +1,4 @@
-"""POST /api/devices/register: standalone devices, the pending pool that matches a renderer with a
+"""POST /api/devices/register: screens, the pending pool that matches a renderer with a
 screen, and the ID-less endpoints a matched client polls."""
 
 import threading
@@ -32,31 +32,6 @@ def _device(app, device_id):
 def _pending(app):
     with app.app_context():
         return [(row.role, row.secret_hash) for row in registration.pending()]
-
-
-# --- standalone -----------------------------------------------------------------------------------
-
-
-def test_standalone_creates_a_device_with_only_a_renderer_secret(app, client):
-    response = client.post("/api/devices/register", json={"role": "renderer", "standalone": True, "secret": RENDERER})
-
-    assert response.status_code == 201
-    device = _device(app, response.get_json()["device_id"])
-    assert device.renderer_secret_hash == hash_secret(RENDERER)
-    assert device.display_secret_hash is None
-    assert _pending(app) == []
-
-
-def test_the_legacy_body_registers_a_standalone_device(app, client):
-    response = client.post("/api/devices/register", json={"device_secret": RENDERER})
-
-    assert response.status_code == 201
-    assert _device(app, response.get_json()["device_id"]).renderer_secret_hash == hash_secret(RENDERER)
-
-
-def test_a_display_cannot_be_standalone(client):
-    response = client.post("/api/devices/register", json={"role": "display", "standalone": True, "secret": DISPLAY})
-    assert response.status_code == 400
 
 
 def test_register_rejects_an_unknown_role(client):
@@ -153,10 +128,10 @@ def test_registering_again_after_matching_returns_the_same_device(split_device, 
         assert response.get_json() == {"device_id": device_id}
 
 
-def test_registering_a_standalone_secret_again_returns_its_device(client, register_device):
+def test_registering_a_secret_again_returns_its_device(client, register_device):
     device_id, secret = register_device()
 
-    response = client.post("/api/devices/register", json={"role": "renderer", "standalone": True, "secret": secret})
+    response = client.post("/api/devices/register", json={"role": "renderer", "secret": secret})
 
     assert (response.status_code, response.get_json()) == (200, {"device_id": device_id})
 
@@ -354,7 +329,7 @@ def test_id_less_endpoints_reject_unknown_and_missing_secrets(client, split_devi
     assert client.get(path, headers={"Authorization": "Bearer "}).status_code == 401
 
 
-def test_a_standalone_pi_can_use_the_id_less_config(client, register_device):
+def test_a_renderer_can_use_the_id_less_config(client, register_device):
     device_id, secret = register_device()
     assert client.get("/api/config", headers=_auth(secret)).get_json()["device_id"] == device_id
 

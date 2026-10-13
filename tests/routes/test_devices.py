@@ -8,13 +8,14 @@ from broker.models import Device, DeviceConfig, PairingCode
 
 
 def test_register_creates_device(client):
-    response = client.post("/api/devices/register", json={"device_secret": "a-very-long-device-secret-value"})
+    secret = "a-very-long-device-secret-value"
+    response = client.post("/api/devices/register", json={"role": "display", "secret": secret})
     assert response.status_code == 201
     assert "device_id" in response.get_json()
 
 
 def test_register_rejects_short_secret(client):
-    response = client.post("/api/devices/register", json={"device_secret": "short"})
+    response = client.post("/api/devices/register", json={"role": "display", "secret": "short"})
     assert response.status_code == 400
 
 

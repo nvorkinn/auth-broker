@@ -63,10 +63,13 @@ def cli(app):
 
 @pytest.fixture
 def register_device(client):
-    """Registers a standalone device and returns (device_id, secret)."""
+    """Registers a screen (whose secret is "display-" plus the given one) and then a renderer with the given secret,
+    returning (device_id, secret)."""
 
     def _register(secret: str = "a-very-long-device-secret-value"):
-        response = client.post("/api/devices/register", json={"role": "renderer", "standalone": True, "secret": secret})
+        screen = client.post("/api/devices/register", json={"role": "display", "secret": "display-" + secret})
+        assert screen.status_code == 201
+        response = client.post("/api/devices/register", json={"role": "renderer", "secret": secret})
         assert response.status_code == 201
         return response.get_json()["device_id"], secret
 

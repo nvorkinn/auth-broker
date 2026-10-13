@@ -9,9 +9,10 @@ from broker.models import Device
 from broker.services import pairing
 
 SECRET = "a-very-long-device-secret-value"
+SCREEN_SECRET = "display-" + SECRET  # what register_device gives the device's screen
 
 
-def token_for_secret(secret=SECRET):
+def token_for_secret(secret=SCREEN_SECRET):
     """What the device computes: SHA-256 of "pairing:" and the hex SHA-256 of its secret."""
     return hashlib.sha256(f"pairing:{hashlib.sha256(secret.encode()).hexdigest()}".encode()).hexdigest()
 
@@ -26,7 +27,7 @@ def _owner(app, device_id):
 
 
 def test_the_token_is_derived_from_the_secret_the_way_a_device_would():
-    assert pairing.token_for(hash_secret(SECRET)) == token_for_secret()
+    assert pairing.token_for(hash_secret(SECRET)) == token_for_secret(SECRET)
 
 
 def test_a_device_registering_stores_its_token(app, register_device):

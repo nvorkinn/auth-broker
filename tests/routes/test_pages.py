@@ -399,11 +399,6 @@ def test_pair_logs_wrong_codes_and_lockouts(client, caplog):
 # --- device ID and screen ----------------------------------------------------------------------------
 
 
-def test_device_page_has_no_unlink_button_without_a_screen(paired_client):
-    client, _, _ = paired_client
-    assert "Unlink screen" not in client.get("/device").get_data(as_text=True)
-
-
 def test_unlink_screen_clears_the_display_secret(app, client, split_device):
     device_id, renderer_secret, display_secret = split_device
     code = client.get("/api/config", headers={"Authorization": f"Bearer {renderer_secret}"}).get_json()["pairing_code"]

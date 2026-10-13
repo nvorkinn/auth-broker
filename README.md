@@ -63,8 +63,7 @@ non-local deployment (Caddy terminates TLS here; see [Caddy](#caddy)).
 
 A device has up to two secrets, one per role:
 
-- **renderer**: whatever draws the frames. On a standalone Pi that's the Pi
-  itself; in a split deployment it's a renderer process on the server, started by the
+- **renderer**: whatever draws the frames. A renderer process on the server, started by the
   orchestrator (or by hand).
 - **display**: a thin screen (e.g. an ESP32) that only fetches finished frames.
 
@@ -79,9 +78,6 @@ unique per device, so the secret alone finds the device.
 e.g. on every boot. A repeat returns 200 `{device_id}` once the client is
 matched, or 202 while it's still waiting.
 
-- **Standalone Pi:** `{"role": "renderer", "standalone": true, "secret": ...}`
-  becomes a device at once (201 `{device_id}`). The old body,
-  `{"device_secret": ...}`, means the same.
 - **Screen:** `{"role": "display", "secret": ...}` becomes a device at once (201
   `{device_id}`) with no renderer. Its owner pairs with it and names it, which
   asks the orchestrator for a renderer (see [Naming a screen](#naming-a-screen)).
@@ -112,7 +108,7 @@ A screen therefore needs no logic beyond:
 |---|---|---|
 | 201 / 200 | `{device_id}`: a new device, or a repeat of a registered secret | start polling |
 | 202 | a renderer waiting in the pool (`Retry-After: 30`) | poll `/api/config`, not `/register` |
-| 400 | bad role or secret, a standalone display, or a bad `claim_token` | fix the request; a firmware bug |
+| 400 | bad role or secret, or a bad `claim_token` | fix the request; a firmware bug |
 | 403 | unknown or spent `claim_token` | log it and retry slowly |
 | 409 | secret already registered with the other role | generate a new secret |
 | 429 | over 5 calls a minute from this IP | wait `Retry-After` (lockouts double, up to 1h) |
