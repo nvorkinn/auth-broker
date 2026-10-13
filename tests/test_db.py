@@ -1,5 +1,7 @@
 import sqlite3
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
+from threading import Event, Lock
 
 import pytest
 from alembic.autogenerate import compare_metadata
@@ -57,6 +59,54 @@ def test_migrations_downgrade_and_upgrade_again(app):
         assert set(inspect(db.engine).get_table_names()) == {"alembic_version"}
         upgrade()
     assert _current_revision(app) == _head_revision(app)
+
+
+def test_concurrent_app_startup_serializes_migrations(app, monkeypatch):
+    from broker import create_app
+    from broker import db as db_module
+
+    with app.app_context():
+        downgrade(revision="0005")
+        db.engine.dispose()
+
+    first_upgrade_started = Event()
+    second_upgrade_started = Event()
+    release_first_upgrade = Event()
+    call_lock = Lock()
+    calls = 0
+    original_upgrade = db_module.command.upgrade
+
+    def pause_first_upgrade(config, revision):
+        nonlocal calls
+        with call_lock:
+            calls += 1
+            call_number = calls
+        if call_number == 1:
+            first_upgrade_started.set()
+            assert release_first_upgrade.wait(timeout=5)
+        else:
+            second_upgrade_started.set()
+        return original_upgrade(config, revision)
+
+    monkeypatch.setattr(db_module.command, "upgrade", pause_first_upgrade)
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        first = executor.submit(create_app)
+        assert first_upgrade_started.wait(timeout=5)
+        second = executor.submit(create_app)
+        try:
+            assert not second_upgrade_started.wait(timeout=0.1)
+        finally:
+            release_first_upgrade.set()
+        first_app = first.result(timeout=10)
+        second_app = second.result(timeout=10)
+
+    assert calls == 2
+    assert _current_revision(first_app) == _head_revision(first_app)
+    assert _current_revision(second_app) == _head_revision(second_app)
+    for started_app in (first_app, second_app):
+        with started_app.app_context():
+            db.engine.dispose()
 
 
 def test_foreign_keys_are_enforced_after_migrating(app):
