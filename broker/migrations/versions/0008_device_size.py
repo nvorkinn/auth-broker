@@ -1,6 +1,6 @@
 """Add device_config.width and height, the screen's size in pixels as it reported at registration.
 
-Existing devices have none.
+Existing devices are backfilled with 480x800 (vertical).
 
 Revision ID: 0008
 Revises: 0007
@@ -25,8 +25,8 @@ __all__ = ["revision", "down_revision", "branch_labels", "depends_on", "upgrade"
 
 def upgrade() -> None:
     with op.batch_alter_table("device_config") as batch:
-        batch.add_column(sa.Column("width", sa.Integer(), nullable=True))
-        batch.add_column(sa.Column("height", sa.Integer(), nullable=True))
+        batch.add_column(sa.Column("width", sa.Integer(), nullable=False, server_default=sa.text("480")))
+        batch.add_column(sa.Column("height", sa.Integer(), nullable=False, server_default=sa.text("800")))
 
 
 def downgrade() -> None:
