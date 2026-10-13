@@ -22,27 +22,6 @@
         </div>
         <div class="form-grid">
             <div class="form-group">
-                <label for="postcode">Postcode</label>
-                <input
-                    type="text"
-                    id="postcode"
-                    name="postcode"
-                    value="{{ config.postcode }}"
-                    placeholder="e.g. SW1A 1AA"
-                    pattern="\s*[A-Za-z]{1,2}[0-9][A-Za-z0-9]?\s*[0-9][A-Za-z]{2}\s*"
-                    title="A UK postcode, e.g. SW1A 1AA"
-                    autocapitalize="characters"
-                    autocomplete="postal-code"
-                    maxlength="10"
-                >
-            </div>
-
-            <div class="form-group">
-                <label for="weather_location">Weather location</label>
-                <input type="text" id="weather_location" name="weather_location" value="{{ config.weather_location }}" placeholder="e.g. London">
-            </div>
-
-            <div class="form-group">
                 <label for="interval">Refresh interval (seconds)</label>
                 <input type="number" id="interval" name="interval" value="{{ config.interval }}" min="5" max="300" required>
             </div>
@@ -61,6 +40,46 @@
                     {% endfor %}
                 </div>
             </fieldset>
+        </div>
+    </div>
+
+    <!-- Weather -->
+    <div class="card">
+        <div class="card-header">
+            <h2 class="card-title">Weather</h2>
+        </div>
+        <div class="form-grid">
+            <div class="form-group">
+                <label for="weather_location">Weather location</label>
+                <input type="text" id="weather_location" name="weather_location" value="{{ config.weather_location }}" placeholder="e.g. London" aria-describedby="weather_location_hint">
+                <p id="weather_location_hint" class="form-hint">Used for the forecast on your screen.</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Notice board -->
+    <div class="card">
+        <div class="card-header">
+            <h2 class="card-title">Notice board</h2>
+        </div>
+        <div class="form-grid">
+            <div class="form-group">
+                <label for="postcode">Postcode</label>
+                <input
+                    type="text"
+                    id="postcode"
+                    name="postcode"
+                    value="{{ config.postcode }}"
+                    placeholder="e.g. SW1A 1AA"
+                    pattern="\s*[A-Za-z]{1,2}[0-9][A-Za-z0-9]?\s*[0-9][A-Za-z]{2}\s*"
+                    title="A UK postcode, e.g. SW1A 1AA"
+                    autocapitalize="characters"
+                    autocomplete="postal-code"
+                    maxlength="10"
+                    aria-describedby="postcode_hint"
+                >
+                <p id="postcode_hint" class="form-hint">Used for local information on your screen's notice board.</p>
+            </div>
         </div>
     </div>
 

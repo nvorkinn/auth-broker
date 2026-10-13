@@ -88,6 +88,17 @@ def test_device_config_shows_orientation_as_vertical_and_read_only(paired_client
     assert '<input type="hidden" name="orientation" value="vertical">' in html
 
 
+def test_device_config_groups_fields_into_sections(paired_client):
+    client, _, _ = paired_client
+    html = client.get("/device").get_data(as_text=True)
+    titles = re.findall(r'<h2 class="card-title">([^<]+)</h2>', html)
+    assert titles[:3] == ["General", "Weather", "Notice board"]
+    general, weather, notice_board = re.split(r'<h2 class="card-title">', html)[1:4]
+    assert 'id="interval"' in general and 'name="orientation"' in general
+    assert 'id="weather_location"' in weather
+    assert 'id="postcode"' in notice_board
+
+
 def test_device_config_shows_vertical_even_when_another_orientation_is_stored(app, paired_client):
     client, device_id, _ = paired_client
     with app.app_context():
