@@ -402,3 +402,18 @@ def test_0004_downgrade_and_upgrade_keep_split_devices(app, split_device):
         downgrade(revision="0003")
         upgrade()
         assert db.session.get(Device, device_id).display_secret_hash is None  # the column went away and back
+
+
+def test_0008_backfills_existing_devices_with_a_480_by_800_screen(app):
+    with app.app_context():
+        downgrade(revision="0007")
+        with db.engine.begin() as conn:
+            conn.exec_driver_sql(
+                "INSERT INTO devices (device_id, created_at, renderer_secret_hash) VALUES (?, ?, ?)",
+                ("old-pi", "2026-03-01 12:00:00", "hash"),
+            )
+            conn.exec_driver_sql("INSERT INTO device_config (device_id) VALUES ('old-pi')")
+        upgrade()
+
+        config = db.session.get(DeviceConfig, "old-pi")
+        assert (config.width, config.height) == (480, 800)

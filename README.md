@@ -93,7 +93,7 @@ unique per device, so the secret alone finds the device.
 
 A screen and a renderer register on different routes, since they do very different things.
 
-**Screen: `POST /api/devices/register {"secret": ...}`.** Safe to call again with the same secret,
+**Screen: `POST /api/devices/register {"secret": ..., "width": ..., "height": ...}`.** Safe to call again with the same secret,
 e.g. on every boot. It becomes a device at once (201 `{device_id}`; a repeat is 200) with no renderer.
 Its owner pairs with it and names it, which asks the orchestrator for a renderer (see
 [Naming a screen](#naming-a-screen)). Anyone can call it, so it is throttled.
@@ -106,7 +106,7 @@ There is no other way to get a renderer: one started by hand has no assignment t
 
 A screen therefore needs no logic beyond:
 
-1. On boot: `POST /api/devices/register {"secret": ...}`
+1. On boot: `POST /api/devices/register {"secret": ..., "width": ..., "height": ...}`
    (201 straight away; the screen has a device even before its renderer runs).
 2. Loop on `GET /api/frame` with `If-None-Match`, handling the status and then
    sleeping for the response's `Retry-After` seconds:

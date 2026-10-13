@@ -92,7 +92,7 @@ def register_device(client, claim_renderer):
     returning (device_id, secret)."""
 
     def _register(secret: str = "a-very-long-device-secret-value"):
-        screen = client.post("/api/devices/register", json={"secret": "display-" + secret})
+        screen = client.post("/api/devices/register", json={"secret": "display-" + secret, "width": 480, "height": 800})
         assert screen.status_code == 201
         response = claim_renderer("display-" + secret, secret)
         assert response.status_code == 201
@@ -106,7 +106,7 @@ def split_device(client, claim_renderer):
     """A device whose screen registered and then had a renderer claim it: returns (device_id,
     renderer_secret, display_secret)."""
     renderer_secret, display_secret = "renderer-secret-0123456789", "display-secret-0123456789"
-    screen = client.post("/api/devices/register", json={"secret": display_secret})
+    screen = client.post("/api/devices/register", json={"secret": display_secret, "width": 480, "height": 800})
     assert screen.status_code == 201
     response = claim_renderer(display_secret, renderer_secret)
     assert response.status_code == 201

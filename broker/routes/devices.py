@@ -20,9 +20,9 @@ def register():
     after, and sends it with every request; only its hash is stored here, and that hash alone
     identifies the device. Safe to call again with the same secret, e.g. on every boot.
 
-    {"secret": ...} becomes a device at once (201 {device_id}), which its owner pairs with and names a
-    renderer for; the orchestrator then starts that renderer, which claims the device itself (see
-    routes/renderers.py). A repeat is a 200.
+    {"secret": ..., "width": ..., "height": ...}, the screen's size in pixels, becomes a device at once
+    (201 {device_id}), which its owner pairs with and names a renderer for; the orchestrator then starts
+    that renderer, which claims the device itself (see routes/renderers.py). A repeat is a 200.
 
     Throttled per IP, every call counting, as anyone can call it."""
     throttle = current_app.extensions["register_throttle"]
@@ -35,18 +35,22 @@ def register():
     if lockout is not None:
         current_app.logger.warning("Too many registrations from %s; locked out for %ss", ip, lockout)
 
-    secret = (request.get_json(silent=True) or {}).get("secret", "")
+    body = request.get_json(silent=True) or {}
+    secret = body.get("secret", "")
+    width, height = body.get("width"), body.get("height")
     if not isinstance(secret, str) or len(secret) < 16:
         return jsonify(error="secret must be a random string of at least 16 characters"), 400
+    if not all(type(size) is int and size > 0 for size in (width, height)):
+        return jsonify(error="width and height must be positive integers"), 400
 
     secret_hash = hash_secret(secret)
     try:
-        found = registration.register_screen(secret_hash)
+        found = registration.register_screen(secret_hash, width, height)
     except IntegrityError:
         # The same secret registered by a simultaneous request (e.g. a quick retry) that got in
         # first: answer as for any repeat.
         db.session.rollback()
-        found = registration.register_screen(secret_hash)
+        found = registration.register_screen(secret_hash, width, height)
 
     if found is None:
         return with_retry_after(jsonify(error="too many devices waiting"), 60), 503
@@ -95,7 +99,7 @@ def get_config(device_id):
     return jsonify(
         device_id=device_id,
         interval=config.interval,
-        orientation=config.orientation,
+        screen={"orientation": config.orientation, "width": config.width, "height": config.height},
         weather={"api_key": current_app.config["WEATHER_API_KEY"], "location": config.weather_location},
         notice_board={"postcode": config.postcode or None},
         tfl={"app_key": current_app.config["TFL_APP_KEY"], "stop_ids": config.tfl_stop_ids},

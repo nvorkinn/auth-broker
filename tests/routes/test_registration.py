@@ -30,7 +30,7 @@ def _device(app, device_id):
 
 
 def _register(client, secret):
-    return client.post("/api/devices/register", json={"secret": secret})
+    return client.post("/api/devices/register", json={"secret": secret, "width": 480, "height": 800})
 
 
 def test_register_rejects_a_non_string_secret(client):
@@ -38,7 +38,9 @@ def test_register_rejects_a_non_string_secret(client):
 
 
 def test_register_ignores_a_role(client):
-    response = client.post("/api/devices/register", json={"role": "renderer", "secret": DISPLAY})
+    response = client.post(
+        "/api/devices/register", json={"role": "renderer", "secret": DISPLAY, "width": 480, "height": 800}
+    )
 
     assert response.status_code == 201
 
@@ -108,7 +110,9 @@ def test_concurrent_registrations_never_share_a_secret(app):
 
     def register(secret):
         try:
-            response = app.test_client().post("/api/devices/register", json={"secret": secret})
+            response = app.test_client().post(
+                "/api/devices/register", json={"secret": secret, "width": 480, "height": 800}
+            )
             assert response.status_code in (200, 201), response.status_code
         except Exception as e:  # noqa: BLE001 -- collected and reported below
             errors.append(e)

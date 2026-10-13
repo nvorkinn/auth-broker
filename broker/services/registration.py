@@ -36,7 +36,7 @@ def _device_with(secret_hash: str) -> Device | None:
     )
 
 
-def register_screen(secret_hash: str) -> Registered | None:
+def register_screen(secret_hash: str, width: int, height: int) -> Registered | None:
     """A screen becomes a device at once, so its owner can pair with it and name its renderer. A repeat
     of a registered secret finds its device. Returns None when too many screens are already waiting to
     be paired."""
@@ -50,7 +50,7 @@ def register_screen(secret_hash: str) -> Registered | None:
     if _unpaired_screens() >= MAX_UNPAIRED_SCREENS:
         db.session.commit()
         return None
-    device_id = _new_device(display_secret_hash=secret_hash)
+    device_id = _new_device(secret_hash, width, height)
     db.session.commit()
     return Registered(device_id=device_id, created=True)
 
@@ -98,13 +98,13 @@ def _drop_stale_screens(now: datetime) -> None:
         db.session.delete(device)
 
 
-def _new_device(display_secret_hash: str) -> str:
+def _new_device(display_secret_hash: str, width: int, height: int) -> str:
     device_id = secrets.token_hex(6)
     # A screen's secret makes the token that sends its owner's browser to /pair.
     device = Device(
         device_id=device_id,
         created_at=datetime.now(UTC),
-        config=DeviceConfig(),
+        config=DeviceConfig(width=width, height=height),
         pairing_token=pairing.token_for(display_secret_hash),
         display_secret_hash=display_secret_hash,
     )

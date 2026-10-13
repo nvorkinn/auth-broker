@@ -21,7 +21,7 @@ def _bearer(secret):
 def _pair(client, claim_renderer, secret):
     """Registers a screen and its renderer (as the shared register_device fixture does) and pairs the client's
     user with them: returns the device's id."""
-    client.post("/api/devices/register", json={"secret": "display-" + secret})
+    client.post("/api/devices/register", json={"secret": "display-" + secret, "width": 480, "height": 800})
     registered = claim_renderer("display-" + secret, secret)
     code = client.post("/api/devices/pairing-code", headers=_bearer(secret)).get_json()["code"]
     assert client.post("/pair", data={"code": code}).status_code == 302

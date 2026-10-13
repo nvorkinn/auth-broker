@@ -29,7 +29,9 @@ def orchestrator(app, client):
 @pytest.fixture
 def screen(app, client):
     """A screen that registered and was paired by the signed-in user, which has no renderer yet: its device_id."""
-    device_id = client.post("/api/devices/register", json={"secret": DISPLAY}).get_json()["device_id"]
+    device_id = client.post("/api/devices/register", json={"secret": DISPLAY, "width": 480, "height": 800}).get_json()[
+        "device_id"
+    ]
     token = pairing.token_for(hash_secret(DISPLAY))
     assert client.post("/pair/token", json={"token": token}).status_code == 200
     return device_id
@@ -83,7 +85,9 @@ def test_a_slug_is_unique_across_the_whole_broker(app, client, screen):
     other = app.test_client()
     other.environ_base["HTTP_X_AUTHENTIK_UID"] = "user-2"
     other.environ_base["HTTP_X_AUTHENTIK_USERNAME"] = USERNAME
-    other_id = other.post("/api/devices/register", json={"secret": "another-display-0123456789"})
+    other_id = other.post(
+        "/api/devices/register", json={"secret": "another-display-0123456789", "width": 480, "height": 800}
+    )
     other_id = other_id.get_json()["device_id"]
     token = pairing.token_for(hash_secret("another-display-0123456789"))
     other.post("/pair/token", json={"token": token})
@@ -131,7 +135,7 @@ def test_the_api_is_only_for_the_screens_owner(app, anonymous_client, client, sc
 
 
 def test_a_screen_can_show_a_pairing_code_before_its_renderer_exists(client):
-    client.post("/api/devices/register", json={"secret": DISPLAY})
+    client.post("/api/devices/register", json={"secret": DISPLAY, "width": 480, "height": 800})
     response = client.post("/api/devices/pairing-code", headers=_bearer(DISPLAY))
     assert response.status_code == 200
     assert len(response.get_json()["code"]) == 6
@@ -287,7 +291,9 @@ def test_a_slug_taken_between_the_check_and_the_insert_is_refused(app, client, s
     other = app.test_client()
     other.environ_base["HTTP_X_AUTHENTIK_UID"] = "user-2"
     other.environ_base["HTTP_X_AUTHENTIK_USERNAME"] = USERNAME
-    other_id = other.post("/api/devices/register", json={"secret": "another-display-0123456789"})
+    other_id = other.post(
+        "/api/devices/register", json={"secret": "another-display-0123456789", "width": 480, "height": 800}
+    )
     other_id = other_id.get_json()["device_id"]
     other.post("/pair/token", json={"token": pairing.token_for(hash_secret("another-display-0123456789"))})
     assert client.post("/device/name", data={"slug": "lisa"}).status_code == 302
