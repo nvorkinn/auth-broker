@@ -22,6 +22,48 @@
         </div>
         <div class="form-grid">
             <div class="form-group">
+                <label for="interval">Refresh interval (seconds)</label>
+                <input type="number" id="interval" name="interval" value="{{ config.interval }}" min="5" max="300" required>
+            </div>
+
+            <!-- Read-only for now: the page always submits its own orientation, shown below but not editable.
+                 A disabled fieldset isn't submitted, so the value goes in this hidden input instead. -->
+            <input type="hidden" name="orientation" value="{{ page_orientation }}">
+            <fieldset class="form-group" disabled>
+                <legend class="form-legend">Orientation</legend>
+                <div class="checkbox-group" style="gap: 20px;">
+                    {% for orientation in orientations %}
+                        <span class="checkbox-group">
+                            <input type="radio" id="orientation_{{ orientation }}" name="orientation" value="{{ orientation }}" {% if page_orientation == orientation %}checked{% endif %}>
+                            <label for="orientation_{{ orientation }}" style="margin: 0; font-size: 14px; font-weight: normal;">{{ orientation | capitalize }}</label>
+                        </span>
+                    {% endfor %}
+                </div>
+            </fieldset>
+        </div>
+    </div>
+
+    <!-- Weather -->
+    <div class="card">
+        <div class="card-header">
+            <h2 class="card-title">Weather</h2>
+        </div>
+        <div class="form-grid">
+            <div class="form-group">
+                <label for="weather_location">Weather location</label>
+                <input type="text" id="weather_location" name="weather_location" value="{{ config.weather_location }}" placeholder="e.g. London" aria-describedby="weather_location_hint">
+                <p id="weather_location_hint" class="form-hint">Used for the forecast on your screen.</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Notice board -->
+    <div class="card">
+        <div class="card-header">
+            <h2 class="card-title">Notice board</h2>
+        </div>
+        <div class="form-grid">
+            <div class="form-group">
                 <label for="postcode">Postcode</label>
                 <input
                     type="text"
@@ -34,17 +76,9 @@
                     autocapitalize="characters"
                     autocomplete="postal-code"
                     maxlength="10"
+                    aria-describedby="postcode_hint"
                 >
-            </div>
-
-            <div class="form-group">
-                <label for="weather_location">Weather location</label>
-                <input type="text" id="weather_location" name="weather_location" value="{{ config.weather_location }}" placeholder="e.g. London">
-            </div>
-
-            <div class="form-group">
-                <label for="interval">Refresh interval (seconds)</label>
-                <input type="number" id="interval" name="interval" value="{{ config.interval }}" min="5" max="300" required>
+                <p id="postcode_hint" class="form-hint">Used for local information on your screen's notice board.</p>
             </div>
         </div>
     </div>

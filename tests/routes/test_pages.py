@@ -1,3 +1,4 @@
+import re
 from unittest.mock import Mock, patch
 
 import pytest
@@ -76,6 +77,64 @@ def test_device_config_get_renders_settings(paired_client):
     response = client.get("/device")
     assert response.status_code == 200
     assert b"Not connected" in response.data
+
+
+def test_device_config_shows_orientation_as_vertical_and_read_only(paired_client):
+    client, _, _ = paired_client
+    html = client.get("/device").get_data(as_text=True)
+    assert '<fieldset class="form-group" disabled>' in html
+    assert re.search(r'id="orientation_vertical"[^>]*checked', html)
+    assert not re.search(r'id="orientation_horizontal"[^>]*checked', html)
+    assert '<input type="hidden" name="orientation" value="vertical">' in html
+
+
+def test_device_config_groups_fields_into_sections(paired_client):
+    client, _, _ = paired_client
+    html = client.get("/device").get_data(as_text=True)
+    titles = re.findall(r'<h2 class="card-title">([^<]+)</h2>', html)
+    assert titles[:3] == ["General", "Weather", "Notice board"]
+    general, weather, notice_board = re.split(r'<h2 class="card-title">', html)[1:4]
+    assert 'id="interval"' in general and 'name="orientation"' in general
+    assert 'id="weather_location"' in weather
+    assert 'id="postcode"' in notice_board
+
+
+def test_device_config_shows_vertical_even_when_another_orientation_is_stored(app, paired_client):
+    client, device_id, _ = paired_client
+    with app.app_context():
+        db.session.get(DeviceConfig, device_id).orientation = "horizontal"
+        db.session.commit()
+    html = client.get("/device").get_data(as_text=True)
+    assert re.search(r'id="orientation_vertical"[^>]*checked', html)
+    assert '<input type="hidden" name="orientation" value="vertical">' in html
+
+
+def test_device_config_post_persists_orientation(app, paired_client):
+    client, device_id, _ = paired_client
+    response = client.post("/device", data={"interval": "15", "orientation": "horizontal"})
+    assert response.status_code == 302
+    with app.app_context():
+        assert db.session.get(DeviceConfig, device_id).orientation == "horizontal"
+
+
+def test_device_config_post_without_orientation_keeps_the_stored_one(app, paired_client):
+    client, device_id, _ = paired_client
+    with app.app_context():
+        db.session.get(DeviceConfig, device_id).orientation = "horizontal"
+        db.session.commit()
+    response = client.post("/device", data={"interval": "15"})
+    assert response.status_code == 302
+    with app.app_context():
+        assert db.session.get(DeviceConfig, device_id).orientation == "horizontal"
+
+
+def test_device_config_post_rejects_an_unknown_orientation(app, paired_client):
+    client, device_id, _ = paired_client
+    response = client.post("/device", data={"interval": "15", "orientation": "diagonal"})
+    assert response.status_code == 400
+    assert b"Orientation must be one of horizontal, vertical." in response.data
+    with app.app_context():
+        assert db.session.get(DeviceConfig, device_id).orientation == "vertical"
 
 
 def test_device_config_post_persists_settings(app, paired_client):

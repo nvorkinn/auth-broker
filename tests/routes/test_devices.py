@@ -72,6 +72,7 @@ def test_get_config_returns_defaults_and_shared_keys(client, register_device):
     assert body == {
         "device_id": device_id,
         "interval": 15,
+        "orientation": "vertical",
         "weather": {"api_key": "test-weather-key", "location": ""},
         "notice_board": {"postcode": None},
         "tfl": {"app_key": "test-tfl-key", "stop_ids": []},
@@ -324,6 +325,16 @@ def test_get_config_returns_the_saved_postcode(app, client, register_device):
 
     response = client.get("/api/config", headers={"Authorization": f"Bearer {secret}"})
     assert response.get_json()["notice_board"] == {"postcode": "SW1A 1AA"}
+
+
+def test_get_config_returns_the_saved_orientation(app, client, register_device):
+    device_id, secret = register_device()
+    with app.app_context():
+        db.session.get(DeviceConfig, device_id).orientation = "horizontal"
+        db.session.commit()
+
+    response = client.get("/api/config", headers={"Authorization": f"Bearer {secret}"})
+    assert response.get_json()["orientation"] == "horizontal"
 
 
 def test_a_blank_weather_location_still_counts_as_missing(app, client, register_device):
