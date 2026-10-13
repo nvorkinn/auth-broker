@@ -10,7 +10,9 @@ from broker.models import Device, DeviceConfig, PairingCode
 
 def test_register_creates_device(client):
     secret = "a-very-long-device-secret-value"
-    response = client.post("/api/devices/register", json={"role": "display", "secret": secret})
+    response = client.post(
+        "/api/devices/register", json={"role": "display", "secret": secret, "width": 800, "height": 480}
+    )
     assert response.status_code == 201
     assert "device_id" in response.get_json()
 
@@ -73,7 +75,7 @@ def test_get_config_returns_defaults_and_shared_keys(client, register_device):
     assert body == {
         "device_id": device_id,
         "interval": 15,
-        "screen": {"orientation": "vertical", "width": None, "height": None},
+        "screen": {"orientation": "vertical", "width": 800, "height": 480},
         "weather": {"api_key": "test-weather-key", "location": ""},
         "notice_board": {"postcode": None},
         "tfl": {"app_key": "test-tfl-key", "stop_ids": []},
@@ -354,7 +356,9 @@ def test_get_config_returns_the_size_the_screen_registered_with(client):
 @pytest.mark.parametrize(
     "extra",
     [
+        {},
         {"width": 100},
+        {"height": 100},
         {"width": 100, "height": 0},
         {"width": "100", "height": 100},
         {"width": True, "height": 100},

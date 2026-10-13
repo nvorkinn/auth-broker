@@ -95,7 +95,7 @@ unique per device, so the secret alone finds the device.
 e.g. on every boot. A repeat returns 200 `{device_id}` once the client is
 matched, or 202 while it's still waiting.
 
-- **Screen:** `{"role": "display", "secret": ...}` becomes a device at once (201
+- **Screen:** `{"role": "display", "secret": ..., "width": ..., "height": ...}` (the screen's size in pixels, required) becomes a device at once (201
   `{device_id}`) with no renderer. Its owner pairs with it and names it, which
   asks the orchestrator for a renderer (see [Naming a screen](#naming-a-screen)).
 - **Renderer with a claim token:** `{"role": "renderer", "secret": ..., "claim_token": ...}`,
@@ -108,7 +108,7 @@ matched, or 202 while it's still waiting.
 
 A screen therefore needs no logic beyond:
 
-1. On boot: `POST /api/devices/register {"role": "display", "secret": ...}`
+1. On boot: `POST /api/devices/register {"role": "display", "secret": ..., "width": ..., "height": ...}`
    (201 straight away; the screen has a device even before its renderer runs).
 2. Loop on `GET /api/frame` with `If-None-Match`, handling the status and then
    sleeping for the response's `Retry-After` seconds:

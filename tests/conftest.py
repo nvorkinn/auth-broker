@@ -69,7 +69,10 @@ def register_device(client):
     returning (device_id, secret)."""
 
     def _register(secret: str = "a-very-long-device-secret-value"):
-        screen = client.post("/api/devices/register", json={"role": "display", "secret": "display-" + secret})
+        screen = client.post(
+            "/api/devices/register",
+            json={"role": "display", "secret": "display-" + secret, "width": 800, "height": 480},
+        )
         assert screen.status_code == 201
         response = client.post("/api/devices/register", json={"role": "renderer", "secret": secret})
         assert response.status_code == 201
@@ -83,7 +86,10 @@ def register_pending(client):
     """Registers a renderer or display through the pending pool and returns the response."""
 
     def _register(role: str, secret: str):
-        return client.post("/api/devices/register", json={"role": role, "secret": secret})
+        body = {"role": role, "secret": secret}
+        if role == "display":
+            body |= {"width": 800, "height": 480}
+        return client.post("/api/devices/register", json=body)
 
     return _register
 

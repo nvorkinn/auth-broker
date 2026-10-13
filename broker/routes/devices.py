@@ -20,8 +20,8 @@ def register():
     after, and sends it with every request; only its hash is stored here, and that hash alone
     identifies the device. Safe to call again with the same secret, e.g. on every boot.
 
-    - {"role": "display", "secret": ..., "width": ..., "height": ...}: a screen, which may report its
-      size in pixels (both or neither). Becomes a device at once (201), which its owner
+    - {"role": "display", "secret": ..., "width": ..., "height": ...}: a screen, which must report its
+      size in pixels. Becomes a device at once (201), which its owner
       pairs with and names a renderer for; the orchestrator then starts that renderer.
     - {"role": "renderer", "secret": ..., "claim_token": ...}: a renderer the orchestrator started for
       an assignment. Takes the secret into that assignment's device (201); an unknown or spent token
@@ -53,11 +53,11 @@ def register():
         return jsonify(error="only a renderer sends a claim_token, as a string"), 400
 
     width, height = body.get("width"), body.get("height")
-    for size in (width, height):
-        if size is not None and (role != "display" or type(size) is not int or size <= 0):
-            return jsonify(error="only a screen sends width and height, as positive integers"), 400
-    if (width is None) != (height is None):
-        return jsonify(error="width and height must be sent together"), 400
+    if role == "display":
+        if not all(type(size) is int and size > 0 for size in (width, height)):
+            return jsonify(error="a screen must send its width and height, as positive integers"), 400
+    elif width is not None or height is not None:
+        return jsonify(error="only a screen sends width and height"), 400
 
     secret_hash = hash_secret(secret)
     found = registration.existing(role, secret_hash)

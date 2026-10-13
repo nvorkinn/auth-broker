@@ -208,8 +208,11 @@ def test_concurrent_registrations_never_share_a_partner(app, tmp_path):
     errors = []
 
     def register(role, secret):
+        body = {"role": role, "secret": secret}
+        if role == "display":
+            body |= {"width": 800, "height": 480}
         try:
-            response = app.test_client().post("/api/devices/register", json={"role": role, "secret": secret})
+            response = app.test_client().post("/api/devices/register", json=body)
             assert response.status_code in (201, 202), response.status_code
         except Exception as e:  # noqa: BLE001 -- collected and reported below
             errors.append(e)
