@@ -181,6 +181,149 @@ entries:
       negate: false
       timeout: 30
 
+  # Sign-up (username, email, password, no email verification while this is in QA). Only offered to a
+  # visitor who reached the login from the broker (the pairing flow): the gate checks the sign-in's
+  # redirect_uri. That hides the sign-up from the Logs and Metrics logins, but it isn't a security
+  # boundary, as anyone can forge the query. What keeps a new account out of those is their group
+  # bindings. A new user is a plain internal user in no group, which the broker accepts.
+  - model: authentik_flows.flow
+    id: broker-enrollment-flow
+    state: present
+    identifiers:
+      slug: broker-enrollment
+    attrs:
+      name: Broker sign-up
+      title: Create your account
+      designation: enrollment
+      authentication: require_unauthenticated
+      layout: stacked
+      policy_engine_mode: any
+  - model: authentik_policies_expression.expressionpolicy
+    id: broker-enrollment-gate
+    state: present
+    identifiers:
+      name: broker-enrollment-from-broker
+    attrs:
+      expression: |
+        from urllib.parse import parse_qs, urlparse
+
+        http_request = request.http_request
+        query = parse_qs(http_request.GET.get("query", "")) if http_request else {}
+        redirect_uri = (query.get("redirect_uri") or [""])[0]
+        return urlparse(redirect_uri).hostname == "auth.nikolaivorkinn.com"
+  - model: authentik_policies.policybinding
+    state: present
+    identifiers:
+      policy: !KeyOf broker-enrollment-gate
+      target: !KeyOf broker-enrollment-flow
+      order: 0
+    attrs:
+      enabled: true
+      negate: false
+      timeout: 30
+  - model: authentik_stages_prompt.prompt
+    id: enrollment-field-username
+    state: present
+    identifiers:
+      name: broker-enrollment-field-username
+    attrs:
+      field_key: username
+      label: Username
+      type: username
+      required: true
+      placeholder: Username
+      order: 0
+  - model: authentik_stages_prompt.prompt
+    id: enrollment-field-email
+    state: present
+    identifiers:
+      name: broker-enrollment-field-email
+    attrs:
+      field_key: email
+      label: Email
+      type: email
+      required: true
+      placeholder: Email
+      order: 1
+  - model: authentik_stages_prompt.prompt
+    id: enrollment-field-password
+    state: present
+    identifiers:
+      name: broker-enrollment-field-password
+    attrs:
+      field_key: password
+      label: Password
+      type: password
+      required: true
+      placeholder: Password
+      order: 2
+  - model: authentik_stages_prompt.prompt
+    id: enrollment-field-password-repeat
+    state: present
+    identifiers:
+      name: broker-enrollment-field-password-repeat
+    attrs:
+      field_key: password_repeat
+      label: Password (repeat)
+      type: password
+      required: true
+      placeholder: Password (repeat)
+      order: 3
+  - model: authentik_stages_prompt.promptstage
+    id: enrollment-prompt
+    state: present
+    identifiers:
+      name: broker-enrollment-prompt
+    attrs:
+      fields:
+        - !KeyOf enrollment-field-username
+        - !KeyOf enrollment-field-email
+        - !KeyOf enrollment-field-password
+        - !KeyOf enrollment-field-password-repeat
+      validation_policies:
+        - !Find [authentik_policies_password.passwordpolicy, [name, default-password-change-password-policy]]
+  - model: authentik_stages_user_write.userwritestage
+    id: enrollment-user-write
+    state: present
+    identifiers:
+      name: broker-enrollment-user-write
+    attrs:
+      user_creation_mode: always_create
+      user_type: internal
+      create_users_as_inactive: false
+  - model: authentik_stages_user_login.userloginstage
+    id: enrollment-user-login
+    state: present
+    identifiers:
+      name: broker-enrollment-user-login
+  - model: authentik_flows.flowstagebinding
+    state: present
+    identifiers:
+      target: !KeyOf broker-enrollment-flow
+      stage: !KeyOf enrollment-prompt
+      order: 10
+    attrs:
+      evaluate_on_plan: true
+      re_evaluate_policies: false
+  - model: authentik_flows.flowstagebinding
+    state: present
+    identifiers:
+      target: !KeyOf broker-enrollment-flow
+      stage: !KeyOf enrollment-user-write
+      order: 20
+    attrs:
+      evaluate_on_plan: true
+      re_evaluate_policies: false
+  - model: authentik_flows.flowstagebinding
+    state: present
+    identifiers:
+      target: !KeyOf broker-enrollment-flow
+      stage: !KeyOf enrollment-user-login
+      order: 100
+    attrs:
+      evaluate_on_plan: true
+      re_evaluate_policies: false
+
   # Passkey login: a WebAuthn-only validation stage on the login screen's identification stage.
   - model: authentik_stages_authenticator_validate.authenticatorvalidatestage
     id: passkey-validation
@@ -384,6 +527,7 @@ entries:
         - email
         - username
       recovery_flow: !KeyOf recovery-flow
+      enrollment_flow: !KeyOf broker-enrollment-flow
       webauthn_stage: !KeyOf passkey-validation
       sources:
         - !KeyOf google-source
