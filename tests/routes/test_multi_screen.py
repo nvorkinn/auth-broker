@@ -260,3 +260,33 @@ def test_the_users_own_header_is_what_decides_ownership(app, client, two_screens
     assert USER == "user-1"
     with app.app_context():
         assert db.session.get(Device, first).owner == USER
+
+
+def test_without_a_signed_in_user_there_are_no_screens(app):
+    from broker.auth import user_devices
+
+    with app.test_request_context("/"):
+        assert user_devices() == []
+
+
+def test_a_screen_waiting_to_be_named_is_called_new_screen(app, client, two_screens):
+    _, second = two_screens
+    with app.app_context():
+        db.session.get(Device, second).renderer_secret_hash = None
+        db.session.get(Device, second).display_secret_hash = "d" * 64
+        db.session.commit()
+
+    assert ">New screen</a>" in client.get("/device/name").data.decode()
+
+
+def test_the_name_input_is_not_styled_like_the_pairing_code(app, client, two_screens):
+    _, second = two_screens
+    with app.app_context():
+        db.session.get(Device, second).renderer_secret_hash = None
+        db.session.get(Device, second).display_secret_hash = "e" * 64
+        db.session.commit()
+
+    page = client.get(f"/device/{second}/name").data.decode()
+
+    assert 'class="slug-input"' in page
+    assert 'class="pairing-input"' not in page

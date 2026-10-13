@@ -161,8 +161,13 @@ def paired_device_id() -> str | None:
 
 
 def screen_label(device: Device) -> str:
-    """What a screen is called on the pages: its name (the slug), or what it reports, or a piece of its id."""
-    return (device.assignment and device.assignment.slug) or device.device_name or device.device_id[:6]
+    """What a screen is called on the pages: its name (the slug), "New screen" while it's waiting to be named,
+    or what it reports, or a piece of its id."""
+    if device.assignment:
+        return device.assignment.slug
+    if device.renderer_secret_hash is None:
+        return "New screen"  # not named yet, so it has no renderer to report a name
+    return device.device_name or device.device_id[:6]
 
 
 def require_user(view):

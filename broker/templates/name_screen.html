@@ -4,6 +4,23 @@
 {% block heading %}Name your screen{% endblock %}
 
 {% block content %}
+<style>
+    /* The pairing code's input style (huge, letter-spaced, upper case) doesn't fit a name typed in lower case. */
+    .slug-input {
+        flex: 1;
+        min-width: 0;
+        padding: 12px 16px;
+        font-size: 18px;
+        font-weight: 600;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        outline: none;
+    }
+
+    .slug-input:focus {
+        border-color: var(--tfl-blue);
+    }
+</style>
 {% if error %}
     <div class="error-banner"><p style="margin: 0;">{{ error }}</p></div>
 {% endif %}
@@ -16,10 +33,10 @@
     <form method="POST" action="{{ url_for('pages.name_screen', device_id=device_id) }}">
         <div style="display: flex; align-items: center; gap: 4px; margin-bottom: 12px;">
             <span class="card-subtitle" style="margin: 0; white-space: nowrap;">{{ prefix }}-</span>
-            <input type="text" name="slug" class="pairing-input" value="{{ slug }}" maxlength="{{ max_length }}"
+            <input type="text" name="slug" class="slug-input" value="{{ slug }}" maxlength="{{ max_length }}"
                    pattern="[a-z0-9][a-z0-9_\-]*" title="Up to {{ max_length }} lowercase letters, numbers, dashes or underscores"
                    autocomplete="off" autocapitalize="none" placeholder="e.g. kitchen" required autofocus
-                   style="margin: 0;">
+                   >
         </div>
         <button type="submit" class="btn-save">Continue</button>
     </form>
