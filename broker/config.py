@@ -15,6 +15,8 @@ def load(app: Flask) -> None:
     # The request header the login proxy (Caddy forward auth to Authentik) puts the signed-in user's
     # id in. Caddy overwrites it on every browser-facing request; see caddy/Caddyfile.
     app.config["USER_HEADER"] = os.environ.get("AUTH_USER_HEADER", "X-Authentik-Uid")
+    # The header with the signed-in user's username, which is only shown and used to prefix a screen's name.
+    app.config["USERNAME_HEADER"] = os.environ.get("AUTH_USERNAME_HEADER", "X-Authentik-Username")
 
     app.config["SPOTIFY_CLIENT_ID"] = os.environ["SPOTIFY_CLIENT_ID"]
     app.config["SPOTIFY_CLIENT_SECRET"] = os.environ["SPOTIFY_CLIENT_SECRET"]

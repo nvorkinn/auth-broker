@@ -9,6 +9,7 @@ from broker.auth import hash_secret
 from broker.db import db
 from broker.models import Device, RendererAssignment
 from broker.services import assignments, pairing
+from tests.conftest import USERNAME
 
 DISPLAY = "display-secret-0123456789"
 RENDERER = "renderer-secret-0123456789"
@@ -64,13 +65,13 @@ def test_naming_the_screen_creates_its_assignment_and_opens_the_settings(app, cl
     assert response.status_code == 302
     assert response.headers["Location"] == "/device"
     assignment = _assignment(app, screen)
-    assert (assignment.slug, assignment.status) == ("lisa", "pending")
+    assert (assignment.slug, assignment.status) == (f"{USERNAME}-lisa", "pending")
     assert assignment.claim_token
     assert client.get("/device").status_code == 200
     assert client.get("/device/name").headers["Location"] == "/device"
 
 
-@pytest.mark.parametrize("slug", ["", "a", "-lisa", "li sa", "Li$a", "x" * 33])
+@pytest.mark.parametrize("slug", ["", "-lisa", "li sa", "Li$a", "x" * 33])
 def test_a_bad_slug_is_refused_and_nothing_is_created(app, client, screen, slug):
     response = client.post("/device/name", data={"slug": slug})
 
@@ -82,6 +83,7 @@ def test_a_slug_is_unique_across_the_whole_broker(app, client, screen):
     client.post("/device/name", data={"slug": "lisa"})
     other = app.test_client()
     other.environ_base["HTTP_X_AUTHENTIK_UID"] = "user-2"
+    other.environ_base["HTTP_X_AUTHENTIK_USERNAME"] = USERNAME
     other_id = other.post("/api/devices/register", json={"role": "display", "secret": "another-display-0123456789"})
     other_id = other_id.get_json()["device_id"]
     token = pairing.token_for(hash_secret("another-display-0123456789"))
@@ -109,7 +111,7 @@ def test_the_api_names_the_screen(app, client, screen):
     response = client.post(f"/api/displays/{screen}/renderer", json={"slug": "lisa"})
 
     assert response.status_code == 201
-    assert response.get_json() == {"id": _assignment(app, screen).id, "slug": "lisa", "status": "pending"}
+    assert response.get_json() == {"id": _assignment(app, screen).id, "slug": f"{USERNAME}-lisa", "status": "pending"}
 
 
 def test_the_api_refuses_a_bad_or_taken_slug_and_a_second_assignment(client, screen):
@@ -156,7 +158,12 @@ def test_the_orchestrator_lists_a_pending_assignment_with_its_claim_token(app, o
     [item] = _list(orchestrator)
 
     assignment = _assignment(app, screen)
-    assert item == {"id": assignment.id, "slug": "lisa", "claim_token": assignment.claim_token, "status": "pending"}
+    assert item == {
+        "id": assignment.id,
+        "slug": f"{USERNAME}-lisa",
+        "claim_token": assignment.claim_token,
+        "status": "pending",
+    }
 
 
 def test_the_renderer_claims_its_screen_with_the_token(app, orchestrator, client, screen):
@@ -296,6 +303,7 @@ def test_a_slug_taken_between_the_check_and_the_insert_is_refused(app, client, s
     the unique index."""
     other = app.test_client()
     other.environ_base["HTTP_X_AUTHENTIK_UID"] = "user-2"
+    other.environ_base["HTTP_X_AUTHENTIK_USERNAME"] = USERNAME
     other_id = other.post("/api/devices/register", json={"role": "display", "secret": "another-display-0123456789"})
     other_id = other_id.get_json()["device_id"]
     other.post("/pair/token", json={"token": pairing.token_for(hash_secret("another-display-0123456789"))})
@@ -317,7 +325,7 @@ def test_a_slug_taken_between_the_check_and_the_insert_is_refused(app, client, s
 
 
 def test_naming_a_screen_that_got_its_renderer_meanwhile_goes_to_the_settings(client, screen, monkeypatch):
-    def already_has_one(device, slug):
+    def already_has_one(device, slug, username):
         raise assignments.NotNeeded(device.device_id)
 
     monkeypatch.setattr(assignments, "create", already_has_one)
@@ -325,3 +333,84 @@ def test_naming_a_screen_that_got_its_renderer_meanwhile_goes_to_the_settings(cl
     response = client.post("/device/name", data={"slug": "lisa"})
 
     assert (response.status_code, response.headers["Location"]) == (302, "/device")
+
+
+# --- the username prefix ------------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("username", "prefix"),
+    [
+        ("nvorkinn", "nvorkinn"),
+        ("Nikolai V.", "nikolai-v"),
+        ("n.vorkinn@gmail.com", "n-vorkinn-gmail-com"[: assignments.PREFIX_MAX].rstrip("-")),
+        ("--A__", "a"),
+        ("x" * 40, "x" * assignments.PREFIX_MAX),
+        ("!!!", "user"),
+        ("", "user"),
+        (None, "user"),
+    ],
+)
+def test_the_prefix_is_the_username_made_safe_and_cut_to_fit(username, prefix):
+    assert assignments.slug_prefix(username) == prefix
+
+
+def test_a_full_slug_always_fits_the_orchestrators_limit():
+    for username in ["a", "x" * 100, "Nikolai V."]:
+        suffix = "s" * assignments.max_suffix_length(username)
+        slug = assignments.full_slug(username, suffix)
+        assert assignments.SLUG_RE.match(slug) and len(slug) <= assignments.SLUG_MAX
+        with pytest.raises(assignments.InvalidSlug):
+            assignments.full_slug(username, suffix + "s")
+
+
+def test_the_name_page_shows_the_prefix_the_user_cannot_change(client, screen):
+    page = client.get("/device/name").data.decode()
+
+    assert f"{USERNAME}-" in page
+    assert f'maxlength="{assignments.max_suffix_length(USERNAME)}"' in page
+
+
+def test_a_suffix_too_long_for_the_prefix_is_refused(app, client, screen):
+    too_long = "s" * (assignments.max_suffix_length(USERNAME) + 1)
+
+    assert client.post("/device/name", data={"slug": too_long}).status_code == 400
+    assert _assignment(app, screen) is None
+
+
+def test_the_slug_uses_the_username_at_the_time_of_naming(app, client, screen):
+    client.environ_base["HTTP_X_AUTHENTIK_USERNAME"] = "Nikolai V."
+
+    client.post("/device/name", data={"slug": "kitchen"})
+
+    assert _assignment(app, screen).slug == "nikolai-v-kitchen"
+
+
+def test_a_user_without_a_username_header_gets_the_fallback_prefix(app, client, screen):
+    del client.environ_base["HTTP_X_AUTHENTIK_USERNAME"]
+
+    client.post("/device/name", data={"slug": "kitchen"})
+
+    assert _assignment(app, screen).slug == "user-kitchen"
+
+
+# --- the username on the page ---------------------------------------------------------------------------
+
+
+def test_the_username_is_shown_at_the_top_of_the_pages(client, screen):
+    for path in ["/device/name", "/pair"]:
+        assert f'<div class="whoami" title="Signed in as {USERNAME}">{USERNAME}</div>' in client.get(path).data.decode()
+
+
+def test_the_username_is_escaped(client, screen):
+    client.environ_base["HTTP_X_AUTHENTIK_USERNAME"] = "<script>alert(1)</script>"
+
+    page = client.get("/pair").data.decode()
+
+    assert "<script>alert(1)</script>" not in page
+    assert "&lt;script&gt;" in page
+
+
+def test_no_username_shows_nothing(client):
+    del client.environ_base["HTTP_X_AUTHENTIK_USERNAME"]
+    assert 'class="whoami"' not in client.get("/pair").data.decode()

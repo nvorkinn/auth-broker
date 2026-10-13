@@ -135,6 +135,13 @@ def current_user() -> str | None:
     return request.headers.get(current_app.config["USER_HEADER"], "").strip() or None
 
 
+def current_username() -> str | None:
+    """The signed-in user's username, from the header the login proxy sets next to the user id. It's only
+    for display and for naming their screens: it's not the user's identity (that's current_user) and it
+    can change."""
+    return request.headers.get(current_app.config["USERNAME_HEADER"], "").strip() or None
+
+
 def paired_device_id() -> str | None:
     """The device the signed-in user is paired with (the one paired most recently, if several)."""
     user = current_user()
