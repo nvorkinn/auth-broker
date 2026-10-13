@@ -11,8 +11,20 @@
 	reverse_proxy {args[0]}
 }
 
+# QA: every request and response to the two hosts a sign-in passes through, with all headers (Caddy's JSON
+# access log has them; it redacts Authorization, Cookie and Set-Cookie unless `log_credentials` is set
+# in the global options). Drop the two `import access_log` lines before going live.
+(access_log) {
+	log {
+		output stdout
+		format json
+	}
+}
+
 # Caddy uses host networking, so 127.0.0.1 is the host throughout.
 auth.nikolaivorkinn.com {
+	import access_log
+
 	# The broker trusts X-Authentik-Uid as the signed-in user, so nothing a visitor sends in it may
 	# get through: strip it from every request, and let forward auth set it on the browser pages.
 	request_header -X-Authentik-Uid
@@ -70,6 +82,7 @@ metrics.nikolaivorkinn.com {
 }
 
 sso.nikolaivorkinn.com {
+	import access_log
 	# Authentik, published on loopback only.
 	reverse_proxy 127.0.0.1:9000
 }

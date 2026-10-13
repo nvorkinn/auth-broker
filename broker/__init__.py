@@ -23,6 +23,10 @@ def create_app() -> Flask:
     config.load(app)
     db_module.init_app(app)
 
+    from . import request_log
+
+    request_log.init_app(app)
+
     from .services.pair_throttle import REGISTRATIONS_PER_MINUTE, PairThrottle
 
     app.extensions["pair_throttle"] = PairThrottle()

@@ -47,6 +47,8 @@ services:
     # Secrets, decrypted from secrets/broker.env by deploy.sh.
     env_file: broker.env
     environment:
+      # QA: logs every request's headers (see broker/request_log.py). Remove before going live.
+      LOG_REQUEST_HEADERS: "true"
       SESSION_COOKIE_SECURE: "true"
       SESSION_COOKIE_SAMESITE: Lax
       SPOTIFY_REDIRECT_URI: https://auth.nikolaivorkinn.com/auth/spotify/callback
