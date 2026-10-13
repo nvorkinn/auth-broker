@@ -1,3 +1,4 @@
+import fcntl
 import os
 from datetime import UTC, datetime
 from pathlib import Path
@@ -48,9 +49,11 @@ def _enable_foreign_keys(dbapi_conn, _record) -> None:
 def upgrade_db() -> None:
     """Brings the DB to the latest revision; needs an app context. Same as `flask db upgrade`,
     except it leaves logging alone: env.py's logging setup would silence the app's own logger."""
-    config = current_app.extensions["migrate"].migrate.get_config()
-    config.attributes["app_startup"] = True
-    command.upgrade(config, "head")
+    with Path(f"{_db_path()}.migrate.lock").open("a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        config = current_app.extensions["migrate"].migrate.get_config()
+        config.attributes["app_startup"] = True
+        command.upgrade(config, "head")
 
 
 def init_app(app) -> None:
