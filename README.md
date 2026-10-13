@@ -296,14 +296,18 @@ export $(grep -v '^#' .env | xargs)
 FLASK_DEBUG=1 python wsgi.py  # debug mode only when asked for; never on a reachable host
 ```
 
-Then, in another terminal, simulate a Pi and walk through pairing yourself:
+Then, in another terminal, simulate a screen and walk through pairing yourself:
 
 ```bash
 python scripts/simulate_device.py
 # prints a device_id and a pairing code
 # -> open http://127.0.0.1:5000/pair and enter the code
-# (or `--token` to try the redirect flow instead)
+# (or `--token` to try the redirect flow instead, `--secret <random string>` to be the same screen across runs)
 ```
+
+It works against the deployed broker too, with no hardware
+(`python scripts/simulate_device.py https://auth.nikolaivorkinn.com`); there
+`/pair` asks for your Authentik login as usual.
 
 ## Resetting a device while developing
 
