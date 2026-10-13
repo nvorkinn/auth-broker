@@ -144,6 +144,11 @@ services:
     container_name: authentik-server
     logging: *logging
     command: server
+    volumes:
+      - authentik_media:/media
+      # Brand assets from the repo (countdown-pill.svg), served by Authentik at
+      # /static/dist/assets/countdown/, so the logo needs no manual upload.
+      - ./authentik:/web/dist/assets/countdown:ro
     # Loopback only: Caddy (host networking) is the one way in, at
     # sso.nikolaivorkinn.com.
     ports:
