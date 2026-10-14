@@ -338,8 +338,7 @@
 
         .form-group input[type="text"],
         .form-group input[type="number"],
-        .form-group input[type="password"],
-        .form-group select {
+        .form-group input[type="password"] {
             width: 100%;
             padding: 10px 12px;
             border: 1px solid var(--border);
@@ -368,6 +367,63 @@
         .form-hint {
             margin: 6px 0 0;
             font-size: 12px;
+            color: var(--text-muted);
+        }
+
+        /* The TfL style picker: a picture of each style to click, the chosen one outlined. */
+        .style-picker {
+            margin-bottom: 16px;
+        }
+
+        .style-options {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+            gap: 12px;
+            margin-top: 10px;
+        }
+
+        .style-option {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            padding: 10px;
+            border: 2px solid var(--border);
+            border-radius: 8px;
+            cursor: pointer;
+            margin: 0;
+        }
+
+        .style-option:has(input:checked) {
+            border-color: var(--tfl-blue);
+        }
+
+        .style-option:has(input:focus-visible) {
+            outline: 2px solid var(--tfl-blue);
+            outline-offset: 2px;
+        }
+
+        .style-option input {
+            position: absolute;
+            opacity: 0;
+            pointer-events: none;
+        }
+
+        .style-option img {
+            width: 100%;
+            height: auto;
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            image-rendering: pixelated;
+        }
+
+        .style-name {
+            font-size: 14px;
+            font-weight: 600;
+        }
+
+        .style-description {
+            font-size: 12px;
+            font-weight: normal;
             color: var(--text-muted);
         }
 

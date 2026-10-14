@@ -53,12 +53,14 @@ class PairingCode(db.Model):
 
 
 ORIENTATIONS = ("horizontal", "vertical")
-# How the screen draws each stop's departures: the API contract's tfl.style, with labels for the config page.
+# How the screen draws each stop's departures: the API contract's tfl.style, with the name and description the
+# config page shows beside each one's picture (broker/static/tfl-styles/<style>.png, cut from the renderer's own
+# snapshot of it).
 TFL_STYLES = {
-    "classic": "Classic: a row per departure",
-    "hero": "Hero: the next departure big",
-    "grouped": "Grouped: a row per route, with its next few times",
-    "card": "Card: each stop in a rounded card",
+    "classic": ("Classic", "A row per departure"),
+    "hero": ("Hero", "The next departure big"),
+    "grouped": ("Grouped", "A row per route, with its next few times"),
+    "card": ("Card", "Each stop in a rounded card"),
 }
 
 

@@ -88,16 +88,20 @@
         <div class="card-header">
             <h2 class="card-title">TfL</h2>
         </div>
-        <div class="form-grid">
-            <div class="form-group">
-                <label for="tfl_style">Style</label>
-                <select id="tfl_style" name="tfl_style" aria-describedby="tfl_style_hint">
-                    {% for style, label in tfl_styles.items() %}
-                        <option value="{{ style }}" {% if config.tfl_style == style %}selected{% endif %}>{{ label }}</option>
-                    {% endfor %}
-                </select>
-                <p id="tfl_style_hint" class="form-hint">How your screen draws each stop's departures.</p>
+        <fieldset class="form-group style-picker" aria-describedby="tfl_style_hint">
+            <legend class="form-legend">Style</legend>
+            <p id="tfl_style_hint" class="form-hint">How your screen draws each stop's departures.</p>
+            <div class="style-options">
+                {% for style, (name, description) in tfl_styles.items() %}
+                    <label class="style-option">
+                        <input type="radio" id="tfl_style_{{ style }}" name="tfl_style" value="{{ style }}" {% if config.tfl_style == style %}checked{% endif %}>
+                        <img src="{{ url_for('static', filename='tfl-styles/' ~ style ~ '.png') }}" alt="" width="267" height="195">
+                        <span class="style-name">{{ name }}</span>
+                        <span class="style-description">{{ description }}</span>
+                    </label>
+                {% endfor %}
             </div>
+        </fieldset>
         </div>
         <div class="search-container">
             <input type="text" id="searchInput" class="search-input" placeholder="Search for a station or stop" autocomplete="off">
