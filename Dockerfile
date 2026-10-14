@@ -1,11 +1,11 @@
 # The IP location data the config page suggests a weather location from (see broker/services/geoip.py),
 # as of this build: DB-IP City Lite and GeoNames' cities, both CC BY 4.0.
 # Data, not code, so it is fetched once on the build machine whatever platform the image is for.
-FROM --platform=$BUILDPLATFORM python:3.12-slim AS geodata
+FROM --platform=$BUILDPLATFORM python:3.14-slim AS geodata
 COPY scripts/fetch_geodata.py /
 RUN python /fetch_geodata.py /geodata
 
-FROM python:3.12-slim
+FROM python:3.14-slim
 
 WORKDIR /app
 
