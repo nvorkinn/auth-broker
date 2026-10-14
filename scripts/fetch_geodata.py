@@ -25,6 +25,14 @@ GEONAMES_URL = "https://download.geonames.org/export/dump/cities15000.zip"
 SKIPPED_FEATURE_CODES = {"PPLX", "PPLH", "PPLQ", "PPLW", "PPLCH"}
 
 
+# DB-IP answers 403 to urllib's default "Python-urllib" agent.
+USER_AGENT = "auth-broker-build (+https://github.com/nvorkinn/auth-broker)"
+
+
+def _request(url: str) -> urllib.request.Request:
+    return urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
+
+
 def _months(now: datetime) -> list[str]:
     """This month and last: a new month's file can take a day or two to appear."""
     last = (now.year, now.month - 1) if now.month > 1 else (now.year - 1, 12)
@@ -34,7 +42,7 @@ def _months(now: datetime) -> list[str]:
 def fetch_dbip(out: Path, now: datetime | None = None) -> None:
     for month in _months(now or datetime.now(UTC)):
         try:
-            with urllib.request.urlopen(DBIP_URL.format(month=month), timeout=120) as response:
+            with urllib.request.urlopen(_request(DBIP_URL.format(month=month)), timeout=120) as response:
                 with gzip.open(response) as mmdb, open(out / "dbip-city-lite.mmdb", "wb") as f:
                     shutil.copyfileobj(mmdb, f)
             print(f"DB-IP City Lite {month}")
@@ -55,7 +63,7 @@ def places_from_geonames(cities: io.TextIOBase):
 
 
 def fetch_places(out: Path) -> None:
-    with urllib.request.urlopen(GEONAMES_URL, timeout=120) as response:
+    with urllib.request.urlopen(_request(GEONAMES_URL), timeout=120) as response:
         archive = zipfile.ZipFile(io.BytesIO(response.read()))
     with archive.open("cities15000.txt") as raw, open(out / "places.tsv", "w", encoding="utf-8") as f:
         count = 0
