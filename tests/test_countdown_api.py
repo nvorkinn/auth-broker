@@ -11,7 +11,7 @@ from countdown_api.models import ConfigResponse
 from flask import Flask
 
 from broker.db import db
-from broker.models import Device
+from broker.models import Device, DeviceConfig
 
 
 def test_a_live_response_has_exactly_the_contracts_fields(client, register_device):
@@ -31,6 +31,19 @@ def test_the_device_name_header_is_read_by_the_generated_view(client, register_d
 
     with client.application.app_context():
         assert db.session.get(Device, device_id).device_name == "camilla"
+
+
+def test_a_device_without_a_config_is_not_found(client, register_device):
+    """The contract declares a 404 for it, with the same error body as the other errors."""
+    device_id, secret = register_device()
+    with client.application.app_context():
+        db.session.delete(db.session.get(DeviceConfig, device_id))
+        db.session.commit()
+
+    response = client.get("/api/config", headers={"Authorization": f"Bearer {secret}"})
+
+    assert response.status_code == 404
+    assert response.get_json() == {"error": "not found"}
 
 
 def test_the_app_refuses_to_start_without_an_implementation_of_every_route():
