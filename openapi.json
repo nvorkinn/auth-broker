@@ -71,11 +71,9 @@
         "description": "GET /api/config.",
         "properties": {
           "device_id": {
-            "title": "Device Id",
             "type": "string"
           },
           "interval": {
-            "title": "Interval",
             "type": "integer"
           },
           "screen": {
@@ -104,14 +102,12 @@
               {
                 "type": "null"
               }
-            ],
-            "title": "Pairing Code"
+            ]
           },
           "setup_missing": {
             "items": {
               "type": "string"
             },
-            "title": "Setup Missing",
             "type": "array"
           }
         },
@@ -133,7 +129,6 @@
       "Error": {
         "properties": {
           "error": {
-            "title": "Error",
             "type": "string"
           }
         },
@@ -153,8 +148,7 @@
               {
                 "type": "null"
               }
-            ],
-            "title": "Username"
+            ]
           },
           "password": {
             "anyOf": [
@@ -164,8 +158,7 @@
               {
                 "type": "null"
               }
-            ],
-            "title": "Password"
+            ]
           }
         },
         "required": [
@@ -185,8 +178,7 @@
               {
                 "type": "null"
               }
-            ],
-            "title": "Postcode"
+            ]
           }
         },
         "required": [
@@ -202,15 +194,12 @@
               "horizontal",
               "vertical"
             ],
-            "title": "Orientation",
             "type": "string"
           },
           "width": {
-            "title": "Width",
             "type": "integer"
           },
           "height": {
-            "title": "Height",
             "type": "integer"
           }
         },
@@ -225,7 +214,6 @@
       "Spotify": {
         "properties": {
           "enabled": {
-            "title": "Enabled",
             "type": "boolean"
           }
         },
@@ -238,14 +226,12 @@
       "Tfl": {
         "properties": {
           "app_key": {
-            "title": "App Key",
             "type": "string"
           },
           "stop_ids": {
             "items": {
               "type": "string"
             },
-            "title": "Stop Ids",
             "type": "array"
           }
         },
@@ -259,11 +245,9 @@
       "Weather": {
         "properties": {
           "api_key": {
-            "title": "Api Key",
             "type": "string"
           },
           "location": {
-            "title": "Location",
             "type": "string"
           }
         },

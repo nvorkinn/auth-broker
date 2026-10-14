@@ -16,12 +16,21 @@ from typing import Any
 
 from flask import Flask
 from pydantic import BaseModel
+from pydantic.json_schema import GenerateJsonSchema
 
 from .contract import API_VERSION, Error
 
 _ATTRIBUTE = "__openapi__"
 _FLASK_PARAMETER = re.compile(r"<(?:[^:>]+:)?([^>]+)>")
 _DEVICE_AUTH = "deviceSecret"
+
+
+class _PlainSchema(GenerateJsonSchema):
+    """Pydantic titles every field with its name reformatted ("Api Key"), which only adds noise to the
+    spec and to the models generated from it."""
+
+    def field_title_should_be_set(self, schema) -> bool:
+        return False
 
 
 def documented(
@@ -86,7 +95,9 @@ def build_spec(app: Flask) -> dict[str, Any]:
 
     schemas: dict[str, Any] = {}
     for model in models.values():
-        schema = model.model_json_schema(mode="serialization", ref_template="#/components/schemas/{model}")
+        schema = model.model_json_schema(
+            mode="serialization", ref_template="#/components/schemas/{model}", schema_generator=_PlainSchema
+        )
         schemas.update(schema.pop("$defs", {}))
         schemas[model.__name__] = schema
 
