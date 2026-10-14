@@ -194,7 +194,7 @@ hasn't made a request (`devices.display_last_seen_at`) for 24 hours becomes `sus
 
 `POST /api/frame` is the screen's poll with its report attached. The broker forwards
 `metrics` to VictoriaMetrics' `/write` after replacing every literal `{device_id}` in it with the
-device's id, and `logs` to Fluent Bit's HTTP input (`127.0.0.1:9880`), both in the background and
+device's id, and `logs` to VictoriaLogs' JSON lines endpoint (`127.0.0.1:9428`), both in the background and
 best-effort: a destination being down is logged and never fails the poll.
 
 A wrong or missing secret gets 401. A valid secret for the wrong role gets
@@ -701,17 +701,23 @@ released alongside the other two images, so nothing needs copying to the host.
 The `deploy-config` job also deploys it, pinning `FLUENT_BIT_VERSION` in `.env`. Query in
 VictoriaLogs with e.g. `{service="caddy"}`.
 
-Every log line, from every source, carries the same fields (stream fields are `service,host`):
+Fluent Bit only transports: it adds no fields and rewrites none. Each source writes the standard
+fields itself, as one JSON object per line (stream fields are `service,host`):
 
 | Field | Meaning |
 |---|---|
-| `service` | Source name: the compose service for container logs (set by the shared `x-logging` anchor, whose `tag: "{{.Name}}"` lands in each record's `attrs.tag`); whatever the sender supplies on the `:9880` HTTP input (default `auth-broker`) or OTLP input (default `otlp`) |
-| `host` | The machine's host name, unless the sender supplies its own (e.g. a device id) |
-| `level` | `trace`/`debug`/`info`/`warn`/`error`/`fatal`: from the JSON log's `level`, else a level word at the start of the line, else `info` |
-| `_msg` | The message |
+| `service` | The source app. For containers it is the Docker log `tag`, which lands in each record's `attrs.tag` and which Fluent Bit lifts to `service`: the compose service name (the shared `x-logging` anchor sets `tag: "{{.Name}}"`), `orchestrator`, and `renderer-<slug>` for each renderer (the orchestrator sets the same tag when it starts one). Screens are `countdown-esp32`; OTLP senders that name none are `otlp` |
+| `host` | The machine's host name; for a screen, its device id |
+| `level` | `debug`/`info`/`warn`/`error`/`fatal`. Written by the broker, renderers and orchestrator; Caddy and the Victoria services have it natively; Authentik uses `warning` for `warn`; Postgres and Fluent Bit write plain text with no `level` |
+| `_msg` | The message: `_msg` from our apps, `msg` from Caddy and the Victoria services, `event` from Authentik, else the raw line (`log`) |
+| `_time` | When Docker saw the line. A screen has no clock, so the broker dates its lines by their uptime relative to the newest in the report |
 
-Senders to `:9880` (the broker, countdown devices) should include `service`, `host` and
-`level` in each record. The logic is in `fluent-bit/normalize.lua`.
+The broker's JSON comes from `gunicorn.conf.py` and `broker/log_format.py` (the access log has the
+method, path without query string, status, bytes and duration as fields). The renderers and orchestrator
+use `countdown_core.core.log_format` and `countdown_orchestrator.log_format` in the pi-dashboard repo; a
+renderer's lines also carry `device` (its name). Screens' logs are posted by the broker straight to
+VictoriaLogs, tagged `service=countdown-esp32` and `host=<device id>`; `VICTORIA_LOGS_URL` overrides the
+destination.
 
 Container logs are rotated by Docker (10 MB x 3 files per container). The `tag` only applies to
 containers created after the change, so recreate them (`docker compose up -d`). Logs from before

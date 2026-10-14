@@ -1,3 +1,4 @@
+import json
 import re
 from datetime import UTC, datetime, timedelta
 from hashlib import blake2b
@@ -448,7 +449,7 @@ def test_renderer_can_upload_again_after_unpair_with_config(client, register_dev
 
 # --- POST: frame plus telemetry ---------------------------------------------------------------------
 
-LOGS_URL = "http://127.0.0.1:9880/logs"
+LOGS_URL = "http://127.0.0.1:9428/insert/jsonline?_stream_fields=service,host&_msg_field=_msg&_time_field=_time"
 METRICS_URL = "http://127.0.0.1:8428/write"
 LINES = "esp,device_id={device_id} uptime_s=3600i,rssi=-60i"
 
@@ -497,6 +498,13 @@ def _metrics_calls(shipped):
 
 def _logs_calls(shipped):
     return [kwargs for url, kwargs in shipped if url == LOGS_URL]
+
+
+def _log_records(shipped):
+    """The records of the one logs call, decoded from its JSON lines."""
+    [call] = _logs_calls(shipped)
+    assert call["headers"] == {"Content-Type": "application/json"}
+    return [json.loads(line) for line in call["data"].decode().split("\n")]
 
 
 def test_post_requires_auth(client, shipped):
@@ -606,35 +614,65 @@ def test_post_ignores_metrics_that_are_not_a_line_protocol_string(client, regist
     assert shipped == []
 
 
-# --- POST: logs, to Fluent Bit ----------------------------------------------------------------------
+# --- POST: logs, to VictoriaLogs --------------------------------------------------------------------
 
 
-def test_post_sends_logs_to_fluent_bit_tagged_with_the_device(client, register_device, shipped):
+def test_post_sends_logs_to_victoria_logs_as_json_lines_for_the_device(client, register_device, shipped):
     device_id, _ = register_device()
 
-    _post(client, {"logs": [{"log": "a", "level": "warn"}, "plain", 7]})
+    _post(client, {"logs": [{"_msg": "a", "level": "warn", "uptime_ms": 5}, "plain", 7]})
 
-    assert shipped == [
-        (
-            LOGS_URL,
-            {
-                "json": [
-                    {"log": "a", "level": "warn", "device_id": device_id},
-                    {"log": "plain", "device_id": device_id},
-                    {"log": "7", "device_id": device_id},
-                ],
-                "timeout": 2,
-            },
-        )
-    ]
+    records = _log_records(shipped)
+    assert [(r["_msg"], r["level"]) for r in records] == [("a", "warn"), ("plain", "info"), ("7", "info")]
+    assert {(r["service"], r["host"], r["device_id"]) for r in records} == {("countdown-esp32", device_id, device_id)}
+    assert records[0]["uptime_ms"] == 5
+    assert _logs_calls(shipped)[0]["timeout"] == 2
 
 
-def test_post_overrides_a_device_id_the_screen_claims_in_a_log(client, register_device, shipped):
+def test_post_dates_each_log_by_its_uptime_relative_to_the_newest(client, register_device, shipped):
+    register_device()
+    before = datetime.now(UTC)
+
+    _post(client, {"logs": [{"_msg": "old", "uptime_ms": 1000}, {"_msg": "new", "uptime_ms": 4000}, "no uptime"]})
+
+    old, new, undated = (datetime.fromisoformat(r["_time"]) for r in _log_records(shipped))
+    assert (new - old).total_seconds() == pytest.approx(3.0)
+    assert before <= new <= datetime.now(UTC)
+    assert before <= undated <= datetime.now(UTC)
+
+
+@pytest.mark.parametrize(
+    ("sent", "expected"),
+    [("WARNING", "warn"), ("critical", "fatal"), ("Error", "error"), ("nonsense", "info"), (3, "info")],
+)
+def test_post_normalises_the_level_of_a_log(client, register_device, shipped, sent, expected):
+    register_device()
+
+    _post(client, {"logs": [{"_msg": "x", "level": sent}]})
+
+    assert _log_records(shipped)[0]["level"] == expected
+
+
+@pytest.mark.parametrize("key", ["log", "message", "msg"])
+def test_post_accepts_the_other_names_for_a_log_message(client, register_device, shipped, key):
+    register_device()
+
+    _post(client, {"logs": [{key: "hello"}]})
+
+    assert _log_records(shipped)[0]["_msg"] == "hello"
+
+
+def test_post_overrides_what_a_screen_claims_about_where_a_log_came_from(client, register_device, shipped):
     device_id, _ = register_device()
 
-    _post(client, {"logs": [{"log": "a", "device_id": "someone-else"}]})
+    _post(
+        client,
+        {"logs": [{"_msg": "a", "device_id": "x", "host": "y", "service": "auth-broker", "_time": "2000-01-01"}]},
+    )
 
-    assert _logs_calls(shipped)[0]["json"] == [{"log": "a", "device_id": device_id}]
+    [record] = _log_records(shipped)
+    assert (record["device_id"], record["host"], record["service"]) == (device_id, device_id, "countdown-esp32")
+    assert record["_time"] != "2000-01-01"
 
 
 @pytest.mark.parametrize("logs", [None, [], "text", {"log": "x"}, 5])
@@ -689,12 +727,12 @@ def test_post_with_non_json_body_still_serves_the_frame(client, register_device,
 
 def test_post_uses_destinations_from_the_environment(client, register_device, shipped, monkeypatch):
     monkeypatch.setenv("VICTORIA_METRICS_URL", "http://vm.example:8428/write")
-    monkeypatch.setenv("FLUENT_BIT_LOGS_URL", "http://fb.example:9880/logs")
+    monkeypatch.setenv("VICTORIA_LOGS_URL", "http://vl.example:9428/insert/jsonline")
     register_device()
 
     _post(client, {"metrics": LINES, "logs": ["x"]})
 
-    assert [url for url, _ in shipped] == ["http://vm.example:8428/write", "http://fb.example:9880/logs"]
+    assert [url for url, _ in shipped] == ["http://vm.example:8428/write", "http://vl.example:9428/insert/jsonline"]
 
 
 # --- POST: a destination that's down or unhappy never touches the screen ----------------------------
@@ -808,7 +846,7 @@ def test_post_on_the_id_less_route_returns_the_frame_and_ships_the_report(client
     assert response.data == _frame()
     assert response.headers["ETag"] == f'"{_etag(_frame())}"'
     assert _metrics_calls(shipped)[0]["data"] == f"esp,device_id={device_id} uptime_s=3600i,rssi=-60i".encode()
-    assert _logs_calls(shipped)[0]["json"] == [{"log": "x", "device_id": device_id}]
+    assert _log_records(shipped)[0]["device_id"] == device_id
 
 
 def test_post_on_the_id_less_route_honours_if_none_match(client, register_device, shipped):

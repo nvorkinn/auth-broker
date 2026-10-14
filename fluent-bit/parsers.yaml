@@ -4,6 +4,6 @@ parsers:
     time_key: time
     time_format: "%Y-%m-%dT%H:%M:%S.%L"
     time_keep: off
-  # Lifts the fields of a JSON log line (the `log` key) so normalize.lua can read its level.
+  # Lifts the fields of a JSON log line (the `log` key).
   - name: json_log
     format: json

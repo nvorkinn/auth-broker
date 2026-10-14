@@ -63,14 +63,14 @@ flowchart TB
         AK["authentik :9000<br/>+ Postgres, worker"]
         OR["Orchestrator<br/>docker.sock"]
         RN["Renderers<br/>renderer-SLUG, host network"]
-        FB["Fluent Bit<br/>:9880 :4318"]
+        FB["Fluent Bit<br/>:4318"]
         VL["VictoriaLogs :9428"]
         VM["VictoriaMetrics :8428"]
     end
     TP["Third parties<br/>Spotify, TfL, Open-Meteo, Glowmarkt,<br/>postcodes.io, Google sign-in, Resend"]
 
     BR -- "screen metrics" --> VM
-    BR -- "screen logs" --> FB
+    BR -- "screen logs" --> VL
     RN -- "OTLP health" --> FB
     FB --> VL
     FB --> VM
@@ -326,7 +326,7 @@ sequenceDiagram
   changed it), or 5 s while there is no frame yet.
 - The renderer uploads only when its picture changed. If the same frame is uploaded again, only `frames.rendered_at`
   moves, which says the renderer is alive.
-- Metrics and logs the screen reports are forwarded in the background to VictoriaMetrics and Fluent Bit, and never
+- Metrics and logs the screen reports are forwarded in the background to VictoriaMetrics and VictoriaLogs, and never
   slow or fail the poll. The `{device_id}` placeholder in the metrics text is replaced by the broker.
 - `last_seen_at` moves on any authenticated call, at most once a minute; `display_last_seen_at` only on the screen's
   own calls. That second one is what decides suspension.
