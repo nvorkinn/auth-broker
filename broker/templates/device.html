@@ -91,18 +91,24 @@
         <fieldset class="form-group style-picker" aria-describedby="tfl_style_hint">
             <legend class="form-legend">Style</legend>
             <p id="tfl_style_hint" class="form-hint">How your screen draws each stop's departures.</p>
-            <div class="style-options">
-                {% for style, (name, description) in tfl_styles.items() %}
-                    <label class="style-option">
-                        <input type="radio" id="tfl_style_{{ style }}" name="tfl_style" value="{{ style }}" {% if config.tfl_style == style %}checked{% endif %}>
-                        <img src="{{ url_for('static', filename='tfl-styles/' ~ style ~ '.png') }}" alt="" width="267" height="195">
-                        <span class="style-name">{{ name }}</span>
-                        <span class="style-description">{{ description }}</span>
-                    </label>
-                {% endfor %}
+            <!-- A carousel: one style in view at a time, and the one in view is the one chosen. -->
+            <div class="style-carousel">
+                <button type="button" class="style-step" data-step="-1" aria-label="Previous style">‹</button>
+                <div class="style-options" id="styleOptions">
+                    {% for style, (name, description) in tfl_styles.items() %}
+                        <label class="style-option">
+                            <input type="radio" id="tfl_style_{{ style }}" name="tfl_style" value="{{ style }}" {% if config.tfl_style == style %}checked{% endif %}>
+                            <img src="{{ url_for('static', filename='tfl-styles/' ~ style ~ '.png') }}" alt="" width="267" height="195">
+                            <span class="style-caption"><span class="style-name">{{ name }}</span> <span class="style-description">{{ description }}</span></span>
+                        </label>
+                    {% endfor %}
+                </div>
+                <button type="button" class="style-step" data-step="1" aria-label="Next style">›</button>
+            </div>
+            <div class="style-dots" aria-hidden="true">
+                {% for style in tfl_styles %}<span class="style-dot" data-style="{{ style }}"></span>{% endfor %}
             </div>
         </fieldset>
-        </div>
         <div class="search-container">
             <input type="text" id="searchInput" class="search-input" placeholder="Search for a station or stop" autocomplete="off">
             <span id="searchSpinner" class="search-spinner">Searching…</span>
@@ -210,6 +216,31 @@
 </form>
 
 <script>
+    // The TfL style carousel: the arrows (or a swipe) move to the next style and choose it.
+    (() => {
+        const strip = document.getElementById('styleOptions');
+        const radios = [...strip.querySelectorAll('input[name="tfl_style"]')];
+        const dots = [...document.querySelectorAll('.style-dot')];
+        const chosen = () => Math.max(0, radios.findIndex(r => r.checked));
+        const show = (index, smooth) => {
+            radios[index].checked = true;
+            dots.forEach((dot, i) => dot.classList.toggle('active', i === index));
+            strip.scrollTo({ left: index * strip.clientWidth, behavior: smooth ? 'smooth' : 'instant' });
+        };
+        document.querySelectorAll('.style-step').forEach(button => button.addEventListener('click', () => {
+            show((chosen() + Number(button.dataset.step) + radios.length) % radios.length, true);
+        }));
+        let settle;
+        strip.addEventListener('scroll', () => {
+            clearTimeout(settle);
+            settle = setTimeout(() => {
+                const index = Math.round(strip.scrollLeft / strip.clientWidth);
+                if (index !== chosen()) show(index, false);
+            }, 120);
+        });
+        show(chosen(), false);
+    })();
+
     const searchInput = document.getElementById('searchInput');
     const searchSpinner = document.getElementById('searchSpinner');
     const searchResults = document.getElementById('searchResults');

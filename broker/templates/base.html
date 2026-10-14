@@ -370,36 +370,39 @@
             color: var(--text-muted);
         }
 
-        /* The TfL style picker: a picture of each style to click, the chosen one outlined. */
-        .style-picker {
+        /* The TfL style picker: a carousel of pictures, one style in view at a time. */
+        fieldset.style-picker {
             margin-bottom: 16px;
         }
 
-        .style-options {
-            display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
-            gap: 12px;
+        .style-carousel {
+            display: flex;
+            align-items: center;
+            gap: 8px;
             margin-top: 10px;
         }
 
-        .style-option {
+        .style-options {
+            flex: 1;
+            display: flex;
+            overflow-x: auto;
+            scroll-snap-type: x mandatory;
+            scrollbar-width: none;
+        }
+
+        .style-options::-webkit-scrollbar {
+            display: none;
+        }
+
+        .style-options .style-option {
+            flex: 0 0 100%;
+            scroll-snap-align: center;
             display: flex;
             flex-direction: column;
-            gap: 4px;
-            padding: 10px;
-            border: 2px solid var(--border);
-            border-radius: 8px;
-            cursor: pointer;
+            align-items: center;
+            gap: 6px;
             margin: 0;
-        }
-
-        .style-option:has(input:checked) {
-            border-color: var(--tfl-blue);
-        }
-
-        .style-option:has(input:focus-visible) {
-            outline: 2px solid var(--tfl-blue);
-            outline-offset: 2px;
+            cursor: pointer;
         }
 
         .style-option input {
@@ -410,10 +413,21 @@
 
         .style-option img {
             width: 100%;
+            max-width: 267px;
             height: auto;
             border: 1px solid var(--border);
             border-radius: 4px;
             image-rendering: pixelated;
+        }
+
+        .style-option:has(input:focus-visible) img {
+            outline: 2px solid var(--tfl-blue);
+            outline-offset: 2px;
+        }
+
+        .style-caption {
+            font-size: 12px;
+            text-align: center;
         }
 
         .style-name {
@@ -422,9 +436,37 @@
         }
 
         .style-description {
-            font-size: 12px;
-            font-weight: normal;
             color: var(--text-muted);
+        }
+
+        .style-step {
+            flex: none;
+            width: 32px;
+            height: 32px;
+            border: 1px solid var(--border);
+            border-radius: 50%;
+            background: var(--bg-card);
+            font-size: 18px;
+            line-height: 1;
+            cursor: pointer;
+        }
+
+        .style-dots {
+            display: flex;
+            justify-content: center;
+            gap: 6px;
+            margin-top: 8px;
+        }
+
+        .style-dot {
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: var(--border);
+        }
+
+        .style-dot.active {
+            background: var(--tfl-blue);
         }
 
         .checkbox-group {
