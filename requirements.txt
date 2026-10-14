@@ -10,4 +10,3 @@ werkzeug
 click
 maxminddb
 pydantic
--r https://nvorkinn.github.io/countdown-api/requirements.txt
