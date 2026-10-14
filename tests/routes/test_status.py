@@ -68,27 +68,25 @@ def test_status_lists_every_device(app, client, register_device):
             "created_at": created_at.isoformat(),
             "paired_at": paired_at.isoformat(),
             "last_seen_at": last_seen_at.isoformat(),
-            "setup_missing": ["a bus or tube stop"],
         },
         new_id: {
             "device_name": None,
             "created_at": response.get_json()[new_id]["created_at"],
             "paired_at": None,
             "last_seen_at": None,
-            "setup_missing": ["a weather location", "a postcode", "a bus or tube stop"],
         },
     }
     assert datetime.fromisoformat(response.get_json()[new_id]["created_at"]).tzinfo == UTC
 
 
 @pytest.mark.usefixtures("status_on")
-def test_status_reports_null_setup_missing_for_a_device_without_config(app, client, register_device):
+def test_status_lists_a_device_without_config(app, client, register_device):
     device_id, _ = register_device()
     with app.app_context():
         db.session.delete(db.session.get(DeviceConfig, device_id))
         db.session.commit()
 
-    assert _status(client).get_json()[device_id]["setup_missing"] is None
+    assert device_id in _status(client).get_json()
 
 
 def test_last_seen_at_is_unset_until_the_device_authenticates(app, client, register_device):

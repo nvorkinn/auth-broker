@@ -9,7 +9,6 @@ from sqlalchemy import select
 from ..auth import require_status_token
 from ..db import db
 from ..models import Device
-from ..services.setup import setup_missing
 
 bp = Blueprint("status", __name__, url_prefix="/api/status")
 
@@ -30,7 +29,6 @@ def devices():
                 "created_at": _timestamp(device.created_at),
                 "paired_at": _timestamp(device.paired_at),
                 "last_seen_at": _timestamp(device.last_seen_at),
-                "setup_missing": setup_missing(device.config) if device.config else None,
             }
             for device in all_devices
         }

@@ -79,7 +79,7 @@ def test_unpair_with_config_also_resets_settings_and_linked_accounts(app, client
     assert config["pairing_code"] is not None
     assert (config["interval"], config["weather"]["location"], config["tfl"]["stop_ids"]) == (15, "", [])
     assert config["glowmarkt"] == {"username": None, "password": None}
-    assert config["setup_missing"] == ["a weather location", "a postcode", "a bus or tube stop"]
+    assert config["notice_board"] == {"postcode": None}
     with app.app_context():
         assert db.session.scalar(select(func.count()).select_from(SpotifyToken)) == 0
 
