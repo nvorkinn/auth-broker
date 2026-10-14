@@ -2,7 +2,7 @@
 
     @bp.get("/config")
     @require_device_auth(roles={"renderer"})
-    @documented("The device's config.", response=ConfigResponse, device_auth=True)
+    @documented("The device's config.", response=ConfigResponse, device_auth=True, headers=[DEVICE_NAME])
     def get_config(device_id): ...
 
 The routes and the document can't drift: the document is read off the Flask URL map. A route not
@@ -11,8 +11,8 @@ generates its models from; regenerate it with `python scripts/export_openapi.py`
 
 import json
 import re
-from collections.abc import Callable
-from typing import Any
+from collections.abc import Callable, Sequence
+from typing import Any, NamedTuple
 
 from flask import Flask
 from pydantic import BaseModel
@@ -23,6 +23,17 @@ from .contract import API_VERSION, Error
 _ATTRIBUTE = "__openapi__"
 _FLASK_PARAMETER = re.compile(r"<(?:[^:>]+:)?([^>]+)>")
 _DEVICE_AUTH = "deviceSecret"
+# OpenAPI says a header parameter with one of these names is ignored: the credential is declared as a security
+# scheme, and the media types by the request body.
+_NOT_PARAMETERS = {"accept", "content-type", "authorization"}
+
+
+class Header(NamedTuple):
+    """A request header a route reads, declared once so the route and the spec use the same name."""
+
+    name: str
+    description: str
+    required: bool = False
 
 
 class _PlainSchema(GenerateJsonSchema):
@@ -34,16 +45,31 @@ class _PlainSchema(GenerateJsonSchema):
 
 
 def documented(
-    summary: str, *, response: type[BaseModel], device_auth: bool = False, not_found: bool = False
+    summary: str,
+    *,
+    response: type[BaseModel],
+    device_auth: bool = False,
+    not_found: bool = False,
+    headers: Sequence[Header] = (),
 ) -> Callable:
     """Declares a view's 200 response model. `device_auth` adds the bearer-secret scheme and its
-    401 and 403; `not_found` adds a 404."""
+    401 and 403; `not_found` adds a 404; `headers` are the request headers the view reads (not
+    Authorization, which `device_auth` covers)."""
+    for header in headers:
+        if header.name.lower() in _NOT_PARAMETERS:
+            raise ValueError(f"{header.name} can't be a header parameter; see _NOT_PARAMETERS")
 
     def decorator(view: Callable) -> Callable:
         setattr(
             view,
             _ATTRIBUTE,
-            {"summary": summary, "response": response, "device_auth": device_auth, "not_found": not_found},
+            {
+                "summary": summary,
+                "response": response,
+                "device_auth": device_auth,
+                "not_found": not_found,
+                "headers": tuple(headers),
+            },
         )
         return view
 
@@ -62,6 +88,16 @@ def _operation(rule_path: str, meta: dict[str, Any]) -> dict[str, Any]:
     parameters = [
         {"name": name, "in": "path", "required": True, "schema": {"type": "string"}}
         for name in _FLASK_PARAMETER.findall(rule_path)
+    ]
+    parameters += [
+        {
+            "name": header.name,
+            "in": "header",
+            "required": header.required,
+            "description": header.description,
+            "schema": {"type": "string"},
+        }
+        for header in meta["headers"]
     ]
     if parameters:
         operation["parameters"] = parameters

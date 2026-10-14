@@ -8,9 +8,12 @@ from ..auth import hash_secret, require_device_auth, with_retry_after
 from ..contract import ConfigResponse, Glowmarkt, NoticeBoard, Screen, Spotify, Tfl, Weather
 from ..db import db
 from ..models import Device, DeviceConfig, GlowmarktCredentials
-from ..openapi import documented
+from ..openapi import Header, documented
 from ..services import pairing, registration
 from ..services.setup import setup_missing
+
+# Cosmetic: the Pi's own DEVICE_ID, so logs and admin output show a name instead of an opaque id.
+DEVICE_NAME = Header("X-Device-Name", "The device's own name, for logs and admin output. Never its identity.")
 
 bp = Blueprint("devices", __name__, url_prefix="/api/devices")
 config_bp = Blueprint("config", __name__, url_prefix="/api")
@@ -75,7 +78,7 @@ def _update_device_name(device_id: str) -> None:
     DEVICE_ID (sent as X-Device-Name on every config poll) -- a purely cosmetic
     label for logs/admin output, never the device's real identity, so a rename
     on the Pi just needs its next poll to take effect here, no re-pairing."""
-    name = request.headers.get("X-Device-Name", "").strip()
+    name = request.headers.get(DEVICE_NAME.name, "").strip()
     if name:
         db.session.get(Device, device_id).device_name = name
         db.session.commit()
@@ -83,7 +86,7 @@ def _update_device_name(device_id: str) -> None:
 
 @config_bp.get("/config")
 @require_device_auth(roles={"renderer"})
-@documented("The renderer's config.", response=ConfigResponse, device_auth=True, not_found=True)
+@documented("The renderer's config.", response=ConfigResponse, device_auth=True, not_found=True, headers=[DEVICE_NAME])
 def get_config(device_id):
     """Polled by the renderer, here or as /api/config with no device_id. Bundles the device's own
     settings together with the shared app-level API keys, so a key rotation doesn't require

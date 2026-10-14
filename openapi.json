@@ -9,6 +9,17 @@
     "/api/config": {
       "get": {
         "summary": "The renderer's config.",
+        "parameters": [
+          {
+            "name": "X-Device-Name",
+            "in": "header",
+            "required": false,
+            "description": "The device's own name, for logs and admin output. Never its identity.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
         "security": [
           {
             "deviceSecret": []
