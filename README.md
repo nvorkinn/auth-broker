@@ -384,8 +384,9 @@ checkout, where `src/` is gitignored and `pytest.ini` puts it on the import path
 against the latest release, with nothing here to bump (and, in exchange, a build is only as repeatable as the latest
 page: a new contract release changes the next build). A cached `docker build` keeps the source it had;
 `--no-cache-filter countdown-api` refreshes it, and `--build-arg COUNTDOWN_API_LATEST=<URL>` points the stage at
-another `latest.json`. The hash comes from the same page as the version, so it catches a corrupt download, not a
-compromised page.
+another `latest.json`. The stage only accepts a release of `nvorkinn/countdown-api` and a plain `countdown_api` wheel name,
+whatever the page says. The hash comes from the same page as the version, so it catches a corrupt download, not a
+compromised page: whoever controls that page, or that repository, controls what gets built in.
 
 - `broker/routes/devices.py` implements `GET /api/config` by subclassing the generated view: the generated code owns
   the route, the `X-Device-Name` header and the shape of the response, and the broker supplies the bearer-secret
