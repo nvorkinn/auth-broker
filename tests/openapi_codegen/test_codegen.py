@@ -1,5 +1,7 @@
 import importlib
 import json
+import os
+import subprocess
 import sys
 import uuid
 from pathlib import Path
@@ -374,3 +376,31 @@ def test_check_detects_stale_output(tmp_path):
     assert (out / "models.py").read_text() == "# edited\n"
     assert main([str(spec), "--out", str(out)]) == 0
     assert main([str(spec), "--out", str(out), "--check"]) == 0
+
+
+def _cli(*args, seed):
+    """The command line in a fresh process, as CI runs it, with Python's string hashing seeded as given."""
+    return subprocess.run(
+        [sys.executable, "-m", "tools.openapi_codegen", *map(str, args)],
+        cwd=ROOT,
+        env={**os.environ, "PYTHONHASHSEED": str(seed)},
+        capture_output=True,
+        text=True,
+    )
+
+
+@pytest.mark.parametrize("which", ["device", "rich"])
+def test_output_does_not_depend_on_the_hash_seed(tmp_path, which):
+    """Iterating a set is in a different order in every process, so anything generated from one would pass
+    --check where it was written and fail it in CI. The in-process test above can't see that."""
+    spec = ROOT / "openapi.json"
+    if which == "rich":
+        spec = tmp_path / "rich.json"
+        spec.write_text(json.dumps(RICH_SPEC))
+    out = tmp_path / "gen"
+
+    written = _cli(spec, "--out", out, seed=1)
+    assert written.returncode == 0, written.stderr
+    for seed in (2, 3, 4, 5, 6):
+        checked = _cli(spec, "--out", out, "--check", seed=seed)
+        assert checked.returncode == 0, f"seed {seed} disagrees with seed 1:\n{checked.stderr}"
