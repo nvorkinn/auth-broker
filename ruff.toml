@@ -1,6 +1,6 @@
 line-length = 120
 target-version = "py312"
-# src/ is the source of countdown-api, fetched by scripts/fetch_countdown_api.py, not edited here.
+# src/ is the source of countdown-api, fetched by the Dockerfile's countdown-api stage, not edited here.
 extend-exclude = [".venv", "src"]
 
 [lint]
