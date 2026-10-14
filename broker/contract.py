@@ -57,7 +57,6 @@ class ConfigResponse(BaseModel):
     device_id: str
     # Seconds between updates.
     interval: int
-    extra_probe: str
     screen: Screen
     weather: Weather
     notice_board: NoticeBoard

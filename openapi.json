@@ -76,9 +76,6 @@
           "interval": {
             "type": "integer"
           },
-          "extra_probe": {
-            "type": "string"
-          },
           "screen": {
             "$ref": "#/components/schemas/Screen"
           },
@@ -117,7 +114,6 @@
         "required": [
           "device_id",
           "interval",
-          "extra_probe",
           "screen",
           "weather",
           "notice_board",
