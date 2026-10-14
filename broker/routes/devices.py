@@ -10,7 +10,6 @@ from ..db import db
 from ..models import Device, DeviceConfig, GlowmarktCredentials
 from ..openapi import Header, documented
 from ..services import pairing, registration
-from ..services.setup import setup_missing
 
 # Cosmetic: the Pi's own DEVICE_ID, so logs and admin output show a name instead of an opaque id.
 DEVICE_NAME = Header("X-Device-Name", "The device's own name, for logs and admin output. Never its identity.")
@@ -107,6 +106,5 @@ def get_config(device_id):
         spotify=Spotify(enabled=config.spotify_enabled),
         glowmarkt=Glowmarkt(username=(creds and creds.username) or None, password=creds.password if creds else None),
         pairing_code=pairing.current_code_for(device_id),
-        setup_missing=setup_missing(config),
     )
     return jsonify(response.model_dump(mode="json"))

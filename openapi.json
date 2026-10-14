@@ -114,12 +114,6 @@
                 "type": "null"
               }
             ]
-          },
-          "setup_missing": {
-            "items": {
-              "type": "string"
-            },
-            "type": "array"
           }
         },
         "required": [
@@ -131,8 +125,7 @@
           "tfl",
           "spotify",
           "glowmarkt",
-          "pairing_code",
-          "setup_missing"
+          "pairing_code"
         ],
         "title": "ConfigResponse",
         "type": "object"

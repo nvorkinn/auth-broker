@@ -36,9 +36,9 @@ a Spotify token.
      fresh one with `flask devices code <device_id>` (below) or from the Pi via
      `POST /api/devices/pairing-code`.
 
-   Once paired, `pairing_code` is `null`. `setup_missing` in the same response
-   lists what the device still needs before it's worth showing (a weather
-   location, a postcode, a bus or tube stop), so the Pi can tell the recipient.
+   Once paired, `pairing_code` is `null`. A new device's weather location,
+   postcode and stop ids are empty (`""`, `null`, `[]`), which is valid; the
+   renderer's panels report for themselves that they need configuring.
    A user can own several screens. Each has its own pages at `/device/<id>` (settings),
    `/device/<id>/name`, `/device/<id>/spotify/disconnect` and `/device/<id>/display/unlink`, and the
    same paths without the id (`/device`, ...) are for the one paired most recently. A screen that isn't
@@ -250,16 +250,14 @@ The response is keyed by device id:
     "device_name": "camilla",
     "created_at": "2026-09-01T10:00:00+00:00",
     "paired_at": "2026-09-01T10:05:00+00:00",
-    "last_seen_at": "2026-10-05T18:01:00+00:00",
-    "setup_missing": []
+    "last_seen_at": "2026-10-05T18:01:00+00:00"
   }
 }
 ```
 
 `last_seen_at` is when the device last made any authenticated request (config,
 Spotify, frame). It's updated at most once a minute, and is `null` until the
-device's first request after this was added. `setup_missing` is the same list
-the config poll returns, or `null` if the device has no settings row.
+device's first request after this was added.
 
 A sensor for one device's last check-in:
 

@@ -4,6 +4,7 @@ from unittest.mock import patch
 import pytest
 from sqlalchemy import func, select, update
 
+from broker.contract import ConfigResponse
 from broker.db import db
 from broker.models import Device, DeviceConfig, PairingCode
 
@@ -80,7 +81,6 @@ def test_get_config_returns_defaults_and_shared_keys(client, register_device):
         "spotify": {"enabled": False},
         "glowmarkt": {"username": None, "password": None},
         "pairing_code": body["pairing_code"],
-        "setup_missing": ["a weather location", "a postcode", "a bus or tube stop"],
     }
 
 
@@ -286,36 +286,26 @@ def test_a_forced_code_for_a_paired_device_is_shown_until_redeemed(client, regis
     assert _get_pairing_code(client, device_id, secret) is None
 
 
-def _setup_missing(client, device_id, secret):
+def _config_body(client, device_id, secret):
     response = client.get("/api/config", headers={"Authorization": f"Bearer {secret}"})
-    return response.get_json()["setup_missing"]
+    assert response.status_code == 200
+    return response.get_json()
 
 
-def test_setup_missing_lists_what_is_still_needed(app, client, register_device):
+def test_get_config_is_valid_with_no_location_postcode_or_stops(app, client, register_device):
     device_id, secret = register_device()
-    assert _setup_missing(client, device_id, secret) == ["a weather location", "a postcode", "a bus or tube stop"]
+    with app.app_context():
+        config = db.session.get(DeviceConfig, device_id)
+        config.weather_location, config.postcode, config.tfl_stop_ids = "", "", []
+        db.session.commit()
 
-    def configure(**columns):
-        with app.app_context():
-            config = db.session.get(DeviceConfig, device_id)
-            for column, value in columns.items():
-                setattr(config, column, value)
-            db.session.commit()
+    body = _config_body(client, device_id, secret)
 
-    configure(weather_location="London")
-    assert _setup_missing(client, device_id, secret) == ["a postcode", "a bus or tube stop"]
-
-    configure(postcode="SW1A 1AA")
-    assert _setup_missing(client, device_id, secret) == ["a bus or tube stop"]
-
-    configure(weather_location="", tfl_stop_ids=["940GZZLUKNG"])
-    assert _setup_missing(client, device_id, secret) == ["a weather location"]
-
-    configure(weather_location="London", postcode="")
-    assert _setup_missing(client, device_id, secret) == ["a postcode"]
-
-    configure(postcode="SW1A 1AA")
-    assert _setup_missing(client, device_id, secret) == []
+    ConfigResponse.model_validate(body)
+    assert "setup_missing" not in body
+    assert body["weather"]["location"] == ""
+    assert body["notice_board"] == {"postcode": None}
+    assert body["tfl"]["stop_ids"] == []
 
 
 def test_get_config_returns_the_saved_postcode(app, client, register_device):
@@ -336,15 +326,6 @@ def test_get_config_returns_the_saved_orientation(app, client, register_device):
 
     response = client.get("/api/config", headers={"Authorization": f"Bearer {secret}"})
     assert response.get_json()["screen"]["orientation"] == "horizontal"
-
-
-def test_a_blank_weather_location_still_counts_as_missing(app, client, register_device):
-    device_id, secret = register_device()
-    with app.app_context():
-        db.session.get(DeviceConfig, device_id).weather_location = "   "
-        db.session.commit()
-
-    assert "a weather location" in _setup_missing(client, device_id, secret)
 
 
 def test_register_stores_the_size_it_is_given(app, client):
