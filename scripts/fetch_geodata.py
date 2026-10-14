@@ -34,7 +34,8 @@ def _months(now: datetime) -> list[str]:
 def fetch_dbip(out: Path, now: datetime | None = None) -> None:
     for month in _months(now or datetime.now(UTC)):
         try:
-            with urllib.request.urlopen(DBIP_URL.format(month=month), timeout=120) as response:
+            request = urllib.request.Request(DBIP_URL.format(month=month), headers={"User-Agent": "Mozilla/5.0"})
+            with urllib.request.urlopen(request, timeout=120) as response:
                 with gzip.open(response) as mmdb, open(out / "dbip-city-lite.mmdb", "wb") as f:
                     shutil.copyfileobj(mmdb, f)
             print(f"DB-IP City Lite {month}")

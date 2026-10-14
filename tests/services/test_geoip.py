@@ -1,3 +1,4 @@
+import gzip
 import importlib.util
 import io
 from datetime import datetime
@@ -100,3 +101,19 @@ def test_fetch_tries_this_month_then_last():
     fetch = _fetch_geodata()
     assert fetch._months(datetime(2026, 10, 1)) == ["2026-10", "2026-09"]
     assert fetch._months(datetime(2027, 1, 1)) == ["2027-01", "2026-12"]
+
+
+def test_fetch_dbip_uses_a_browser_user_agent(monkeypatch, tmp_path):
+    fetch = _fetch_geodata()
+    compressed = gzip.compress(b"database")
+
+    def urlopen(request, timeout):
+        assert request.full_url == fetch.DBIP_URL.format(month="2026-10")
+        assert request.get_header("User-agent") == "Mozilla/5.0"
+        assert timeout == 120
+        return io.BytesIO(compressed)
+
+    monkeypatch.setattr(fetch.urllib.request, "urlopen", urlopen)
+    fetch.fetch_dbip(tmp_path, datetime(2026, 10, 1))
+
+    assert (tmp_path / "dbip-city-lite.mmdb").read_bytes() == b"database"
