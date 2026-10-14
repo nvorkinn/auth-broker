@@ -1,6 +1,12 @@
 line-length = 120
 target-version = "py312"
-extend-exclude = [".venv"]
+# src/ is the source of countdown-api, fetched by scripts/fetch_countdown_api.py, not edited here.
+extend-exclude = [".venv", "src"]
 
 [lint]
 select = ["E", "F", "I", "UP", "B"]
+
+[lint.isort]
+# Ruff finds first-party modules on disk, and src/ only exists once the script has run; this keeps imports sorted the
+# same way with and without it.
+known-third-party = ["countdown_api"]

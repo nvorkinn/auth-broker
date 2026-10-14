@@ -366,21 +366,25 @@ by the first migration on its first start, keeping its data.
 The API between the broker and the renderer ([pi-dashboard](https://github.com/nvorkinn/pi-dashboard)) is defined in
 neither repository but in [countdown-api](https://github.com/nvorkinn/countdown-api): an OpenAPI file, and the Python
 package that [openapi-codegen](https://github.com/nvorkinn/openapi-codegen) generates from it (the Pydantic models,
-Flask views for this side, and a `requests` client for the renderer's). It isn't on PyPI; its **latest page**,
-https://nvorkinn.github.io/countdown-api/, is a package index, and its `constraints.txt` says which version is the
-latest.
+Flask views for this side, and a `requests` client for the renderer's). Each release is published as a wheel, and
+the project's **latest page**, https://nvorkinn.github.io/countdown-api/, says which release is the latest.
 
-Here it is an ordinary dependency, in `requirements.txt`:
+Here it is source code fetched into `src/`, by a small script:
 
-```
---extra-index-url https://nvorkinn.github.io/countdown-api/simple/
--c https://nvorkinn.github.io/countdown-api/constraints.txt
-countdown-api[server]
+```bash
+python scripts/fetch_countdown_api.py        # into src/; stdlib only
 ```
 
-`countdown-api[server]` adds Flask to the models; the constraints file is read when pip installs, so the latest
-release is installed whatever it is, with no version to bump here (and, in exchange, a build is only as repeatable as
-the latest page: a new contract release changes the next build).
+It reads the latest page's [`latest.json`](https://nvorkinn.github.io/countdown-api/latest.json), which names the
+latest release's wheel and its SHA-256, downloads that wheel from the release, checks it against the hash, and
+unpacks its `countdown_api/` package (the Pydantic models, the Flask views for this side, the `requests` client for
+the renderer's, and the contract itself, `openapi.yaml`) into `src/`. Nothing in it is committed. `pytest.ini`
+puts `src/` on the import path for the tests; the Dockerfile fetches it in a build stage and sets `PYTHONPATH`.
+CI and the image therefore always build against the latest release, with nothing here to bump (and, in exchange, a
+build is only as repeatable as the latest page: a new contract release changes the next build). A cached
+`docker build` keeps the source it had; `--no-cache-filter countdown-api` refreshes it. `COUNTDOWN_API_LATEST` points
+the script at another `latest.json` (a URL or a file). The hash comes from the same page as the version, so it
+catches a corrupt download, not a compromised page.
 
 - `broker/routes/devices.py` implements `GET /api/config` by subclassing the generated view: the generated code owns
   the route, the `X-Device-Name` header and the shape of the response, and the broker supplies the bearer-secret
@@ -396,6 +400,7 @@ Change the format in countdown-api, by adding fields: a device on an older rende
 
 ```bash
 pip install -r requirements-dev.txt
+python scripts/fetch_countdown_api.py    # the source of countdown-api, into src/ (see above)
 python -m pytest --cov=broker --cov-report=term-missing
 ```
 

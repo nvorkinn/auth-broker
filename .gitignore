@@ -14,3 +14,5 @@ coverage.xml
 htmlcov/
 # IP location data, fetched into the image at build time (scripts/fetch_geodata.py).
 /geodata/
+# The source of countdown-api, fetched by scripts/fetch_countdown_api.py.
+/src/

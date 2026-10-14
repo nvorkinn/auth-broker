@@ -24,6 +24,11 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements-dev.txt
 
+      # The source of the latest countdown-api, never committed: this fails if the contract has moved to something
+      # the broker doesn't implement.
+      - name: Fetch countdown-api
+        run: python scripts/fetch_countdown_api.py
+
       - name: Lint
         run: ruff check .
 
