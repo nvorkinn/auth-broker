@@ -373,7 +373,8 @@ changing either:
 python scripts/export_openapi.py   # then commit openapi.json
 ```
 
-`tests/test_openapi.py` fails while the committed file is stale. Change the format by adding fields (bump
+With `pre-commit install` that happens on commit (the hook rewrites the file and fails once; add it and commit
+again). `tests/test_openapi.py` fails while the committed file is stale, so CI catches it either way. Change the format by adding fields (bump
 `API_VERSION` in `contract.py`): a device on an older renderer ignores fields it doesn't know.
 
 ## Running tests
