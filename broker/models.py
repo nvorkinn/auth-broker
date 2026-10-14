@@ -53,6 +53,13 @@ class PairingCode(db.Model):
 
 
 ORIENTATIONS = ("horizontal", "vertical")
+# How the screen draws each stop's departures: the API contract's tfl.style, with labels for the config page.
+TFL_STYLES = {
+    "classic": "Classic: a row per departure",
+    "hero": "Hero: the next departure big",
+    "grouped": "Grouped: a row per route, with its next few times",
+    "card": "Card: each stop in a rounded card",
+}
 
 
 class DeviceConfig(db.Model):
@@ -64,6 +71,8 @@ class DeviceConfig(db.Model):
     postcode: Mapped[str] = mapped_column(String, default="", server_default=text("''"))
     spotify_enabled: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("0"))
     tfl_stop_ids: Mapped[list[str]] = mapped_column(JSON, default=list, server_default=text("'[]'"))
+    # How each stop's departures are drawn, one of TFL_STYLES.
+    tfl_style: Mapped[str] = mapped_column(String, default="classic", server_default=text("'classic'"))
     # How the screen is mounted, one of ORIENTATIONS.
     orientation: Mapped[str] = mapped_column(String, default="vertical", server_default=text("'vertical'"))
     # The screen's size in pixels as it reported at registration; 480x800 for screens registered before it did.

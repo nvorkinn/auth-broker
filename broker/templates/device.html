@@ -88,6 +88,17 @@
         <div class="card-header">
             <h2 class="card-title">TfL</h2>
         </div>
+        <div class="form-grid">
+            <div class="form-group">
+                <label for="tfl_style">Style</label>
+                <select id="tfl_style" name="tfl_style" aria-describedby="tfl_style_hint">
+                    {% for style, label in tfl_styles.items() %}
+                        <option value="{{ style }}" {% if config.tfl_style == style %}selected{% endif %}>{{ label }}</option>
+                    {% endfor %}
+                </select>
+                <p id="tfl_style_hint" class="form-hint">How your screen draws each stop's departures.</p>
+            </div>
+        </div>
         <div class="search-container">
             <input type="text" id="searchInput" class="search-input" placeholder="Search for a station or stop" autocomplete="off">
             <span id="searchSpinner" class="search-spinner">Searching…</span>
