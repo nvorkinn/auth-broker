@@ -281,6 +281,7 @@ broker/
   services/   the broker's own logic that more than one route needs (pairing, registration, setup)
   clients/    everything that talks to an outside API (Spotify, TfL, Open-Meteo)
   models.py   the schema; db.py and migrations/ manage it
+  api.py      the routes of the countdown API contract (vendor/countdown-api): the registry they are served from
   auth.py     the decorators that guard routes
   config.py   environment variables → app.config
   cli.py      `flask devices ...` admin commands
@@ -365,27 +366,34 @@ by the first migration on its first start, keeping its data.
 
 ## The device API contract
 
-What the renderer polls (`GET /api/config`) is typed in `broker/contract.py` (pydantic), separate from the
-SQLAlchemy models so a column change and a wire-format change are independent. `openapi.json` at the repo
-root is generated from those models and the routes that declare themselves with `@documented`; the renderer
-([pi-dashboard](https://github.com/nvorkinn/pi-dashboard)) generates its own models from a copy of it. After
-changing either:
+The contract between the broker and the renderer ([pi-dashboard](https://github.com/nvorkinn/pi-dashboard)) is
+one OpenAPI file, in [nvorkinn/countdown-api](https://github.com/nvorkinn/countdown-api), which both sides use as
+the submodule `vendor/countdown-api`. [openapi-codegen](https://github.com/nvorkinn/openapi-codegen) turns it into
+the Pydantic models, the renderer's `requests` client and the server side below, and the result is committed
+there, so a contract change is a change to the code.
 
-```bash
-python scripts/export_openapi.py   # then commit openapi.json
+So far only `GET /api/config` is in it. The broker serves it through `broker/api.py`: `api` is the registry the
+generated code provides, and `routes/devices.py` registers what answers each operation:
+
+```python
+@api.get_config()
+def get_config(*, device_id, x_device_name=None) -> ConfigResponse: ...
 ```
 
-With `pre-commit install` that happens on commit (the hook rewrites the file and fails once; add it and commit
-again). `tests/test_openapi.py` fails while the committed file is stale, so CI catches it either way. Change the format by adding fields (bump
-`API_VERSION` in `contract.py`): a device on an older renderer ignores fields it doesn't know.
+- **Who may call it** is in the contract: the operation's `security` names the `deviceSecret` scheme with the role
+  (`renderer`) as its scope. `broker/api.py` registers the one authenticator for that scheme, which is
+  `auth.authenticate_device`, the same check as `require_device_auth`, and the `device_id` it provides is the
+  handler's argument.
+- **Nothing can be forgotten.** `create_app()` ends with `api.register(app)`, which refuses to start the app if the
+  contract has an operation nothing here registers, a security scheme without an authenticator, or a handler
+  that doesn't fit its operation. So when the submodule moves to a contract that adds a route, the build fails
+  (every test uses `create_app()`) until the broker implements it.
+- **Changing the contract** is a PR in countdown-api, which regenerates its code and keeps it current. Then here:
+  `git -C vendor/countdown-api fetch && git -C vendor/countdown-api checkout <commit>`, commit the new pointer
+  (Dependabot opens that PR weekly), and implement what the build says is missing. Change the format by adding
+  fields: a device on an older renderer ignores fields it doesn't know.
 
-### Generating code from an OpenAPI file
-
-The generator that turns an OpenAPI 3.x JSON or YAML file into Pydantic models, `requests` clients and extensible
-Flask blueprints now lives in its own repository,
-[nvorkinn/openapi-codegen](https://github.com/nvorkinn/openapi-codegen) (it was `tools/openapi_codegen` here).
-The broker doesn't use it: it builds `openapi.json` from `broker/contract.py` and the routes (above), and the
-renderer generates its models from that file.
+The broker's other routes are plain Flask blueprints and not in the contract.
 
 ## Running tests
 
