@@ -51,3 +51,30 @@ def test_a_live_response_has_exactly_the_specs_fields(client, register_device):
     body = client.get("/api/config", headers={"Authorization": f"Bearer {secret}"}).get_json()
     schema = json.loads(SPEC_FILE.read_text())["components"]["schemas"]["ConfigResponse"]
     assert set(body) == set(schema["properties"])
+
+
+def test_a_path_parameter_is_declared_and_the_flask_syntax_converted():
+    """No documented route has one yet, so this uses a stand-in."""
+    from flask import Flask
+    from pydantic import BaseModel
+
+    from broker.openapi import documented
+
+    class Thing(BaseModel):
+        name: str
+
+    stand_in = Flask(__name__)
+
+    @stand_in.get("/things/<int:thing_id>")
+    @documented("A thing.", response=Thing)
+    def get_thing(thing_id): ...
+
+    spec = build_spec(stand_in)
+
+    operation = spec["paths"]["/things/{thing_id}"]["get"]
+    assert operation["parameters"] == [
+        {"name": "thing_id", "in": "path", "required": True, "schema": {"type": "string"}}
+    ]
+    assert "security" not in operation
+    assert operation["responses"].keys() == {"200"}
+    assert "Thing" in spec["components"]["schemas"]
