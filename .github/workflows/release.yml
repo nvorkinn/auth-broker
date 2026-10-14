@@ -126,7 +126,7 @@ jobs:
             services: auth-broker fluent-bit victoria-logs victoria-metrics
     environment: ${{ matrix.environment }}
     concurrency:
-      group: ${{ matrix.environment }}
+      group: ${{ matrix.environment }}-${{ needs.tag.outputs.value }}
       cancel-in-progress: false
     env: &deploy-env
       TAG: ${{ needs.tag.outputs.value }}
@@ -177,7 +177,7 @@ jobs:
             services: authentik-config
     environment: ${{ matrix.environment }}
     concurrency:
-      group: ${{ matrix.environment }}
+      group: ${{ matrix.environment }}-${{ needs.tag.outputs.value }}
       cancel-in-progress: false
     env: *deploy-env
     steps: *deploy-steps
