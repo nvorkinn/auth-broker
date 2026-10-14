@@ -11,9 +11,11 @@ from .schema import SpecError
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="python -m tools.openapi_codegen",
-        description="Generate Pydantic models, requests clients and Flask blueprints from an OpenAPI 3.x JSON file.",
+        description=(
+            "Generate Pydantic models, requests clients and Flask blueprints from an OpenAPI 3.x JSON or YAML file."
+        ),
     )
-    parser.add_argument("spec", type=Path, help="the openapi.json to read")
+    parser.add_argument("spec", type=Path, help="the OpenAPI file to read: .json, or .yaml/.yml (needs PyYAML)")
     parser.add_argument("--out", type=Path, required=True, help="the package directory to write")
     parser.add_argument(
         "--check",

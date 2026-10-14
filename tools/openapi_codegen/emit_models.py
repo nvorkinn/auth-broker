@@ -154,7 +154,8 @@ def _dependency_order(models: dict[str, ModelDef], aliases: dict[str, AliasDef])
             return
         state[name] = 1
         bases = models[name].bases if name in models else []
-        for dep in sorted(deps[name], key=lambda d: d not in bases):
+        # By name within each group: deps is a frozenset, whose order changes with every process's hash seed.
+        for dep in sorted(deps[name], key=lambda d: (d not in bases, d)):
             if dep not in deps:
                 continue
             # A field may refer to a subclass of a model still being defined; that one has to wait for it.
