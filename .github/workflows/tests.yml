@@ -14,12 +14,15 @@ jobs:
   test:
     runs-on: ubuntu-latest
     steps:
+      # vendor/countdown-api is a submodule: the API contract and the code generated from it.
       - uses: actions/checkout@v7
+        with:
+          submodules: true
 
       - uses: actions/setup-python@v7
         with:
           cache: pip
-          python-version: "3.12"
+          python-version: "3.14"
 
       - name: Install dependencies
         run: pip install -r requirements-dev.txt
@@ -71,11 +74,17 @@ jobs:
             check: validate --config /etc/caddy/Caddyfile --adapter caddyfile
           - image: fluent-bit
             check: --dry-run --config /fluent-bit/etc/fluent-bit.yaml
+          # The broker itself: its CMD is overridden, and importing the submodule's code checks it was copied in and installed.
+          - image: broker
+            context: .
+            check: python -c "import countdown_api.blueprints"
     steps:
       - uses: actions/checkout@v7
+        with:
+          submodules: true
 
       - name: Build image
-        run: docker build -t auth-broker-${{ matrix.image }} ${{ matrix.image }}
+        run: docker build -t auth-broker-${{ matrix.image }} ${{ matrix.context || matrix.image }}
 
       - name: Check config
         run: docker run --rm auth-broker-${{ matrix.image }} ${{ matrix.check }}

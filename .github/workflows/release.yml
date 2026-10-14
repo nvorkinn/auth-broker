@@ -47,6 +47,9 @@ jobs:
       IMAGE: ghcr.io/${{ github.repository_owner }}/${{ matrix.image }}
     steps:
       - uses: actions/checkout@v7
+        with:
+          # The broker image bakes in vendor/countdown-api; the infra images don't use it.
+          submodules: ${{ matrix.context == '.' }}
 
       - name: Log in to GitHub Container Registry
         uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4

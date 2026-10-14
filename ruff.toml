@@ -1,6 +1,7 @@
 line-length = 120
-target-version = "py312"
-extend-exclude = [".venv"]
+target-version = "py314"
+# vendor/ is the countdown-api submodule: linted by its own repository.
+extend-exclude = [".venv", "vendor"]
 
 [lint]
 select = ["E", "F", "I", "UP", "B"]

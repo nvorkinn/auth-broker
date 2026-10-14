@@ -290,8 +290,12 @@ broker/
 
 ## Running locally
 
+Python 3.14 is needed. `vendor/countdown-api` is a git submodule (the API contract and the code generated from it),
+installed by `requirements.txt` in editable mode, so clone with it and update it with the repository:
+
 ```bash
-python -m venv .venv && source .venv/bin/activate
+git clone --recurse-submodules https://github.com/nvorkinn/auth-broker.git   # or, in a clone: git submodule update --init
+python3.14 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 cp secrets/broker.env.example .env  # fill in Spotify app credentials + a random FLASK_SECRET_KEY
 export SPOTIFY_REDIRECT_URI=https://auth.nikolaivorkinn.com/auth/spotify/callback

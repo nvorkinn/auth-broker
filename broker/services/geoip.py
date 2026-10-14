@@ -43,7 +43,7 @@ def _load(directory: str) -> GeoData | None:
                 Place(name, float(lat), float(lon), int(population or 0))
                 for name, lat, lon, population in (line.rstrip("\n").split("\t") for line in f)
             ]
-    except (OSError, ValueError, maxminddb.InvalidDatabaseError):
+    except OSError, ValueError, maxminddb.InvalidDatabaseError:
         current_app.logger.info("No IP location data in %s, so no weather location suggestions", directory)
         return None
     return GeoData(reader, places)
