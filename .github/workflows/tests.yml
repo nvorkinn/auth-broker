@@ -24,11 +24,6 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements-dev.txt
 
-      # The source of the latest countdown-api, never committed: this fails if the contract has moved to something
-      # the broker doesn't implement. It is the Dockerfile's countdown-api stage, exported into src/.
-      - name: Fetch countdown-api
-        run: docker build --target countdown-api-src --output src .
-
       - name: Lint
         run: ruff check .
 

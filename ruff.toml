@@ -1,12 +1,6 @@
 line-length = 120
 target-version = "py312"
-# src/ is the source of countdown-api, fetched by the Dockerfile's countdown-api stage, not edited here.
-extend-exclude = [".venv", "src"]
+extend-exclude = [".venv"]
 
 [lint]
 select = ["E", "F", "I", "UP", "B"]
-
-[lint.isort]
-# Ruff finds first-party modules on disk, and src/ only exists once the script has run; this keeps imports sorted the
-# same way with and without it.
-known-third-party = ["countdown_api"]

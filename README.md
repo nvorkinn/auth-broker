@@ -369,24 +369,18 @@ package that [openapi-codegen](https://github.com/nvorkinn/openapi-codegen) gene
 Flask views for this side, and a `requests` client for the renderer's). Each release is published as a wheel, and
 the project's **latest page**, https://nvorkinn.github.io/countdown-api/, says which release is the latest.
 
-Here it is source code fetched into `src/` as part of the build, by a stage of the `Dockerfile`:
+Here it is an ordinary dependency, one line of `requirements.txt`:
 
-```bash
-docker build --target countdown-api-src --output src .        # into src/
+```
+-r https://nvorkinn.github.io/countdown-api/requirements.txt
 ```
 
-The stage reads the latest page's [`latest.json`](https://nvorkinn.github.io/countdown-api/latest.json), which names
-the latest release's wheel and its SHA-256, downloads that wheel from the release, checks it against the hash, and
-unpacks its `countdown_api/` package (the Pydantic models, the Flask views for this side, the `requests` client for
-the renderer's, and the contract itself, `openapi.yaml`). Plain `curl`, `jq`, `sha256sum` and `unzip`, no Python. The
-image copies the result to `/app/src` and sets `PYTHONPATH`; the command above exports the same files for CI and for a
-checkout, where `src/` is gitignored and `pytest.ini` puts it on the import path. So CI and the image always build
-against the latest release, with nothing here to bump (and, in exchange, a build is only as repeatable as the latest
-page: a new contract release changes the next build). A cached `docker build` keeps the source it had;
-`--no-cache-filter countdown-api` refreshes it, and `--build-arg COUNTDOWN_API_LATEST=<URL>` points the stage at
-another `latest.json`. The stage only accepts a release of `nvorkinn/countdown-api` and a plain `countdown_api` wheel name,
-whatever the page says. The hash comes from the same page as the version, so it catches a corrupt download, not a
-compromised page: whoever controls that page, or that repository, controls what gets built in.
+That file, published on the latest page with each release, is just the URL of the latest release's wheel, so pip
+installs it as a direct URL: nothing is looked up in an index, and no name on PyPI can stand in for it. The wheel holds
+the whole `countdown_api` package (the Pydantic models, the Flask views for this side, the `requests` client for the
+renderer's, and the contract itself, `openapi.yaml`); this side uses the models and the views. CI and the image therefore always build against the latest release, with nothing here to bump
+(and, in exchange, a build is only as repeatable as the latest page: a new contract release changes the next build,
+and whoever controls that page, or the countdown-api repository, controls what is installed).
 
 - `broker/routes/devices.py` implements `GET /api/config` by subclassing the generated view: the generated code owns
   the route, the `X-Device-Name` header and the shape of the response, and the broker supplies the bearer-secret
@@ -402,7 +396,6 @@ Change the format in countdown-api, by adding fields: a device on an older rende
 
 ```bash
 pip install -r requirements-dev.txt
-docker build --target countdown-api-src --output src .    # the source of countdown-api, into src/ (see above)
 python -m pytest --cov=broker --cov-report=term-missing
 ```
 
