@@ -2,4 +2,3 @@
 pytest
 pytest-cov
 ruff==0.16.10
-pyyaml
