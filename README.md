@@ -379,42 +379,11 @@ again). `tests/test_openapi.py` fails while the committed file is stale, so CI c
 
 ### Generating code from an OpenAPI file
 
-`tools/openapi_codegen` turns any OpenAPI 3.x JSON or YAML file into a Python package (the generator itself is
-standard library only; reading YAML needs `pip install pyyaml`, which `requirements-dev.txt` has):
-
-```bash
-python -m tools.openapi_codegen openapi.json --out some/package   # or openapi.yaml; add --check to fail if stale
-```
-
-- `models.py`: Pydantic models. An optional field is `T | None = None`; a required field that may be `null`
-  is `T | None` with no default.
-- `clients/<route>.py`: one `<Route>Client` per route with a `get()`, `post()`, … per verb. Headers, query and
-  path parameters and the body are arguments. `Client(base_url, session=None, auth_token=None)` calls through
-  the `requests.Session` if given, else `requests.request`; an error status raises `ApiError`.
-- `blueprints/<route>.py`: one Flask `MethodView` per route plus `create_blueprint()`. Subclass the view and
-  override `handle_<verb>()` (and `authenticate()`, which refuses every route that declares security until you
-  do); anything left alone answers 501. `blueprints.register_all(app, *your_views)` wires them up.
-
-```python
-from some.package.blueprints.api_config import ApiConfigView, create_blueprint
-
-
-class ConfigView(ApiConfigView):
-    def authenticate(self, security): ...  # raise ApiHTTPError(401) unless self.bearer_token() is valid
-
-    def handle_get(self, *, x_device_name=None):
-        return ConfigResponse(...)
-
-
-app.register_blueprint(create_blueprint(ConfigView))
-```
-
-Generated files are overwritten on every run, so keep custom logic in subclasses. Only local `$ref`s and
-JSON bodies are supported.
-
-A file named `.yaml` or `.yml` is read as YAML, anything else as JSON. YAML is read the way JSON would mean it: only
-`true`/`false` are booleans (so an enum of `on`, `off`, `yes`, `no` stays strings), dates stay strings, an unquoted
-`200:` key is the status code `"200"`, and a repeated key is an error naming its line.
+The generator that turns an OpenAPI 3.x JSON or YAML file into Pydantic models, `requests` clients and extensible
+Flask blueprints now lives in its own repository,
+[nvorkinn/openapi-codegen](https://github.com/nvorkinn/openapi-codegen) (it was `tools/openapi_codegen` here).
+The broker doesn't use it: it builds `openapi.json` from `broker/contract.py` and the routes (above), and the
+renderer generates its models from that file.
 
 ## Running tests
 
