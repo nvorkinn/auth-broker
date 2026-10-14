@@ -2,9 +2,9 @@ from datetime import UTC, datetime, timedelta
 from unittest.mock import patch
 
 import pytest
+from countdown_api.models import ConfigResponse
 from sqlalchemy import func, select, update
 
-from broker.contract import ConfigResponse
 from broker.db import db
 from broker.models import Device, DeviceConfig, PairingCode
 
