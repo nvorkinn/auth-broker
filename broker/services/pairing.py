@@ -23,11 +23,11 @@ CODE_LENGTH = 6
 CODE_TTL = timedelta(minutes=10)
 
 
-def token_for(renderer_secret_hash: str) -> str:
+def token_for(secret_hash: str) -> str:
     """The token a device derives from its secret to send its owner's browser, hex SHA-256 of
     "pairing:" plus the hex SHA-256 of the secret (auth.hash_secret). One-way from the secret, so
     it's safe in a URL; the device computes the same two hashes and sends nothing extra to register."""
-    return hashlib.sha256(f"pairing:{renderer_secret_hash}".encode()).hexdigest()
+    return hashlib.sha256(f"pairing:{secret_hash}".encode()).hexdigest()
 
 
 def pair_by_token(user: str, token: str) -> str:
