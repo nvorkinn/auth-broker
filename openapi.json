@@ -1,0 +1,279 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "auth-broker device API",
+    "version": "1.0.0",
+    "description": "What a renderer polls the broker for. Generated from broker/contract.py; do not edit."
+  },
+  "paths": {
+    "/api/config": {
+      "get": {
+        "summary": "The renderer's config.",
+        "security": [
+          {
+            "deviceSecret": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or unknown secret.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "A valid secret for a role this endpoint doesn't allow.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "deviceSecret": {
+        "type": "http",
+        "scheme": "bearer"
+      }
+    },
+    "schemas": {
+      "ConfigResponse": {
+        "description": "GET /api/config.",
+        "properties": {
+          "device_id": {
+            "title": "Device Id",
+            "type": "string"
+          },
+          "interval": {
+            "title": "Interval",
+            "type": "integer"
+          },
+          "screen": {
+            "$ref": "#/components/schemas/Screen"
+          },
+          "weather": {
+            "$ref": "#/components/schemas/Weather"
+          },
+          "notice_board": {
+            "$ref": "#/components/schemas/NoticeBoard"
+          },
+          "tfl": {
+            "$ref": "#/components/schemas/Tfl"
+          },
+          "spotify": {
+            "$ref": "#/components/schemas/Spotify"
+          },
+          "glowmarkt": {
+            "$ref": "#/components/schemas/Glowmarkt"
+          },
+          "pairing_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pairing Code"
+          },
+          "setup_missing": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Setup Missing",
+            "type": "array"
+          }
+        },
+        "required": [
+          "device_id",
+          "interval",
+          "screen",
+          "weather",
+          "notice_board",
+          "tfl",
+          "spotify",
+          "glowmarkt",
+          "pairing_code",
+          "setup_missing"
+        ],
+        "title": "ConfigResponse",
+        "type": "object"
+      },
+      "Error": {
+        "properties": {
+          "error": {
+            "title": "Error",
+            "type": "string"
+          }
+        },
+        "required": [
+          "error"
+        ],
+        "title": "Error",
+        "type": "object"
+      },
+      "Glowmarkt": {
+        "properties": {
+          "username": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Username"
+          },
+          "password": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Password"
+          }
+        },
+        "required": [
+          "username",
+          "password"
+        ],
+        "title": "Glowmarkt",
+        "type": "object"
+      },
+      "NoticeBoard": {
+        "properties": {
+          "postcode": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Postcode"
+          }
+        },
+        "required": [
+          "postcode"
+        ],
+        "title": "NoticeBoard",
+        "type": "object"
+      },
+      "Screen": {
+        "properties": {
+          "orientation": {
+            "enum": [
+              "horizontal",
+              "vertical"
+            ],
+            "title": "Orientation",
+            "type": "string"
+          },
+          "width": {
+            "title": "Width",
+            "type": "integer"
+          },
+          "height": {
+            "title": "Height",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "orientation",
+          "width",
+          "height"
+        ],
+        "title": "Screen",
+        "type": "object"
+      },
+      "Spotify": {
+        "properties": {
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "enabled"
+        ],
+        "title": "Spotify",
+        "type": "object"
+      },
+      "Tfl": {
+        "properties": {
+          "app_key": {
+            "title": "App Key",
+            "type": "string"
+          },
+          "stop_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Stop Ids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "app_key",
+          "stop_ids"
+        ],
+        "title": "Tfl",
+        "type": "object"
+      },
+      "Weather": {
+        "properties": {
+          "api_key": {
+            "title": "Api Key",
+            "type": "string"
+          },
+          "location": {
+            "title": "Location",
+            "type": "string"
+          }
+        },
+        "required": [
+          "api_key",
+          "location"
+        ],
+        "title": "Weather",
+        "type": "object"
+      }
+    }
+  }
+}

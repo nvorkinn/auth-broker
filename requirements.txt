@@ -9,3 +9,4 @@ alembic
 werkzeug
 click
 maxminddb
+pydantic

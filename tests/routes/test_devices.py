@@ -308,7 +308,7 @@ def test_setup_missing_lists_what_is_still_needed(app, client, register_device):
     configure(postcode="SW1A 1AA")
     assert _setup_missing(client, device_id, secret) == ["a bus or tube stop"]
 
-    configure(weather_location="", tfl_stop_ids='["940GZZLUKNG"]')
+    configure(weather_location="", tfl_stop_ids=["940GZZLUKNG"])
     assert _setup_missing(client, device_id, secret) == ["a weather location"]
 
     configure(weather_location="London", postcode="")
