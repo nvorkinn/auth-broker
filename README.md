@@ -377,6 +377,40 @@ With `pre-commit install` that happens on commit (the hook rewrites the file and
 again). `tests/test_openapi.py` fails while the committed file is stale, so CI catches it either way. Change the format by adding fields (bump
 `API_VERSION` in `contract.py`): a device on an older renderer ignores fields it doesn't know.
 
+### Generating code from an OpenAPI file
+
+`tools/openapi_codegen` (standard library only) turns any OpenAPI 3.x JSON file into a Python package:
+
+```bash
+python -m tools.openapi_codegen openapi.json --out some/package   # add --check to fail if it is stale
+```
+
+- `models.py`: Pydantic models. An optional field is `T | None = None`; a required field that may be `null`
+  is `T | None` with no default.
+- `clients/<route>.py`: one `<Route>Client` per route with a `get()`, `post()`, … per verb. Headers, query and
+  path parameters and the body are arguments. `Client(base_url, session=None, auth_token=None)` calls through
+  the `requests.Session` if given, else `requests.request`; an error status raises `ApiError`.
+- `blueprints/<route>.py`: one Flask `MethodView` per route plus `create_blueprint()`. Subclass the view and
+  override `handle_<verb>()` (and `authenticate()`, which refuses every route that declares security until you
+  do); anything left alone answers 501. `blueprints.register_all(app, *your_views)` wires them up.
+
+```python
+from some.package.blueprints.api_config import ApiConfigView, create_blueprint
+
+
+class ConfigView(ApiConfigView):
+    def authenticate(self, security): ...  # raise ApiHTTPError(401) unless self.bearer_token() is valid
+
+    def handle_get(self, *, x_device_name=None):
+        return ConfigResponse(...)
+
+
+app.register_blueprint(create_blueprint(ConfigView))
+```
+
+Generated files are overwritten on every run, so keep custom logic in subclasses. Only local `$ref`s and
+JSON bodies are supported.
+
 ## Running tests
 
 ```bash
