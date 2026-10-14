@@ -77,7 +77,7 @@ def test_get_config_returns_defaults_and_shared_keys(client, register_device):
         "screen": {"orientation": "vertical", "width": 480, "height": 800},
         "weather": {"api_key": "test-weather-key", "location": ""},
         "notice_board": {"postcode": None},
-        "tfl": {"app_key": "test-tfl-key", "stop_ids": []},
+        "tfl": {"app_key": "test-tfl-key", "stop_ids": [], "style": "classic"},
         "spotify": {"enabled": False},
         "glowmarkt": {"username": None, "password": None},
         "pairing_code": body["pairing_code"],
@@ -345,3 +345,14 @@ def test_register_stores_the_size_it_is_given(app, client):
 def test_register_rejects_a_missing_or_bad_screen_size(client, extra):
     response = client.post("/api/devices/register", json={"secret": "display-secret-0123456789", **extra})
     assert response.status_code == 400
+
+
+def test_get_config_returns_the_saved_tfl_style(app, client, register_device):
+    device_id, secret = register_device()
+    headers = {"Authorization": f"Bearer {secret}"}
+    assert client.get("/api/config", headers=headers).get_json()["tfl"]["style"] == "classic"
+    with app.app_context():
+        db.session.get(DeviceConfig, device_id).tfl_style = "grouped"
+        db.session.commit()
+
+    assert client.get("/api/config", headers=headers).get_json()["tfl"]["style"] == "grouped"

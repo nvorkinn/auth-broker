@@ -502,3 +502,52 @@ def test_unlink_screen_requires_pairing(client):
     response = client.post("/device/display/unlink")
     assert response.status_code == 302
     assert response.headers["Location"] == "/pair"
+
+
+def test_device_config_shows_the_stored_tfl_style_selected(app, paired_client):
+    client, device_id, _ = paired_client
+    with app.app_context():
+        db.session.get(DeviceConfig, device_id).tfl_style = "card"
+        db.session.commit()
+    html = client.get("/device").get_data(as_text=True)
+    assert re.findall(r'name="tfl_style" value="(\w+)"', html) == ["classic", "hero", "grouped", "card"]
+    assert re.search(r'value="card" checked', html)
+    assert not re.search(r'value="classic" checked', html)
+
+
+def test_device_config_shows_a_picture_of_every_tfl_style(app, paired_client):
+    client, _, _ = paired_client
+    html = client.get("/device").get_data(as_text=True)
+    pictures = re.findall(r'<img src="(/static/tfl-styles/\w+\.png)"', html)
+    assert pictures == [f"/static/tfl-styles/{style}.png" for style in ("classic", "hero", "grouped", "card")]
+    for picture in pictures:
+        response = client.get(picture)
+        assert response.status_code == 200
+        assert response.mimetype == "image/png"
+
+
+def test_device_config_post_persists_the_tfl_style(app, paired_client):
+    client, device_id, _ = paired_client
+    response = client.post("/device", data={"interval": "15", "tfl_style": "hero"})
+    assert response.status_code == 302
+    with app.app_context():
+        assert db.session.get(DeviceConfig, device_id).tfl_style == "hero"
+
+
+def test_device_config_post_without_a_tfl_style_keeps_the_stored_one(app, paired_client):
+    client, device_id, _ = paired_client
+    with app.app_context():
+        db.session.get(DeviceConfig, device_id).tfl_style = "grouped"
+        db.session.commit()
+    client.post("/device", data={"interval": "15"})
+    with app.app_context():
+        assert db.session.get(DeviceConfig, device_id).tfl_style == "grouped"
+
+
+def test_device_config_post_rejects_an_unknown_tfl_style(app, paired_client):
+    client, device_id, _ = paired_client
+    response = client.post("/device", data={"interval": "15", "tfl_style": "fancy"})
+    assert response.status_code == 400
+    assert b"The TfL style must be one of classic, hero, grouped, card." in response.data
+    with app.app_context():
+        assert db.session.get(DeviceConfig, device_id).tfl_style == "classic"

@@ -97,7 +97,7 @@ def get_config(*, device_id: str, x_device_name: str | None = None) -> ConfigRes
         screen=Screen(orientation=config.orientation, width=config.width, height=config.height),
         weather=Weather(api_key=current_app.config["WEATHER_API_KEY"], location=config.weather_location),
         notice_board=NoticeBoard(postcode=config.postcode or None),
-        tfl=Tfl(app_key=current_app.config["TFL_APP_KEY"], stop_ids=config.tfl_stop_ids),
+        tfl=Tfl(app_key=current_app.config["TFL_APP_KEY"], stop_ids=config.tfl_stop_ids, style=config.tfl_style),
         spotify=Spotify(enabled=config.spotify_enabled),
         glowmarkt=Glowmarkt(username=(creds and creds.username) or None, password=creds.password if creds else None),
         pairing_code=pairing.current_code_for(device_id),
