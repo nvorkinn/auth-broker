@@ -1,6 +1,7 @@
 """Turns an OpenAPI document into the files of a Python package: models, clients and Flask blueprints."""
 
 import json
+import re
 from pathlib import Path
 from typing import Any
 
@@ -70,11 +71,80 @@ def stale_files(files: dict[str, str], out: Path) -> list[str]:
     return stale
 
 
+_YAML_SUFFIXES = {".yaml", ".yml"}
+
+
 def load(path: Path) -> dict[str, Any]:
+    """Reads an OpenAPI document: YAML if the file is named .yaml or .yml (which needs PyYAML), otherwise JSON."""
+    text = path.read_text()
+    if path.suffix.lower() in _YAML_SUFFIXES:
+        return _load_yaml(path, text)
     try:
-        return json.loads(path.read_text())
+        return json.loads(text)
     except json.JSONDecodeError as error:
         raise SpecError(f"{path} isn't valid JSON: {error}") from error
+
+
+def _load_yaml(path: Path, text: str) -> dict[str, Any]:
+    """PyYAML is only imported here, so JSON users need nothing beyond the standard library.
+
+    It reads YAML 1.1, which would turn several things in a spec into something JSON can't say, so the loader
+    is narrowed to what JSON would have meant: only true and false are booleans (not yes, no, on, off, which
+    would otherwise corrupt an enum), dates stay strings, and a repeated key is an error rather than the last
+    one silently winning. An unquoted integer key, as in `200:`, is a status code and becomes "200"."""
+    try:
+        import yaml
+    except ImportError as error:
+        raise SpecError(
+            f"{path} is YAML, which needs PyYAML (pip install pyyaml); a JSON spec needs nothing extra"
+        ) from error
+
+    timestamp, boolean = "tag:yaml.org,2002:timestamp", "tag:yaml.org,2002:bool"
+    true_or_false = re.compile(r"^(?:true|false|True|False|TRUE|FALSE)$")
+    resolvers: dict[str, list] = {}
+    for first_char, entries in yaml.SafeLoader.yaml_implicit_resolvers.items():
+        kept = []
+        for tag, pattern in entries:
+            if tag == timestamp or (tag == boolean and first_char not in "tTfF"):
+                continue
+            kept.append((tag, true_or_false if tag == boolean else pattern))
+        if kept:
+            resolvers[first_char] = kept
+
+    class Loader(yaml.SafeLoader):
+        yaml_implicit_resolvers = resolvers
+
+        def construct_mapping(self, node, deep=False):
+            seen = set()
+            for key_node, _ in node.value:
+                if key_node.tag == "tag:yaml.org,2002:merge":
+                    continue
+                key = self.construct_object(key_node, deep=True)
+                if key in seen:
+                    raise SpecError(f"{path}, line {key_node.start_mark.line + 1}: the key {key!r} appears twice")
+                seen.add(key)
+            return super().construct_mapping(node, deep)
+
+    try:
+        document = yaml.load(text, Loader=Loader)
+    except yaml.YAMLError as error:
+        raise SpecError(f"{path} isn't valid YAML: {error}") from error
+    return _string_keys(document, path)
+
+
+def _string_keys(node: Any, path: Path) -> Any:
+    if isinstance(node, dict):
+        out = {}
+        for key, value in node.items():
+            if isinstance(key, int) and not isinstance(key, bool):
+                key = str(key)
+            elif not isinstance(key, str):
+                raise SpecError(f"{path}: the key {key!r} isn't a string; quote it")
+            out[key] = _string_keys(value, path)
+        return out
+    if isinstance(node, list):
+        return [_string_keys(item, path) for item in node]
+    return node
 
 
 def _package_docstring(document: dict[str, Any]) -> str:

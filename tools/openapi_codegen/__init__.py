@@ -1,4 +1,4 @@
-"""Generate Pydantic models, `requests` clients and Flask blueprints from an OpenAPI 3.x JSON document.
+"""Generate Pydantic models, `requests` clients and Flask blueprints from an OpenAPI 3.x JSON or YAML document.
 
     python -m tools.openapi_codegen openapi.json --out generated/device_api
 

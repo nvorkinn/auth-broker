@@ -379,10 +379,11 @@ again). `tests/test_openapi.py` fails while the committed file is stale, so CI c
 
 ### Generating code from an OpenAPI file
 
-`tools/openapi_codegen` (standard library only) turns any OpenAPI 3.x JSON file into a Python package:
+`tools/openapi_codegen` turns any OpenAPI 3.x JSON or YAML file into a Python package (the generator itself is
+standard library only; reading YAML needs `pip install pyyaml`, which `requirements-dev.txt` has):
 
 ```bash
-python -m tools.openapi_codegen openapi.json --out some/package   # add --check to fail if it is stale
+python -m tools.openapi_codegen openapi.json --out some/package   # or openapi.yaml; add --check to fail if stale
 ```
 
 - `models.py`: Pydantic models. An optional field is `T | None = None`; a required field that may be `null`
@@ -410,6 +411,10 @@ app.register_blueprint(create_blueprint(ConfigView))
 
 Generated files are overwritten on every run, so keep custom logic in subclasses. Only local `$ref`s and
 JSON bodies are supported.
+
+A file named `.yaml` or `.yml` is read as YAML, anything else as JSON. YAML is read the way JSON would mean it: only
+`true`/`false` are booleans (so an enum of `on`, `off`, `yes`, `no` stays strings), dates stay strings, an unquoted
+`200:` key is the status code `"200"`, and a repeated key is an error naming its line.
 
 ## Running tests
 
