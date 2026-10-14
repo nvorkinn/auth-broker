@@ -5,13 +5,3 @@ repos:
       - id: ruff-check
         args: [--fix]
       - id: ruff-format
-  # Keeps openapi.json (the renderer's contract, see README) in step with broker/contract.py and the
-  # documented routes. Like ruff --fix above, it rewrites the file and fails the commit once: add it and commit again.
-  - repo: local
-    hooks:
-      - id: export-openapi
-        name: regenerate openapi.json
-        entry: python scripts/export_openapi.py
-        language: system
-        pass_filenames: false
-        files: ^broker/(contract|openapi)\.py$|^broker/routes/

@@ -13,6 +13,6 @@ def location_found(location: str) -> bool | None:
         )
         response.raise_for_status()
         return bool(response.json().get("results"))
-    except (requests.RequestException, ValueError):
+    except requests.RequestException, ValueError:
         current_app.logger.warning("Couldn't check weather location %r with Open-Meteo", location, exc_info=True)
         return None

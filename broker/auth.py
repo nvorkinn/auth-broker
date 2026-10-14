@@ -31,38 +31,58 @@ def with_retry_after(response, seconds):
     return response
 
 
+class DeviceAuthError(Exception):
+    """A request that device auth turns away: `status` is 401 for a missing, malformed or unknown secret and
+    403 for a valid one whose role isn't allowed here; `message` is the `error` it is answered with."""
+
+    def __init__(self, status: int, message: str) -> None:
+        super().__init__(message)
+        self.status = status
+        self.message = message
+
+
+def authenticate_device(authorization: str, roles=frozenset(ROLES)) -> Device:
+    """Identifies the device behind an `Authorization: Bearer <secret>` header, whose secret alone finds it.
+    The secret that matches decides the caller's role: a valid secret for a role not in `roles` is a 403,
+    anything else a 401 (DeviceAuthError). Sets g.device_id and g.role, logs the request and records the
+    device as seen. The prefix is matched exactly: `bearer x` is no more a secret than a bare one."""
+    secret = authorization.removeprefix("Bearer ")
+    if not authorization.startswith("Bearer ") or not secret:
+        raise DeviceAuthError(401, "unauthorized")
+
+    device, role = _find_by_secret(secret)
+    if role is None:
+        raise DeviceAuthError(401, "unauthorized")
+    if role not in roles:
+        raise DeviceAuthError(403, "forbidden")
+
+    g.device_id, g.role = device.device_id, role
+    # device_name is just the Pi's own DEVICE_ID, echoed back here purely so a log line
+    # reads as a name instead of an opaque id -- never used for anything else.
+    current_app.logger.info(
+        "%s %s device=%s (%s) role=%s",
+        request.method,
+        request.path,
+        device.device_name or "unnamed",
+        device.device_id,
+        role,
+    )
+    _mark_seen(device, role)
+    return device
+
+
 def require_device_auth(roles=frozenset(ROLES)):
-    """Protects device-facing endpoints with one of the device's own bearer secrets, which alone
-    finds the device. The secret that matches decides the caller's role: a valid secret
-    for a role not in `roles` is a 403, anything else a 401. Sets g.device_id and g.role, and passes device_id to
-    the view."""
+    """Protects device-facing endpoints with one of the device's own bearer secrets (see
+    authenticate_device) and passes device_id to the view. For the routes of the countdown API contract
+    (vendor/countdown-api) the same check is its `deviceSecret` authenticator, in api.py."""
 
     def decorator(view):
         @functools.wraps(view)
         def wrapped(*args, **kwargs):
-            auth_header = request.headers.get("Authorization", "")
-            secret = auth_header.removeprefix("Bearer ")
-            if not auth_header.startswith("Bearer ") or not secret:
-                return jsonify(error="unauthorized"), 401
-
-            device, role = _find_by_secret(secret)
-            if role is None:
-                return jsonify(error="unauthorized"), 401
-            if role not in roles:
-                return jsonify(error="forbidden"), 403
-
-            g.device_id, g.role = device.device_id, role
-            # device_name is just the Pi's own DEVICE_ID, echoed back here purely so a log line
-            # reads as a name instead of an opaque id -- never used for anything else.
-            current_app.logger.info(
-                "%s %s device=%s (%s) role=%s",
-                request.method,
-                request.path,
-                device.device_name or "unnamed",
-                device.device_id,
-                role,
-            )
-            _mark_seen(device, role)
+            try:
+                device = authenticate_device(request.headers.get("Authorization", ""), roles)
+            except DeviceAuthError as error:
+                return jsonify(error=error.message), error.status
             return view(*args, device_id=device.device_id, **kwargs)
 
         return wrapped

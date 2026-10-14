@@ -11,6 +11,9 @@ WORKDIR /app
 
 ENV PYTHONUNBUFFERED=1
 
+# requirements.txt installs vendor/countdown-api (the API contract and its generated code) from here, editable,
+# so it has to stay where it is.
+COPY vendor/countdown-api/ vendor/countdown-api/
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 

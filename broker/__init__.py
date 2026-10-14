@@ -47,7 +47,6 @@ def create_app() -> Flask:
     )
 
     app.register_blueprint(devices.bp)
-    app.register_blueprint(devices.config_bp)
     app.register_blueprint(renderers.bp)
     app.register_blueprint(spotify_proxy.bp)
     app.register_blueprint(spotify_oauth.bp)
@@ -56,6 +55,12 @@ def create_app() -> Flask:
     app.register_blueprint(frames.bp)
     app.register_blueprint(status.bp)
     app.register_blueprint(orchestrator.bp)
+
+    # The routes of the countdown API contract (vendor/countdown-api). This also checks that the broker answers
+    # every one of them, and refuses to start if it doesn't.
+    from .api import api
+
+    api.register(app)
 
     from . import cli
 

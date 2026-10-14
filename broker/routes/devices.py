@@ -1,21 +1,18 @@
 """A device's own lifecycle: registering on first boot, pairing codes, and the config poll it
 checks in with. Everything but /register needs one of the device's secrets."""
 
+from countdown_api.blueprints import ApiHTTPError
+from countdown_api.models import ConfigResponse, Glowmarkt, NoticeBoard, Screen, Spotify, Tfl, Weather
 from flask import Blueprint, current_app, jsonify, request
 from sqlalchemy.exc import IntegrityError
 
+from ..api import api
 from ..auth import hash_secret, require_device_auth, with_retry_after
-from ..contract import ConfigResponse, Glowmarkt, NoticeBoard, Screen, Spotify, Tfl, Weather
 from ..db import db
 from ..models import Device, DeviceConfig, GlowmarktCredentials
-from ..openapi import Header, documented
 from ..services import pairing, registration
 
-# Cosmetic: the Pi's own DEVICE_ID, so logs and admin output show a name instead of an opaque id.
-DEVICE_NAME = Header("X-Device-Name", "The device's own name, for logs and admin output. Never its identity.")
-
 bp = Blueprint("devices", __name__, url_prefix="/api/devices")
-config_bp = Blueprint("config", __name__, url_prefix="/api")
 
 
 @bp.post("/register")
@@ -72,31 +69,29 @@ def create_pairing_code(device_id):
     return jsonify(code=code, expires_in_seconds=int(pairing.CODE_TTL.total_seconds()))
 
 
-def _update_device_name(device_id: str) -> None:
+def _update_device_name(device_id: str, name: str | None) -> None:
     """Opportunistically keeps devices.device_name in sync with the Pi's own
     DEVICE_ID (sent as X-Device-Name on every config poll) -- a purely cosmetic
     label for logs/admin output, never the device's real identity, so a rename
     on the Pi just needs its next poll to take effect here, no re-pairing."""
-    name = request.headers.get(DEVICE_NAME.name, "").strip()
+    name = (name or "").strip()
     if name:
         db.session.get(Device, device_id).device_name = name
         db.session.commit()
 
 
-@config_bp.get("/config")
-@require_device_auth(roles={"renderer"})
-@documented("The renderer's config.", response=ConfigResponse, device_auth=True, not_found=True, headers=[DEVICE_NAME])
-def get_config(device_id):
-    """Polled by the renderer, here or as /api/config with no device_id. Bundles the device's own
-    settings together with the shared app-level API keys, so a key rotation doesn't require
+@api.get_config()
+def get_config(*, device_id: str, x_device_name: str | None = None) -> ConfigResponse:
+    """Polled by the renderer (GET /api/config in the contract, which also says that only its role may). Bundles
+    the device's own settings together with the shared app-level API keys, so a key rotation doesn't require
     re-flashing every gifted device. Carries the device_id, so a renderer needn't keep it."""
-    _update_device_name(device_id)
+    _update_device_name(device_id, x_device_name)
     config = db.session.get(DeviceConfig, device_id)
     if config is None:
-        return jsonify(error="not found"), 404
+        raise ApiHTTPError(404, message="not found")
 
     creds = db.session.get(GlowmarktCredentials, device_id)
-    response = ConfigResponse(
+    return ConfigResponse(
         device_id=device_id,
         interval=config.interval,
         screen=Screen(orientation=config.orientation, width=config.width, height=config.height),
@@ -107,4 +102,3 @@ def get_config(device_id):
         glowmarkt=Glowmarkt(username=(creds and creds.username) or None, password=creds.password if creds else None),
         pairing_code=pairing.current_code_for(device_id),
     )
-    return jsonify(response.model_dump(mode="json"))

@@ -34,12 +34,12 @@ class Device(db.Model):
     # screen is on, so this is what decides when a renderer is suspended (see services/assignments.py).
     display_last_seen_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
 
-    config: Mapped["DeviceConfig | None"] = relationship(back_populates="device", cascade="all, delete-orphan")
-    pairing_codes: Mapped[list["PairingCode"]] = relationship(back_populates="device", cascade="all, delete-orphan")
-    spotify_token: Mapped["SpotifyToken | None"] = relationship(cascade="all, delete-orphan")
-    glowmarkt_credentials: Mapped["GlowmarktCredentials | None"] = relationship(cascade="all, delete-orphan")
-    frame: Mapped["Frame | None"] = relationship(cascade="all, delete-orphan")
-    assignment: Mapped["RendererAssignment | None"] = relationship(back_populates="device")
+    config: Mapped[DeviceConfig | None] = relationship(back_populates="device", cascade="all, delete-orphan")
+    pairing_codes: Mapped[list[PairingCode]] = relationship(back_populates="device", cascade="all, delete-orphan")
+    spotify_token: Mapped[SpotifyToken | None] = relationship(cascade="all, delete-orphan")
+    glowmarkt_credentials: Mapped[GlowmarktCredentials | None] = relationship(cascade="all, delete-orphan")
+    frame: Mapped[Frame | None] = relationship(cascade="all, delete-orphan")
+    assignment: Mapped[RendererAssignment | None] = relationship(back_populates="device")
 
 
 class PairingCode(db.Model):

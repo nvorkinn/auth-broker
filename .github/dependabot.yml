@@ -27,3 +27,9 @@ updates:
     directory: "/"
     schedule:
       interval: "weekly"
+  # vendor/countdown-api: a new commit of the API contract shows up as a PR, and the broker's build fails on it
+  # until every route it adds is implemented.
+  - package-ecosystem: "gitsubmodule"
+    directory: "/"
+    schedule:
+      interval: "weekly"
