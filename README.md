@@ -9,6 +9,13 @@ public HTTPS endpoint that handles that handshake, hosts the recipient-facing
 config site, and brokers ongoing Spotify calls so no device ever has to hold
 a Spotify token.
 
+## How it fits together
+
+[docs/architecture.md](docs/architecture.md) shows who calls whom (screen, Caddy, this broker, authentik, the
+orchestrator and the renderers), which token or secret exists when, and what each call changes;
+[docs/database.md](docs/database.md) shows the tables and how they fit in. The sections below say how each part works
+and how to run and deploy it.
+
 ## How a device gets set up
 
 1. **First boot:** the Pi generates its own secret and calls
@@ -29,12 +36,11 @@ a Spotify token.
      `POST /pair/token`) until the device has registered, which is normally
      seconds, and goes to `/device`. It gives up after 90 seconds and offers the
      code instead. Someone else's device is refused (409).
-   - **Code (fallback).** The Pi polls `GET /api/config`; while unpaired, the
-     response carries a short-lived `pairing_code` (a fresh one whenever the last
-     expires) for its screen. The user enters it at `/pair`. A code also hands a
-     device to a different user, since it proves they're at the device: get a
-     fresh one with `flask devices code <device_id>` (below) or from the Pi via
-     `POST /api/devices/pairing-code`.
+   - **Code (fallback).** A short-lived `pairing_code` (10 minutes, one use) is made on
+     request: by `POST /api/devices/pairing-code` (either secret), by `flask devices code <device_id>`
+     (below), or, for an unpaired device, by its renderer's `GET /api/config`. The user enters it at
+     `/pair`. A code also hands a device to a different user, since it proves they're at the device.
+     The ESP32 firmware doesn't ask for one.
 
    Once paired, `pairing_code` is `null`. A new device's weather location,
    postcode and stop ids are empty (`""`, `null`, `[]`), which is valid; the
@@ -181,7 +187,7 @@ hasn't made a request (`devices.display_last_seen_at`) for 24 hours becomes `sus
 |---|---|
 | `GET /api/config` | renderer |
 | `GET /api/spotify/<now-playing \| queue \| top/<artists\|tracks>>` | renderer |
-| `POST /api/devices/pairing-code` | renderer |
+| `POST /api/devices/pairing-code` | renderer, display |
 | `PUT /api/frame` (raw 800x480 1-bit, 48000 bytes) | renderer |
 | `GET /api/frame` (ETag / `If-None-Match` → 304) | renderer, display |
 | `POST /api/frame` (JSON `{"metrics": "<InfluxDB line protocol>", "logs": [...]}`; answers like the GET) | renderer, display |
