@@ -10,3 +10,11 @@ werkzeug
 click
 maxminddb
 pydantic
+
+# countdown-api: the contract between this broker and the renderer, and the code generated from it (the Pydantic
+# models and the Flask views; the [server] extra adds Flask). It isn't on PyPI; its latest page is a package index,
+# and the page's constraints.txt pins the version, so the latest release is installed whatever it is. See README,
+# "The device API contract".
+--extra-index-url https://nvorkinn.github.io/countdown-api/simple/
+-c https://nvorkinn.github.io/countdown-api/constraints.txt
+countdown-api[server]

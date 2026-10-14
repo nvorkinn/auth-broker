@@ -1,13 +1,13 @@
 """A device's own lifecycle: registering on first boot, pairing codes, and the config poll it
 checks in with. Everything but /register needs one of the device's secrets."""
 
+from countdown_api.blueprints import ApiHTTPError
+from countdown_api.blueprints.api_config import ApiConfigView
+from countdown_api.models import ConfigResponse, Glowmarkt, NoticeBoard, Screen, Spotify, Tfl, Weather
 from flask import Blueprint, current_app, jsonify, request
 from sqlalchemy.exc import IntegrityError
 
 from ..auth import DeviceAuthError, authenticate_device, hash_secret, require_device_auth, with_retry_after
-from ..countdown_api.blueprints._base import ApiHTTPError
-from ..countdown_api.blueprints.api_config import ApiConfigView, create_blueprint
-from ..countdown_api.models import ConfigResponse, Glowmarkt, NoticeBoard, Screen, Spotify, Tfl, Weather
 from ..db import db
 from ..models import Device, DeviceConfig, GlowmarktCredentials
 from ..services import pairing, registration
@@ -83,7 +83,7 @@ def _update_device_name(device_id: str, name: str | None) -> None:
 
 class ConfigView(ApiConfigView):
     """GET /api/config: the renderer's config. The route, its header and the shape of the response are the
-    countdown API contract (broker/countdown_api/ is generated from it); this is the broker's side of it."""
+    countdown API contract (the countdown-api package is generated from it); this is the broker's side of it."""
 
     def authenticate(self, security):
         try:
@@ -116,6 +116,3 @@ class ConfigView(ApiConfigView):
             pairing_code=pairing.current_code_for(device_id),
             setup_missing=setup_missing(config),
         )
-
-
-config_bp = create_blueprint(ConfigView, name="config")

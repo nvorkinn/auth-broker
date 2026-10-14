@@ -363,27 +363,34 @@ by the first migration on its first start, keeping its data.
 
 ## The device API contract
 
-What the renderer polls (`GET /api/config`) is typed in `broker/contract.py` (pydantic), separate from the
-SQLAlchemy models so a column change and a wire-format change are independent. `openapi.json` at the repo
-root is generated from those models and the routes that declare themselves with `@documented`; the renderer
-([pi-dashboard](https://github.com/nvorkinn/pi-dashboard)) generates its own models from a copy of it. After
-changing either:
+The API between the broker and the renderer ([pi-dashboard](https://github.com/nvorkinn/pi-dashboard)) is defined in
+neither repository but in [countdown-api](https://github.com/nvorkinn/countdown-api): an OpenAPI file, and the Python
+package that [openapi-codegen](https://github.com/nvorkinn/openapi-codegen) generates from it (the Pydantic models,
+Flask views for this side, and a `requests` client for the renderer's). It isn't on PyPI; its **latest page**,
+https://nvorkinn.github.io/countdown-api/, is a package index, and its `constraints.txt` says which version is the
+latest.
 
-```bash
-python scripts/export_openapi.py   # then commit openapi.json
+Here it is an ordinary dependency, in `requirements.txt`:
+
+```
+--extra-index-url https://nvorkinn.github.io/countdown-api/simple/
+-c https://nvorkinn.github.io/countdown-api/constraints.txt
+countdown-api[server]
 ```
 
-With `pre-commit install` that happens on commit (the hook rewrites the file and fails once; add it and commit
-again). `tests/test_openapi.py` fails while the committed file is stale, so CI catches it either way. Change the format by adding fields (bump
-`API_VERSION` in `contract.py`): a device on an older renderer ignores fields it doesn't know.
+`countdown-api[server]` adds Flask to the models; the constraints file is read when pip installs, so the latest
+release is installed whatever it is, with no version to bump here (and, in exchange, a build is only as repeatable as
+the latest page: a new contract release changes the next build).
 
-### Generating code from an OpenAPI file
+- `broker/routes/devices.py` implements `GET /api/config` by subclassing the generated view: the generated code owns
+  the route, the `X-Device-Name` header and the shape of the response, and the broker supplies the bearer-secret
+  check (`authenticate`) and the body (`handle_get`). The wire models are separate from the SQLAlchemy models, so a
+  column change and a wire-format change are independent.
+- `create_app` registers the views with `register_all`, which raises if a route or verb of the contract has no
+  implementation. **So the app doesn't start, and the tests fail, when the contract gains an operation the broker
+  doesn't implement.**
 
-The generator that turns an OpenAPI 3.x JSON or YAML file into Pydantic models, `requests` clients and extensible
-Flask blueprints now lives in its own repository,
-[nvorkinn/openapi-codegen](https://github.com/nvorkinn/openapi-codegen) (it was `tools/openapi_codegen` here).
-The broker doesn't use it: it builds `openapi.json` from `broker/contract.py` and the routes (above), and the
-renderer generates its models from that file.
+Change the format in countdown-api, by adding fields: a device on an older renderer ignores fields it doesn't know.
 
 ## Running tests
 

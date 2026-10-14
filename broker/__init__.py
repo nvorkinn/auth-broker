@@ -34,6 +34,8 @@ def create_app() -> Flask:
     app.extensions["pair_throttle"] = PairThrottle()
     app.extensions["register_throttle"] = PairThrottle(max_events=REGISTRATIONS_PER_MINUTE)
 
+    from countdown_api.blueprints import register_all
+
     from .routes import (
         devices,
         frames,
@@ -47,7 +49,6 @@ def create_app() -> Flask:
     )
 
     app.register_blueprint(devices.bp)
-    app.register_blueprint(devices.config_bp)
     app.register_blueprint(renderers.bp)
     app.register_blueprint(spotify_proxy.bp)
     app.register_blueprint(spotify_oauth.bp)
@@ -56,6 +57,9 @@ def create_app() -> Flask:
     app.register_blueprint(frames.bp)
     app.register_blueprint(status.bp)
     app.register_blueprint(orchestrator.bp)
+    # The routes of the countdown API, each served by the broker's subclass of its generated view. Raises if the
+    # contract has a route (or a verb) none of them implements, so the app doesn't start without all of it.
+    register_all(app, devices.ConfigView)
 
     from . import cli
 
