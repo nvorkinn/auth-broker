@@ -5,8 +5,10 @@ from flask import Blueprint, current_app, jsonify, request
 from sqlalchemy.exc import IntegrityError
 
 from ..auth import hash_secret, require_device_auth, with_retry_after
+from ..contract import ConfigResponse, Glowmarkt, NoticeBoard, Screen, Spotify, Tfl, Weather
 from ..db import db
 from ..models import Device, DeviceConfig, GlowmarktCredentials
+from ..openapi import documented
 from ..services import pairing, registration
 from ..services.setup import setup_missing
 
@@ -81,6 +83,7 @@ def _update_device_name(device_id: str) -> None:
 
 @config_bp.get("/config")
 @require_device_auth(roles={"renderer"})
+@documented("The renderer's config.", response=ConfigResponse, device_auth=True, not_found=True)
 def get_config(device_id):
     """Polled by the renderer, here or as /api/config with no device_id. Bundles the device's own
     settings together with the shared app-level API keys, so a key rotation doesn't require
@@ -91,20 +94,16 @@ def get_config(device_id):
         return jsonify(error="not found"), 404
 
     creds = db.session.get(GlowmarktCredentials, device_id)
-    glowmarkt = {
-        "username": (creds and creds.username) or None,
-        "password": creds.password if creds else None,
-    }
-
-    return jsonify(
+    response = ConfigResponse(
         device_id=device_id,
         interval=config.interval,
-        screen={"orientation": config.orientation, "width": config.width, "height": config.height},
-        weather={"api_key": current_app.config["WEATHER_API_KEY"], "location": config.weather_location},
-        notice_board={"postcode": config.postcode or None},
-        tfl={"app_key": current_app.config["TFL_APP_KEY"], "stop_ids": config.tfl_stop_ids},
-        spotify={"enabled": config.spotify_enabled},
-        glowmarkt=glowmarkt,
+        screen=Screen(orientation=config.orientation, width=config.width, height=config.height),
+        weather=Weather(api_key=current_app.config["WEATHER_API_KEY"], location=config.weather_location),
+        notice_board=NoticeBoard(postcode=config.postcode or None),
+        tfl=Tfl(app_key=current_app.config["TFL_APP_KEY"], stop_ids=config.tfl_stop_ids),
+        spotify=Spotify(enabled=config.spotify_enabled),
+        glowmarkt=Glowmarkt(username=(creds and creds.username) or None, password=creds.password if creds else None),
         pairing_code=pairing.current_code_for(device_id),
         setup_missing=setup_missing(config),
     )
+    return jsonify(response.model_dump(mode="json"))

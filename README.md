@@ -361,6 +361,22 @@ before gunicorn starts. A database from before migrations existed is adopted
 by the first migration on its first start, keeping its data.
 `test_migrations_match_the_models` fails if a model changes without a migration.
 
+## The device API contract
+
+What the renderer polls (`GET /api/config`) is typed in `broker/contract.py` (pydantic), separate from the
+SQLAlchemy models so a column change and a wire-format change are independent. `openapi.json` at the repo
+root is generated from those models and the routes that declare themselves with `@documented`; the renderer
+([pi-dashboard](https://github.com/nvorkinn/pi-dashboard)) generates its own models from a copy of it. After
+changing either:
+
+```bash
+python scripts/export_openapi.py   # then commit openapi.json
+```
+
+With `pre-commit install` that happens on commit (the hook rewrites the file and fails once; add it and commit
+again). `tests/test_openapi.py` fails while the committed file is stale, so CI catches it either way. Change the format by adding fields (bump
+`API_VERSION` in `contract.py`): a device on an older renderer ignores fields it doesn't know.
+
 ## Running tests
 
 ```bash
