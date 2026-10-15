@@ -521,6 +521,7 @@ entries:
       meta_icon: /static/dist/assets/countdown/countdown-pill.svg
       provider: !KeyOf broker-proxy-provider
   - model: authentik_core.application
+    id: logs-app
     state: present
     identifiers:
       slug: logs
@@ -528,6 +529,16 @@ entries:
       name: Logs
       meta_icon: /static/dist/assets/countdown/countdown-pill.svg
       provider: !KeyOf logs-proxy-provider
+  - model: authentik_policies.policybinding
+    state: present
+    identifiers:
+      group: !Find [authentik_core.group, [name, authentik Admins]]
+      target: !KeyOf logs-app
+      order: 0
+    attrs:
+      enabled: true
+      negate: false
+      timeout: 30
   - model: authentik_core.application
     id: metrics-app
     state: present
