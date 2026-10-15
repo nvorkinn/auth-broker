@@ -426,7 +426,7 @@ entries:
       branding_default_flow_background: 820461.jpg
       flow_recovery: !KeyOf recovery-flow
 
-  # Forward-auth for the Logs and Metrics UIs through the embedded outpost. The proxy
+  # Forward-auth for the Logs, Metrics and Grafana UIs through the embedded outpost. The proxy
   # provider comes first: it is an OAuth2 provider, so the OAuth2 entry then finds it
   # by name and sets its client credentials and redirect URIs.
   - model: authentik_providers_proxy.proxyprovider
@@ -454,6 +454,14 @@ entries:
     attrs:
       <<: *proxy-attrs
       external_host: https://metrics.nikolaivorkinn.com
+  - model: authentik_providers_proxy.proxyprovider
+    id: grafana-proxy-provider
+    state: present
+    identifiers:
+      name: Provider for Grafana
+    attrs:
+      <<: *proxy-attrs
+      external_host: https://grafana.nikolaivorkinn.com
   - model: authentik_providers_proxy.proxyprovider
     id: broker-proxy-provider
     state: present
@@ -521,6 +529,7 @@ entries:
       meta_icon: /static/dist/assets/countdown/countdown-pill.svg
       provider: !KeyOf broker-proxy-provider
   - model: authentik_core.application
+    id: logs-app
     state: present
     identifiers:
       slug: logs
@@ -528,6 +537,35 @@ entries:
       name: Logs
       meta_icon: /static/dist/assets/countdown/countdown-pill.svg
       provider: !KeyOf logs-proxy-provider
+  - model: authentik_policies.policybinding
+    state: present
+    identifiers:
+      group: !Find [authentik_core.group, [name, authentik Admins]]
+      target: !KeyOf logs-app
+      order: 0
+    attrs:
+      enabled: true
+      negate: false
+      timeout: 30
+  - model: authentik_core.application
+    id: grafana-app
+    state: present
+    identifiers:
+      slug: grafana
+    attrs:
+      name: Grafana
+      meta_icon: /static/dist/assets/countdown/countdown-pill.svg
+      provider: !KeyOf grafana-proxy-provider
+  - model: authentik_policies.policybinding
+    state: present
+    identifiers:
+      group: !Find [authentik_core.group, [name, authentik Admins]]
+      target: !KeyOf grafana-app
+      order: 0
+    attrs:
+      enabled: true
+      negate: false
+      timeout: 30
   - model: authentik_core.application
     id: metrics-app
     state: present
@@ -560,6 +598,7 @@ entries:
         - !KeyOf logs-proxy-provider
         - !KeyOf metrics-proxy-provider
         - !KeyOf broker-proxy-provider
+        - !KeyOf grafana-proxy-provider
 
   # Google as a federated login source.
   - model: authentik_sources_oauth.oauthsource

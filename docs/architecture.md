@@ -20,7 +20,7 @@ this page is the map. [The database](database.md) has the tables.
 | **auth-broker** | this repository, gunicorn on `127.0.0.1:5000` | The hub: device identities, pairing, each screen's settings, the latest frame, renderer assignments, the Spotify proxy. State is one SQLite file. |
 | **Caddy** | this repository (`caddy/`), the host's ports 80 and 443 | TLS, routing, the sign-in gate for browser pages, and the `X-Authentik-*` headers. |
 | **authentik** | this repository (`authentik/`), behind the `sso.` host | Sign-in, sign-up, passkeys and authenticator apps, Google login. Its embedded outpost answers Caddy's forward_auth. |
-| **Fluent Bit, VictoriaLogs, VictoriaMetrics** | this repository | Where the screens' and renderers' logs and metrics end up. |
+| **Fluent Bit, VictoriaLogs, VictoriaMetrics, Grafana** | this repository | Where the screens' and renderers' logs and metrics end up, and the dashboards over the logs. |
 | **countdown-api** | [countdown-api](https://github.com/nvorkinn/countdown-api), the `vendor/countdown-api` submodule | The OpenAPI contract between renderer and broker (so far `GET /api/config`) and the code generated from it. |
 
 ## Who calls the broker, and how
@@ -65,6 +65,7 @@ flowchart TB
         RN["Renderers<br/>renderer-SLUG, host network"]
         FB["Fluent Bit<br/>:4318"]
         VL["VictoriaLogs :9428"]
+        GF["Grafana :3000"]
         VM["VictoriaMetrics :8428"]
     end
     TP["Third parties<br/>Spotify, TfL, Open-Meteo, Glowmarkt,<br/>postcodes.io, Google sign-in, Resend"]
@@ -73,16 +74,18 @@ flowchart TB
     BR -- "screen logs" --> VL
     RN -- "OTLP health" --> FB
     FB --> VL
+    GF -- "queries" --> VL
     FB --> VM
-    CD -- "logs. and metrics. hosts" --> VL
+    CD -- "logs., metrics. and grafana. hosts" --> VL
     CD --> VM
+    CD --> GF
     OR -- "create, stop, remove" --> RN
     RN --> TP
     BR --> TP
     AK --> TP
 ```
 
-Everything runs on one host. Caddy, the broker, Fluent Bit and the two Victoria services use host networking,
+Everything runs on one host. Caddy, the broker, Fluent Bit, Grafana and the two Victoria services use host networking,
 authentik and its Postgres sit on the compose network with only `127.0.0.1:9000` published, and the orchestrator makes each renderer with
 `network_mode: host`, so a renderer reaches the host's Fluent Bit on `127.0.0.1:4318` but talks to the broker over its
 public URL (`BROKER_URL`).

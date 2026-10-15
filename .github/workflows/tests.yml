@@ -74,6 +74,9 @@ jobs:
             check: validate --config /etc/caddy/Caddyfile --adapter caddyfile
           - image: fluent-bit
             check: --dry-run --config /fluent-bit/etc/fluent-bit.yaml
+          # The plugin install runs in the build; the check is that Grafana starts its CLI.
+          - image: grafana
+            check: --help
           # The broker itself: its CMD is overridden, and importing the submodule's code checks it was copied in and installed.
           - image: broker
             context: .
