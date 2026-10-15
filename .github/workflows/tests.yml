@@ -74,11 +74,6 @@ jobs:
             check: validate --config /etc/caddy/Caddyfile --adapter caddyfile
           - image: fluent-bit
             check: --dry-run --config /fluent-bit/etc/fluent-bit.yaml
-          # The plugin install runs in the build. Grafana's own entrypoint (run.sh) appends its settings to any
-          # arguments, so the check bypasses it and lists the installed plugins.
-          - image: grafana
-            entrypoint: grafana
-            check: cli plugins ls
           # The broker itself: its CMD is overridden, and importing the submodule's code checks it was copied in and installed.
           - image: broker
             context: .
@@ -92,4 +87,4 @@ jobs:
         run: docker build -t auth-broker-${{ matrix.image }} ${{ matrix.context || matrix.image }}
 
       - name: Check config
-        run: docker run --rm ${{ matrix.entrypoint && format('--entrypoint {0}', matrix.entrypoint) || '' }} auth-broker-${{ matrix.image }} ${{ matrix.check }}
+        run: docker run --rm auth-broker-${{ matrix.image }} ${{ matrix.check }}

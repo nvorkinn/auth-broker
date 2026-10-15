@@ -129,37 +129,6 @@ services:
     volumes:
       - victoria_metrics_data:/victoria-metrics-data
 
-  # Dashboards for the logs, as code (grafana/): the config server and the renderers side by side, the
-  # screens, the platform. Listens on 127.0.0.1:3000 (host networking, like the rest) and Caddy serves it
-  # at grafana.nikolaivorkinn.com to Authentik admins only. Caddy's forward auth names the signed-in user
-  # in X-Authentik-Username; Grafana trusts that header from loopback only (its login form is off).
-  grafana:
-    <<: *release-image
-    image: ghcr.io/nvorkinn/auth-broker-grafana:${GRAFANA_VERSION:-latest}
-    container_name: grafana
-    logging: *logging
-    network_mode: host
-    mem_limit: 384m
-    environment:
-      GF_SERVER_HTTP_ADDR: 127.0.0.1
-      GF_SERVER_HTTP_PORT: "3000"
-      GF_SERVER_ROOT_URL: https://grafana.nikolaivorkinn.com/
-      GF_AUTH_ANONYMOUS_ENABLED: "false"
-      GF_AUTH_DISABLE_LOGIN_FORM: "true"
-      GF_AUTH_PROXY_ENABLED: "true"
-      GF_AUTH_PROXY_HEADER_NAME: X-Authentik-Username
-      GF_AUTH_PROXY_HEADER_PROPERTY: username
-      GF_AUTH_PROXY_AUTO_SIGN_UP: "true"
-      GF_AUTH_PROXY_WHITELIST: 127.0.0.1
-      # Only admins get past Caddy, so whoever arrives may use Explore.
-      GF_USERS_AUTO_ASSIGN_ORG_ROLE: Editor
-      GF_ANALYTICS_REPORTING_ENABLED: "false"
-      GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
-      GF_LOG_MODE: console
-      GF_LOG_CONSOLE_FORMAT: json
-    volumes:
-      - grafana_data:/var/lib/grafana
-
   # Authentik (SSO with passkeys). All three read their secrets from
   # authentik.env, decrypted from secrets/authentik.env by deploy.sh.
   # AUTHENTIK_VERSION in .env pins the upstream release; bump it by hand,
@@ -219,8 +188,6 @@ volumes:
   caddy_config:
     name: caddy_config
   fluent-bit-state:
-  grafana_data:
-    name: grafana_data
   authentik_db:
     name: authentik_db
   authentik_media:

@@ -88,14 +88,6 @@ metrics.nikolaivorkinn.com {
 	}
 }
 
-# Grafana, the grafana compose service. The login is Authentik's, as for the hosts above, and Grafana
-# takes the user from X-Authentik-Username, so nothing a visitor sends in it may get through.
-grafana.nikolaivorkinn.com {
-	import access_log
-	request_header -X-Authentik-Username
-	import admin_only 127.0.0.1:3000
-}
-
 sso.nikolaivorkinn.com {
 	import access_log
 	# Authentik, published on loopback only.

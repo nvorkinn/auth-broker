@@ -435,8 +435,6 @@ side, and pushes each with the release tag (and `:latest`):
   `fluent-bit/` config baked in (see [Logs](#logs)).
 - `ghcr.io/nvorkinn/auth-broker-victoria-logs:<tag>`: single-node
   VictoriaLogs, listening on loopback only (see [Logs](#logs)).
-- `ghcr.io/nvorkinn/auth-broker-grafana:<tag>`: Grafana with the VictoriaLogs plugin, its datasource
-  and the dashboards baked in (see [Dashboards](#dashboards)).
 - `ghcr.io/nvorkinn/auth-broker-victoria-metrics:<tag>`: single-node
   VictoriaMetrics, listening on loopback only (see [Metrics](#metrics)).
 
@@ -738,29 +736,6 @@ VictoriaLogs used to run by hand from its own compose project in
 `/opt/victorialogs/`. Before the first deploy that includes this service,
 stop that one so port 9428 is free (its data isn't carried over):
 `docker compose -f /opt/victorialogs/compose.yaml down`.
-
-### Dashboards
-
-Grafana, as code, shows the logs per app: `https://grafana.nikolaivorkinn.com`, for Authentik admins
-only. Everything is in `grafana/` and baked into `ghcr.io/nvorkinn/auth-broker-grafana:<tag>`: the
-VictoriaLogs datasource (`provisioning/datasources/`), the dashboards (`dashboards/*.json`, folder
-"Countdown") and the plugin. Dashboards are read-only in the UI; change the JSON and release.
-
-| Dashboard | Shows |
-|---|---|
-| Config server and renderers | `auth-broker` on the left and `renderer-*` on the right: errors, warnings, requests and 5xx, log volume by level, recent warnings and errors, all lines. *Renderer* (a slug or a regex) and *Contains* narrow it |
-| Screens (ESP32) | `service="countdown-esp32"`: what each screen reported, by device id (`host`) |
-| Platform | Caddy, Authentik, and the orchestrator, Fluent Bit and Victoria services; errors per service |
-
-Queries are LogsQL on the fields in [Logs](#logs), e.g. `{service=~"renderer-.+"} level:in(error,fatal)`.
-Authentik writes `warning` where the others write `warn`, so the queries match both.
-
-Grafana listens on `127.0.0.1:3000` (host networking). Caddy's forward auth names the signed-in user in
-`X-Authentik-Username` and Grafana trusts that header from loopback only, with its own login form off;
-the `grafana` and `logs` Authentik applications are bound to the `authentik Admins` group in the
-blueprint. Its state (users and preferences, nothing else) is in the volume `grafana_data`, limited to
-384 MB of memory. The `deploy-config` job deploys it, pinning `GRAFANA_VERSION` in `.env`. The
-`grafana.` DNS record points at the host like the others.
 
 ### Authentik's Postgres
 

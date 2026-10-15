@@ -1,9 +1,0 @@
-apiVersion: 1
-providers:
-  - name: countdown
-    folder: Countdown
-    type: file
-    # Changes are made in the JSON files, in git: edits in the UI are not kept.
-    allowUiUpdates: false
-    options:
-      path: /etc/grafana/dashboards
