@@ -29,8 +29,6 @@ class GunicornLogger(Logger):
     is left out, as it can carry tokens (the OAuth callback's code, for one)."""
 
     def access(self, resp, req, environ, request_time):
-        if not self.cfg.accesslog and not self.cfg.logconfig_dict:
-            return
         status = int(str(resp.status).split()[0])
         fields = {
             "method": req.method,
