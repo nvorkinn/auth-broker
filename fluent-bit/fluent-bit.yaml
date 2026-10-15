@@ -7,7 +7,6 @@ pipeline:
   inputs:
     - name: tail
       path: /var/lib/docker/containers/*/*-json.log
-      path_key: path
       parser: docker
       tag: docker_logs
       db: /state/docker-logs.db
@@ -19,11 +18,6 @@ pipeline:
     - name: opentelemetry
       listen: 127.0.0.1
       port: 4318
-    # Accepts a `service` and `host` per record from the sender (defaults: auth-broker, this host).
-    - name: http
-      tag: http_logs
-      host: 127.0.0.1
-      port: 9880
     - name: fluentbit_metrics
       tag: telemetry
       scrape_interval: 30
@@ -35,33 +29,39 @@ pipeline:
       scrape_interval: 30
 
   filters:
-    # The host name is picked up here and turned into `host` by normalize.lua, so a sender that
-    # already supplies its own `host` (e.g. a device posting to :9880) keeps it.
-    - name: sysinfo
-      match: '*'
-      fluentbit_version_key: flb_ver
-      os_name_key: os_name
-      hostname_key: _fb_host
-    # Docker app logs that are JSON (Caddy, Authentik, ...) get their fields lifted so the level
-    # can be read; non-JSON lines pass through untouched.
+    # Docker app logs that are JSON (the broker, the renderers, Caddy, Authentik, ...) get their fields
+    # lifted, so `level` and `_msg` reach VictoriaLogs as the app wrote them; other lines keep their text
+    # in `log`. Nothing is rewritten here: the apps emit the standard fields (see the README's Logs section).
     - name: parser
       match: docker_logs
       key_name: log
       parser: json_log
       reserve_data: on
-      preserve_key: on
-    # Standard fields on every log: service, host, level, _msg.
-    - name: lua
+      preserve_key: off
+    # Docker puts the container's log tag (its name, set by the compose logging options) in attrs.tag;
+    # that is the stream's `service`.
+    - name: nest
+      match: docker_logs
+      operation: lift
+      nested_under: attrs
+    - name: modify
+      match: docker_logs
+      rename: tag service
+    # OTLP senders that name no service of their own.
+    - name: modify
+      match_regex: '.*v1.logs$'
+      add: service otlp
+    # The machine, as the other stream field. Fluent Bit runs on the host network, so this is the host's name.
+    - name: modify
       match_regex: '.*logs$'
-      script: /fluent-bit/etc/normalize.lua
-      call: normalize
+      add: host ${HOSTNAME}
 
   outputs:
     - name: http
       match: '*logs'
       host: 127.0.0.1
       port: 9428
-      uri: /insert/jsonline?_stream_fields=service,host&_msg_field=_msg&_time_field=date
+      uri: /insert/jsonline?_stream_fields=service,host&_msg_field=_msg,msg,event,log&_time_field=date
       format: json_lines
       json_date_key: date
       json_date_format: iso8601

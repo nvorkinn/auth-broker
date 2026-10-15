@@ -6,4 +6,5 @@ FROM victoriametrics/victoria-logs:v1.53.0
 # Loopback only: the container uses host networking, and Caddy is the one way
 # in, at logs.nikolaivorkinn.com.
 CMD ["-httpListenAddr=127.0.0.1:9428", \
-     "-storageDataPath=/victoria-logs-data"]
+     "-storageDataPath=/victoria-logs-data", \
+     "-loggerFormat=json"]

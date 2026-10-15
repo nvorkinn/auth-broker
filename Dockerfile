@@ -19,8 +19,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY --from=geodata /geodata geodata/
 COPY broker/ broker/
-COPY wsgi.py .
+COPY wsgi.py gunicorn.conf.py ./
 
 EXPOSE 5000
 
-CMD ["gunicorn", "--bind", "0.0.0.0:5000", "--access-logfile", "-", "--error-logfile", "-", "--log-level", "info", "wsgi:app"]
+CMD ["gunicorn", "--bind", "0.0.0.0:5000", "wsgi:app"]

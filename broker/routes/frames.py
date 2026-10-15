@@ -1,7 +1,8 @@
+import json
 import logging
 import os
 from concurrent.futures import ThreadPoolExecutor
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from hashlib import blake2b
 
 import requests
@@ -18,14 +19,21 @@ FRAME_BYTES = 800 * 480 // 8  # 1-bit packed; better to share this via the proto
 # Retry-After, in seconds, on a GET before the renderer's first frame: it's expected any moment.
 NO_FRAME_RETRY_AFTER = 5
 
-# Where a screen's reports go. Logs: Fluent Bit's HTTP input (fluent-bit/fluent-bit.yaml). Telemetry:
-# VictoriaMetrics' InfluxDB line protocol endpoint. Both listen on the host's loopback, which the
-# broker shares through host networking in compose.
+# Where a screen's reports go. Logs: VictoriaLogs' JSON lines endpoint, with the fields the dashboards
+# group by (see the README's Logs section). Telemetry: VictoriaMetrics' InfluxDB line protocol endpoint.
+# Both listen on the host's loopback, which the broker shares through host networking in compose.
 FORWARD_TIMEOUT = 2
-LOGS_URL_DEFAULT = "http://127.0.0.1:9880/logs"
+LOGS_URL_DEFAULT = "http://127.0.0.1:9428/insert/jsonline?_stream_fields=service,host&_msg_field=_msg&_time_field=_time"
 METRICS_URL_DEFAULT = "http://127.0.0.1:8428/write"
 # What the screen writes where its device_id goes in its line protocol; it can't know it itself.
 DEVICE_ID_PLACEHOLDER = "{device_id}"
+DEVICE_LOG_SERVICE = "countdown-esp32"
+# Names a screen's log entry may carry its text under, in order of preference.
+MESSAGE_KEYS = ("_msg", "log", "message", "msg")
+# Set by the broker from what it knows, so a screen can't claim them.
+RESERVED_KEYS = {"service", "host", "device_id", "level", *MESSAGE_KEYS}
+LEVELS = {"warning": "warn", "critical": "fatal", "err": "error", "trace": "debug"}
+KNOWN_LEVELS = {"debug", "info", "warn", "error", "fatal"}
 
 logger = logging.getLogger(__name__)
 _executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="forward")
@@ -75,15 +83,46 @@ def post_frame(device_id):
                 headers={"Content-Type": "text/plain"},
             )
         if isinstance(logs, list) and logs:
-            records = [_log_record(entry, device_id) for entry in logs]
-            _forward(os.environ.get("FLUENT_BIT_LOGS_URL", LOGS_URL_DEFAULT), json=records)
+            _forward(
+                os.environ.get("VICTORIA_LOGS_URL", LOGS_URL_DEFAULT),
+                data=_log_lines(logs, device_id, datetime.now(UTC)),
+                headers={"Content-Type": "application/json"},
+            )
     return _frame_response(device_id)
 
 
-def _log_record(entry, device_id: str) -> dict:
-    """Fluent Bit's HTTP input only takes JSON objects; VictoriaLogs reads the text from `log`."""
-    record = entry if isinstance(entry, dict) else {"log": str(entry)}
-    return {**record, "device_id": device_id}
+def _log_lines(logs: list, device_id: str, received_at: datetime) -> bytes:
+    """One JSON object per line, the way VictoriaLogs ingests them. The screen has no clock, only the
+    milliseconds it has been up, so a line is dated by how long before this report it was written:
+    the report arrived just after its newest line."""
+    entries = [entry if isinstance(entry, dict) else {"_msg": str(entry)} for entry in logs]
+    uptimes = [e["uptime_ms"] for e in entries if _is_number(e.get("uptime_ms"))]
+    newest = max(uptimes, default=0)
+    records = []
+    for entry in entries:
+        uptime = entry.get("uptime_ms")
+        age_ms = newest - uptime if _is_number(uptime) else 0
+        records.append(_log_record(entry, device_id, received_at - timedelta(milliseconds=age_ms)))
+    return "\n".join(json.dumps(record) for record in records).encode()
+
+
+def _is_number(value) -> bool:
+    return isinstance(value, int | float) and not isinstance(value, bool)
+
+
+def _log_record(entry: dict, device_id: str, at: datetime) -> dict:
+    message = next((entry[k] for k in MESSAGE_KEYS if entry.get(k) not in (None, "")), "")
+    level = str(entry.get("level", "info")).lower()
+    level = LEVELS.get(level, level)
+    return {
+        **{k: v for k, v in entry.items() if k not in RESERVED_KEYS and not k.startswith("_")},
+        "_time": at.isoformat(timespec="milliseconds"),
+        "_msg": str(message),
+        "level": level if level in KNOWN_LEVELS else "info",
+        "service": DEVICE_LOG_SERVICE,
+        "host": device_id,
+        "device_id": device_id,
+    }
 
 
 def _forward(url: str, **request_kwargs) -> None:
