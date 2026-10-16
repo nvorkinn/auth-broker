@@ -420,21 +420,23 @@ def test_0008_backfills_existing_devices_with_a_480_by_800_screen(app):
         assert (config.width, config.height) == (480, 800)
 
 
-def test_0011_backfills_clock_format_and_keeps_existing_settings(app, register_device):
+def test_0012_backfills_clock_format_and_keeps_existing_settings(app, register_device):
     device_id, _ = register_device()
     with app.app_context():
         config = db.session.get(DeviceConfig, device_id)
         config.interval, config.weather_location, config.tfl_style = 30, "London", "card"
+        config.spotify_style = "hero"
         db.session.commit()
         db.session.remove()
 
-        downgrade(revision="0010")
+        downgrade(revision="0011")
         assert "clock_format" not in {column["name"] for column in inspect(db.engine).get_columns("device_config")}
         upgrade()
 
         config = db.session.get(DeviceConfig, device_id)
         assert config.clock_format == "24h"
         assert (config.interval, config.weather_location, config.tfl_style) == (30, "London", "card")
+        assert config.spotify_style == "hero"
 
 
 def test_clock_format_defaults_to_24_hour_for_orm_and_raw_inserts(app):

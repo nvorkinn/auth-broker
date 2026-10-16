@@ -215,6 +215,7 @@ def test_device_config_post_rejects_invalid_clock_formats_without_saving_anythin
             "interval": "20",
             "weather_location": "London",
             "spotify_enabled": "on",
+            "spotify_style": "hero",
             "glowmarkt_username": "new-account",
             "glowmarkt_password": "new-password",
         },
@@ -231,6 +232,7 @@ def test_device_config_post_rejects_invalid_clock_formats_without_saving_anythin
             "",
             False,
         )
+        assert config.spotify_style == "classic"
         assert db.session.get(GlowmarktCredentials, device_id) is None
 
 
@@ -596,8 +598,8 @@ def test_device_config_shows_the_stored_tfl_style_selected(app, paired_client):
         db.session.commit()
     html = client.get("/device").get_data(as_text=True)
     assert re.findall(r'name="tfl_style" value="(\w+)"', html) == ["classic", "hero", "grouped", "card"]
-    assert re.search(r'value="card" checked', html)
-    assert not re.search(r'value="classic" checked', html)
+    assert re.search(r'name="tfl_style" value="card" checked', html)
+    assert not re.search(r'name="tfl_style" value="classic" checked', html)
 
 
 def test_device_config_shows_a_picture_of_every_tfl_style(app, paired_client):
@@ -636,3 +638,54 @@ def test_device_config_post_rejects_an_unknown_tfl_style(app, paired_client):
     assert b"The TfL style must be one of classic, hero, grouped, card." in response.data
     with app.app_context():
         assert db.session.get(DeviceConfig, device_id).tfl_style == "classic"
+
+
+def test_device_config_shows_the_stored_spotify_style_selected(app, paired_client):
+    client, device_id, _ = paired_client
+    with app.app_context():
+        db.session.get(DeviceConfig, device_id).spotify_style = "hero"
+        db.session.commit()
+    html = client.get("/device").get_data(as_text=True)
+    assert re.findall(r'name="spotify_style" value="(\w+)"', html) == ["classic", "airy", "hero", "card"]
+    assert re.search(r'name="spotify_style" value="hero" checked', html)
+    assert not re.search(r'name="spotify_style" value="classic" checked', html)
+    # The TfL picker beside it keeps its own choice.
+    assert re.search(r'name="tfl_style" value="classic" checked', html)
+
+
+def test_device_config_shows_a_picture_of_every_spotify_style(app, paired_client):
+    client, _, _ = paired_client
+    html = client.get("/device").get_data(as_text=True)
+    pictures = re.findall(r'<img src="(/static/spotify-styles/\w+\.png)"', html)
+    assert pictures == [f"/static/spotify-styles/{style}.png" for style in ("classic", "airy", "hero", "card")]
+    for picture in pictures:
+        response = client.get(picture)
+        assert response.status_code == 200
+        assert response.mimetype == "image/png"
+
+
+def test_device_config_post_persists_the_spotify_style(app, paired_client):
+    client, device_id, _ = paired_client
+    response = client.post("/device", data={"interval": "15", "spotify_style": "airy"})
+    assert response.status_code == 302
+    with app.app_context():
+        assert db.session.get(DeviceConfig, device_id).spotify_style == "airy"
+
+
+def test_device_config_post_without_a_spotify_style_keeps_the_stored_one(app, paired_client):
+    client, device_id, _ = paired_client
+    with app.app_context():
+        db.session.get(DeviceConfig, device_id).spotify_style = "card"
+        db.session.commit()
+    client.post("/device", data={"interval": "15"})
+    with app.app_context():
+        assert db.session.get(DeviceConfig, device_id).spotify_style == "card"
+
+
+def test_device_config_post_rejects_an_unknown_spotify_style(app, paired_client):
+    client, device_id, _ = paired_client
+    response = client.post("/device", data={"interval": "15", "spotify_style": "fancy"})
+    assert response.status_code == 400
+    assert b"The Spotify style must be one of classic, airy, hero, card." in response.data
+    with app.app_context():
+        assert db.session.get(DeviceConfig, device_id).spotify_style == "classic"
