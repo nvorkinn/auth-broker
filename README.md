@@ -440,8 +440,8 @@ side, and pushes each with the release tag (and `:latest`):
 
 - `ghcr.io/nvorkinn/auth-broker:<tag>`: the broker itself (`Dockerfile`).
 - `ghcr.io/nvorkinn/auth-broker-caddy:<tag>`: [Caddy](https://caddyserver.com/)
-  with this repo's `caddy/Caddyfile` baked in. It terminates TLS for
-  `auth.nikolaivorkinn.com` and reverse-proxies to the broker.
+  with this repo's `caddy/Caddyfile` and `caddy/site/` baked in. It terminates TLS for
+  `auth.nikolaivorkinn.com` and reverse-proxies to the broker, and serves the public page (see [Caddy](#caddy)).
 - `ghcr.io/nvorkinn/auth-broker-fluent-bit:<tag>`: Fluent Bit with this repo's
   `fluent-bit/` config baked in (see [Logs](#logs)).
 - `ghcr.io/nvorkinn/auth-broker-victoria-logs:<tag>`: single-node
@@ -668,6 +668,11 @@ the Caddyfile means the host: it reaches the broker (also host-networked, bound 
 share the Caddyfile's `admin_only` snippet: an Authentik login in the admin
 group, then the upstream. A Caddyfile change ships like code: edit
 `caddy/Caddyfile`, tag a release, bump `CADDY_VERSION`.
+
+`countdown.nikolaivorkinn.com` is the public page about the display, with no login. It's static: `caddy/site/`
+is baked into the Caddy image at `/srv/countdown`, so it ships the same way. Its screen pictures are frames from
+pi-dashboard's renderer (`tests/test_display_snapshots.py`'s helpers, in English and Norwegian). Its DNS name needs an
+A record for the host before Caddy can get its certificate.
 
 Its certificates and ACME account live in the named volume `caddy_data`
 (config state in `caddy_config`). Never replace those with throwaway storage

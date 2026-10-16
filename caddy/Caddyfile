@@ -93,3 +93,11 @@ sso.nikolaivorkinn.com {
 	# Authentik, published on loopback only.
 	reverse_proxy 127.0.0.1:9000
 }
+
+# The public page about the display: static files baked into this image from caddy/site/. No login.
+countdown.nikolaivorkinn.com {
+	import access_log
+	encode zstd gzip
+	root * /srv/countdown
+	file_server
+}
