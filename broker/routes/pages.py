@@ -13,10 +13,11 @@ from ..auth import (
     screen_label,
     user_devices,
 )
-from ..clients import tfl, weather
+from ..clients import weather
 from ..db import db
 from ..models import (
     CLOCK_FORMATS,
+    LANGUAGES,
     ORIENTATIONS,
     SPOTIFY_STYLES,
     TFL_STYLES,
@@ -25,7 +26,7 @@ from ..models import (
     GlowmarktCredentials,
     SpotifyToken,
 )
-from ..services import assignments, geoip, pairing
+from ..services import assignments, geoip, pairing, stops
 
 bp = Blueprint("pages", __name__)
 
@@ -33,15 +34,27 @@ PAIRING_TOKEN_RE = re.compile(r"^[0-9a-f]{64}$")
 
 # UK postcode shape: outward code (e.g. SW1A, N1, EC2V) then inward code (digit + two letters).
 UK_POSTCODE_RE = re.compile(r"^([A-Z]{1,2}[0-9][A-Z0-9]?)([0-9][A-Z]{2})$")
+# A Norwegian postcode is four digits ("0150"); a UK one always has letters, so the two can't be confused.
+NORWEGIAN_POSTCODE_RE = re.compile(r"^[0-9]{4}$")
 
 
 def normalize_postcode(value: str) -> str | None:
-    """Returns the postcode in canonical form ("SW1A 1AA"), "" if blank, or None if it isn't a valid UK postcode."""
+    """Returns the postcode in canonical form ("SW1A 1AA", "0150"), "" if blank, or None if it is neither a UK nor
+    a Norwegian postcode."""
     compact = re.sub(r"\s+", "", value).upper()
     if not compact:
         return ""
+    if NORWEGIAN_POSTCODE_RE.match(compact):
+        return compact
     match = UK_POSTCODE_RE.match(compact)
     return f"{match[1]} {match[2]}" if match else None
+
+
+def postcode_country(postcode: str) -> str | None:
+    """The country of a normalized postcode: "NO", "GB", or None for none."""
+    if not postcode:
+        return None
+    return "NO" if NORWEGIAN_POSTCODE_RE.match(postcode) else "GB"
 
 
 @bp.app_context_processor
@@ -136,6 +149,7 @@ def device_config():
 
         config = db.session.get(DeviceConfig, device_id)
         clock_format = request.form.get("clock_format", config.clock_format)
+        language = request.form.get("language", config.language)
         orientation = request.form.get("orientation", config.orientation)
         tfl_style = request.form.get("tfl_style", config.tfl_style)
         spotify_style = request.form.get("spotify_style", config.spotify_style)
@@ -147,12 +161,14 @@ def device_config():
         if found is False:
             errors.append(
                 f'We couldn\'t find "{weather_location}" for the weather: try just the town or city name, '
-                'not a postcode (e.g. "Kennington" or "London").'
+                'not a postcode (e.g. "Kennington" or "Oslo").'
             )
         elif found is None:
             errors.append("We couldn't check the weather location just now. Please try again in a minute.")
         if postcode is None:
-            errors.append(f'"{raw_postcode.strip()}" isn\'t a valid UK postcode.')
+            errors.append(f'"{raw_postcode.strip()}" isn\'t a valid UK or Norwegian postcode.')
+        if language not in LANGUAGES:
+            errors.append(f"The language must be one of {', '.join(LANGUAGES)}.")
         if clock_format not in CLOCK_FORMATS:
             errors.append(f"The clock format must be one of {', '.join(CLOCK_FORMATS)}.")
         if orientation not in ORIENTATIONS:
@@ -166,6 +182,7 @@ def device_config():
 
         config.interval = interval
         config.clock_format = clock_format
+        config.language = language
         config.weather_location = weather_location
         config.postcode = postcode
         config.spotify_enabled = spotify_enabled
@@ -266,11 +283,13 @@ def _render_device_config(device_id: str, errors: list[str] | None = None):
         config=config,
         weather_suggestion=weather_suggestion,
         clock_formats=CLOCK_FORMATS,
+        languages=LANGUAGES,
         orientations=ORIENTATIONS,
         tfl_styles=TFL_STYLES,
         spotify_styles=SPOTIFY_STYLES,
         page_orientation=PAGE_ORIENTATION,
-        stops=tfl.resolve_stops(config.tfl_stop_ids),
+        stops=stops.resolve(config.tfl_stop_ids),
+        MODE_ICONS=stops.MODE_ICONS,
         spotify_linked=db.session.get(SpotifyToken, device_id) is not None,
         glowmarkt=glowmarkt,
         errors=errors or [],

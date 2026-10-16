@@ -30,10 +30,11 @@ erDiagram
         string device_id PK, FK
         int interval "seconds, default 15"
         string clock_format "12h or 24h, default 24h"
+        string language "en or nb, default en"
         string weather_location
-        string postcode
+        string postcode "UK or Norwegian"
         bool spotify_enabled
-        json tfl_stop_ids
+        json tfl_stop_ids "TfL and Entur stop ids, mixed"
         string orientation
         int width "from register"
         int height "from register"

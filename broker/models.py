@@ -54,6 +54,8 @@ class PairingCode(db.Model):
 
 ORIENTATIONS = ("horizontal", "vertical")
 CLOCK_FORMATS = {"24h": "24-hour (13:00)", "12h": "12-hour (1:00 PM)"}
+# What the screen is drawn in: the API contract's language, with its name in itself for the config page.
+LANGUAGES = {"en": "English", "nb": "Norsk"}
 # How the screen draws each stop's departures: the API contract's tfl.style, with the name and description the
 # config page shows beside each one's picture (broker/static/tfl-styles/<style>.png, cut from the renderer's own
 # snapshot of it).
@@ -79,11 +81,16 @@ class DeviceConfig(db.Model):
     device_id: Mapped[str] = mapped_column(ForeignKey("devices.device_id"), primary_key=True)
     interval: Mapped[int] = mapped_column(Integer, default=15, server_default=text("15"))
     clock_format: Mapped[str] = mapped_column(String, default="24h", server_default=text("'24h'"))
+    # The screen's language, one of LANGUAGES.
+    language: Mapped[str] = mapped_column(String, default="en", server_default=text("'en'"))
     weather_location: Mapped[str] = mapped_column(String, default="", server_default=text("''"))
+    # A UK postcode ("SW1A 1AA") or a Norwegian one ("0150"); see pages.normalize_postcode.
     postcode: Mapped[str] = mapped_column(String, default="", server_default=text("''"))
     spotify_enabled: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("0"))
     # How Spotify is drawn, one of SPOTIFY_STYLES.
     spotify_style: Mapped[str] = mapped_column(String, default="classic", server_default=text("'classic'"))
+    # Every departure stop, in the owner's order: TfL NaPTAN ids and Entur NSR ids (NSR:...) mixed; the id says
+    # which (services/stops.py). Named for when they were all TfL's.
     tfl_stop_ids: Mapped[list[str]] = mapped_column(JSON, default=list, server_default=text("'[]'"))
     # How each stop's departures are drawn, one of TFL_STYLES.
     tfl_style: Mapped[str] = mapped_column(String, default="classic", server_default=text("'classic'"))

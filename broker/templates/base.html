@@ -221,6 +221,54 @@
             background-color: var(--tfl-blue);
         }
 
+        /* Norway's (Entur's) modes; its buses take .mode-bus. */
+        .mode-metro {
+            background-color: #ec700c;
+        }
+
+        .mode-tram {
+            background-color: #0b91ef;
+        }
+
+        .mode-rail {
+            background-color: #b4111c;
+        }
+
+        .mode-water {
+            background-color: #682c88;
+        }
+
+        /* A station's platforms, listed under it in the search results. */
+        .search-item.indent {
+            padding-left: 52px;
+            background-color: #f8fafc;
+        }
+
+        .search-item.indent .mode-icon {
+            width: 24px;
+            height: 24px;
+        }
+
+        @media (max-width: 600px) {
+            .search-item.indent {
+                padding-left: 32px;
+            }
+        }
+
+        /* Entur's ids are long and unbroken; let them wrap rather than push the card's buttons out. */
+        .item-text {
+            min-width: 0;
+        }
+
+        .item-text code {
+            overflow-wrap: anywhere;
+        }
+
+        .stop-area {
+            font-weight: 400;
+            color: var(--text-muted);
+        }
+
         .item-text h4 {
             font-size: 14px;
             font-weight: 600;
@@ -241,6 +289,8 @@
             border-radius: 6px;
             cursor: pointer;
             transition: opacity 0.2s;
+            white-space: nowrap;
+            flex-shrink: 0;
         }
 
         .btn-add:hover {
