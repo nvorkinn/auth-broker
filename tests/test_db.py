@@ -474,12 +474,12 @@ def test_0013_backfills_english_and_keeps_existing_settings(app, register_device
         assert (config.clock_format, config.tfl_stop_ids) == ("12h", ["940GZZLUKNG", "NSR:Quay:7333"])
 
 
-# --- 0014: classic retired --------------------------------------------------------------------------
+# --- 0015: classic retired --------------------------------------------------------------------------
 
 
-def test_0014_moves_classic_devices_to_hero_and_keeps_the_others(app):
+def test_0015_moves_classic_devices_to_hero_and_keeps_the_others(app):
     with app.app_context():
-        downgrade(revision="0013")
+        downgrade(revision="0014")
         with db.engine.begin() as conn:
             for device_id, tfl_style, spotify_style in [("old", "classic", "classic"), ("picked", "card", "airy")]:
                 conn.exec_driver_sql(
