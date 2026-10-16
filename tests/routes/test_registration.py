@@ -15,7 +15,7 @@ from broker.db import db
 from broker.models import Device, DeviceConfig
 from broker.routes.frames import FRAME_BYTES, NO_FRAME_RETRY_AFTER
 from broker.services import registration
-from broker.services.pair_throttle import REGISTRATIONS_PER_MINUTE, PairThrottle
+from broker.services.pair_throttle import MAX_REGISTRATION_LOCKOUT_SECONDS, REGISTRATIONS_PER_MINUTE, PairThrottle
 
 USER = "user-1"
 RENDERER = "renderer-secret-0123456789"
@@ -207,7 +207,9 @@ def test_a_claim_is_not_throttled(app, client):
 @pytest.fixture
 def register_throttle(app):
     """Put back the real /register limit the app fixture lifts."""
-    app.extensions["register_throttle"] = PairThrottle(max_events=REGISTRATIONS_PER_MINUTE)
+    app.extensions["register_throttle"] = PairThrottle(
+        max_events=REGISTRATIONS_PER_MINUTE, max_lockout=MAX_REGISTRATION_LOCKOUT_SECONDS
+    )
 
 
 @pytest.mark.usefixtures("register_throttle")

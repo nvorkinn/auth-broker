@@ -230,7 +230,7 @@ def test_device_config_post_rejects_invalid_clock_formats_without_saving_anythin
         config = db.session.get(DeviceConfig, device_id)
         assert (config.clock_format, config.interval, config.weather_location, config.spotify_enabled) == (
             "12h",
-            15,
+            20,
             "",
             False,
         )
@@ -275,7 +275,22 @@ def test_device_config_post_falls_back_to_default_interval_for_garbage_input(app
     client.post("/device", data={"interval": "not-a-number"})
 
     with app.app_context():
-        assert db.session.get(DeviceConfig, device_id).interval == 15
+        assert db.session.get(DeviceConfig, device_id).interval == 20
+
+
+@pytest.mark.parametrize(("submitted", "saved"), [("5", 20), ("0", 20), ("20", 20), ("300", 300), ("3600", 300)])
+def test_device_config_post_keeps_the_interval_between_20_seconds_and_5_minutes(app, paired_client, submitted, saved):
+    client, device_id, _ = paired_client
+    client.post("/device", data={"interval": submitted})
+
+    with app.app_context():
+        assert db.session.get(DeviceConfig, device_id).interval == saved
+
+
+def test_device_config_page_offers_only_the_allowed_intervals(paired_client):
+    client, _, _ = paired_client
+
+    assert b'min="20" max="300"' in client.get("/device").data
 
 
 def test_device_config_shows_resolved_stop_names(paired_client):
@@ -480,7 +495,7 @@ def test_device_config_post_saves_normalized_postcode(app, paired_client):
 
 def test_device_config_post_rejects_invalid_postcode_and_saves_nothing(app, paired_client):
     client, device_id, _ = paired_client
-    client.post("/device", data={"interval": "15", "postcode": "SW1A 1AA", "weather_location": "London"})
+    client.post("/device", data={"interval": "20", "postcode": "SW1A 1AA", "weather_location": "London"})
 
     response = client.post(
         "/device", data={"interval": "30", "postcode": "not a postcode", "weather_location": "Leeds"}
@@ -490,12 +505,12 @@ def test_device_config_post_rejects_invalid_postcode_and_saves_nothing(app, pair
 
     with app.app_context():
         config = db.session.get(DeviceConfig, device_id)
-        assert (config.interval, config.postcode, config.weather_location) == (15, "SW1A 1AA", "London")
+        assert (config.interval, config.postcode, config.weather_location) == (20, "SW1A 1AA", "London")
 
 
 def test_device_config_post_rejects_weather_location_open_meteo_cant_find(app, paired_client, weather_location_lookup):
     client, device_id, _ = paired_client
-    client.post("/device", data={"interval": "15", "weather_location": "London"})
+    client.post("/device", data={"interval": "20", "weather_location": "London"})
 
     weather_location_lookup.return_value = False
     response = client.post("/device", data={"interval": "30", "weather_location": "SE17 2PX"})
@@ -506,7 +521,7 @@ def test_device_config_post_rejects_weather_location_open_meteo_cant_find(app, p
     weather_location_lookup.assert_called_with("SE17 2PX")
     with app.app_context():
         config = db.session.get(DeviceConfig, device_id)
-        assert (config.interval, config.weather_location) == (15, "London")
+        assert (config.interval, config.weather_location) == (20, "London")
 
 
 def test_device_config_post_refuses_an_unverified_weather_location_when_open_meteo_is_unreachable(

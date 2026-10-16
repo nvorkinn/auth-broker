@@ -97,12 +97,12 @@ def test_saving_one_screen_leaves_the_other_alone(app, client, two_screens):
     first, second = two_screens
     _set_weather(app, second, "Secondtown")
 
-    response = client.post(f"/device/{first}", data={"weather_location": "", "interval": "20", "postcode": ""})
+    response = client.post(f"/device/{first}", data={"weather_location": "", "interval": "30", "postcode": ""})
 
     assert (response.status_code, response.headers["Location"]) == (302, f"/device/{first}")
     with app.app_context():
-        assert db.session.get(DeviceConfig, first).interval == 20
-        assert db.session.get(DeviceConfig, second).interval == 15
+        assert db.session.get(DeviceConfig, first).interval == 30
+        assert db.session.get(DeviceConfig, second).interval == 20
     assert _weather(app, second) == "Secondtown"
 
 

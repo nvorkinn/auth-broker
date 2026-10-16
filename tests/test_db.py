@@ -209,7 +209,8 @@ def test_a_legacy_db_keeps_its_data(adopt):
             "kitchen",
         )
         config = db.session.get(DeviceConfig, "d")
-        assert (config.tfl_stop_ids, config.spotify_enabled, config.interval) == (["S1"], True, 15)
+        # Its old default of 15 seconds is raised to the 20 second minimum.
+        assert (config.tfl_stop_ids, config.spotify_enabled, config.interval) == (["S1"], True, 20)
         assert config.clock_format == "24h"
         frame = db.session.get(Frame, "d")
         assert (frame.frame, frame.rendered_at) == (b"\xaa\x55", datetime(2026, 1, 3, tzinfo=UTC))

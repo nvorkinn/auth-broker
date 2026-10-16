@@ -63,6 +63,9 @@ ORIENTATIONS = ("horizontal", "vertical")
 CLOCK_FORMATS = {"24h": "24-hour (13:00)", "12h": "12-hour (1:00 PM)"}
 # What the screen is drawn in: the API contract's language, with its name in itself for the config page.
 LANGUAGES = {"en": "English", "nb": "Norsk"}
+# The screen's refresh interval, in seconds: its default and the range the config site accepts.
+DEFAULT_INTERVAL = 20
+MIN_INTERVAL, MAX_INTERVAL = 20, 300
 # How the screen draws each stop's departures: the API contract's tfl.style, with the name and description the
 # config page shows beside each one's picture (broker/static/tfl-styles/<style>.png, cut from the renderer's own
 # snapshot of it).
@@ -88,7 +91,7 @@ class DeviceConfig(db.Model):
     __tablename__ = "device_config"
 
     device_id: Mapped[str] = mapped_column(ForeignKey("devices.device_id"), primary_key=True)
-    interval: Mapped[int] = mapped_column(Integer, default=15, server_default=text("15"))
+    interval: Mapped[int] = mapped_column(Integer, default=DEFAULT_INTERVAL, server_default=text("20"))
     clock_format: Mapped[str] = mapped_column(String, default="24h", server_default=text("'24h'"))
     # The screen's language, one of LANGUAGES.
     language: Mapped[str] = mapped_column(String, default="en", server_default=text("'en'"))
