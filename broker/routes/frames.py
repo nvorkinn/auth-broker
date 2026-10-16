@@ -1,17 +1,23 @@
+"""A screen's frames: the renderer uploads them, and the screen polls for them and reports its logs and metrics."""
+
 import json
 import logging
 import os
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 from hashlib import blake2b
+from typing import TYPE_CHECKING
 
 import requests
 from flask import Blueprint, Response, abort, jsonify, request
 from sqlalchemy.dialects.sqlite import insert
 
-from ..auth import require_device_auth
-from ..db import db
-from ..models import DeviceConfig, Frame
+from broker.auth import require_device_auth
+from broker.db import db
+from broker.models import DeviceConfig, Frame
+
+if TYPE_CHECKING:
+    from flask.typing import ResponseReturnValue
 
 bp = Blueprint("frames", __name__, url_prefix="/api")
 
@@ -41,7 +47,8 @@ _executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="forward")
 
 @bp.put("/frame")
 @require_device_auth(roles={"renderer"})
-def update_frame(device_id):
+def update_frame(device_id: str) -> ResponseReturnValue:
+    """Store the renderer's latest frame for its screen."""
     frame = request.get_data()
     if len(frame) != FRAME_BYTES:
         abort(400)
@@ -59,18 +66,23 @@ def update_frame(device_id):
 
 @bp.get("/frame")
 @require_device_auth(roles={"display", "renderer"})
-def get_frame(device_id):
-    """Polled by the screen. Every answer it should keep polling after carries Retry-After, so its
-    loop is just "handle the status, sleep Retry-After": the device's refresh interval once there's
-    a frame (the renderer redraws no more often than that), a few seconds before the first one."""
+def get_frame(device_id: str) -> ResponseReturnValue:
+    """Serve the screen its current frame.
+
+    The screen polls this. Every answer it should keep polling after carries Retry-After, so its loop is
+    just "handle the status, sleep Retry-After": the device's refresh interval once there's a frame
+    (the renderer redraws no more often than that), a few seconds before the first one.
+    """
     return _frame_response(device_id)
 
 
 @bp.post("/frame")
 @require_device_auth(roles={"display", "renderer"})
-def post_frame(device_id):
-    """Same answer as the GET, but the screen also reports what it logged and measured since its
-    last poll, to save it a request. Both are forwarded without making the screen wait."""
+def post_frame(device_id: str) -> ResponseReturnValue:
+    """Answer as the GET does, and forward what the screen logged and measured since its last poll.
+
+    The screen reports both here to save it a request. Both are forwarded without making the screen wait.
+    """
     body = request.get_json(silent=True)
     if isinstance(body, dict):
         metrics, logs = body.get("metrics"), body.get("logs")
@@ -92,9 +104,11 @@ def post_frame(device_id):
 
 
 def _log_lines(logs: list, device_id: str, received_at: datetime) -> bytes:
-    """One JSON object per line, the way VictoriaLogs ingests them. The screen has no clock, only the
-    milliseconds it has been up, so a line is dated by how long before this report it was written:
-    the report arrived just after its newest line."""
+    """Turn a screen's log entries into one JSON object per line, the way VictoriaLogs ingests them.
+
+    The screen has no clock, only the milliseconds it has been up, so a line is dated by how long before this
+    report it was written: the report arrived just after its newest line.
+    """
     entries = [entry if isinstance(entry, dict) else {"_msg": str(entry)} for entry in logs]
     uptimes = [e["uptime_ms"] for e in entries if _is_number(e.get("uptime_ms"))]
     newest = max(uptimes, default=0)
@@ -106,7 +120,7 @@ def _log_lines(logs: list, device_id: str, received_at: datetime) -> bytes:
     return "\n".join(json.dumps(record) for record in records).encode()
 
 
-def _is_number(value) -> bool:
+def _is_number(value: object) -> bool:
     return isinstance(value, int | float) and not isinstance(value, bool)
 
 
@@ -125,11 +139,11 @@ def _log_record(entry: dict, device_id: str, at: datetime) -> dict:
     }
 
 
-def _forward(url: str, **request_kwargs) -> None:
+def _forward(url: str, **request_kwargs: object) -> None:
     _executor.submit(_post, url, request_kwargs)
 
 
-def _post(url: str, request_kwargs: dict) -> None:
+def _post(url: str, request_kwargs: dict[str, object]) -> None:
     # Best-effort: a destination that's down or unhappy must never fail or slow a screen's poll.
     try:
         requests.post(url, timeout=FORWARD_TIMEOUT, **request_kwargs).raise_for_status()
@@ -137,7 +151,7 @@ def _post(url: str, request_kwargs: dict) -> None:
         logger.warning("could not forward to %s", url, exc_info=True)
 
 
-def _frame_response(device_id: str):
+def _frame_response(device_id: str) -> ResponseReturnValue:
     row = db.session.get(Frame, device_id)
     if not row:
         return jsonify(error="no frame yet"), 404, {"Retry-After": str(NO_FRAME_RETRY_AFTER)}

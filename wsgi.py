@@ -1,3 +1,5 @@
+"""The WSGI entry point gunicorn serves; run directly, it starts Flask's development server."""
+
 import os
 
 from broker import create_app

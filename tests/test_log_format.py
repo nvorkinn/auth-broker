@@ -1,5 +1,6 @@
 import json
 import logging
+import sys
 from datetime import timedelta
 from types import SimpleNamespace
 
@@ -32,12 +33,15 @@ def test_levels_are_the_ones_victoria_logs_dashboards_use(level, expected):
     assert _format(level)["level"] == expected
 
 
+def _boom():
+    msg = "boom"
+    raise ValueError(msg)
+
+
 def test_a_traceback_stays_in_one_record():
     try:
-        raise ValueError("boom")
+        _boom()
     except ValueError:
-        import sys
-
         entry = _format(logging.ERROR, "failed", (), exc_info=sys.exc_info())
 
     assert "Traceback" in entry["exception"]
@@ -72,7 +76,7 @@ def _access(status, query=b"", sent=5):
 
 
 def test_the_access_log_has_the_request_as_fields_without_the_query_string():
-    record, entry = _access(200, query=b"code=SECRET")
+    _record, entry = _access(200, query=b"code=SECRET")
 
     assert entry == {
         "level": "info",

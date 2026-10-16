@@ -3,6 +3,8 @@ import logging
 
 import pytest
 
+from broker import request_log
+
 
 class _Records(logging.Handler):
     def __init__(self):
@@ -15,8 +17,11 @@ class _Records(logging.Handler):
 
 @pytest.fixture
 def caplog(app):
-    """The app logger's own records. The migration tests leave that logger disabled (alembic's fileConfig
-    does), so it's switched back on here."""
+    """Capture the app logger's own records.
+
+    The migration tests leave that logger disabled (alembic's fileConfig does), so it's switched back
+    on here.
+    """
     handler = _Records()
     previous = app.logger.level, app.logger.disabled
     app.logger.addHandler(handler)
@@ -38,8 +43,6 @@ def test_nothing_is_logged_by_default(client, caplog):
 
 def test_every_request_is_logged_with_its_headers_and_the_redirect(app, client, caplog):
     app.config["LOG_REQUEST_HEADERS"] = True
-    from broker import request_log
-
     request_log.init_app(app)
 
     client.set_cookie("a", "b")

@@ -1,4 +1,15 @@
+import secrets
+
 import pytest
+from cryptography.fernet import Fernet
+from sqlalchemy import select
+
+from broker import create_app
+from broker.auth import hash_secret
+from broker.db import db
+from broker.models import Device
+from broker.services import assignments
+from broker.services.pair_throttle import PairThrottle
 
 
 @pytest.fixture
@@ -11,22 +22,14 @@ def app(tmp_path, monkeypatch):
     monkeypatch.setenv("WEATHER_API_KEY", "test-weather-key")
     monkeypatch.setenv("BROKER_DB_PATH", str(tmp_path / "broker.db"))
 
-    from cryptography.fernet import Fernet
-
     monkeypatch.setenv("CREDENTIAL_ENCRYPTION_KEY", Fernet.generate_key().decode())
-
-    from broker import create_app
 
     application = create_app()
     application.config.update(TESTING=True)
     # Tests register far more devices a minute than the real limit allows; the throttle's own
     # tests put the real one back (see register_throttle).
-    from broker.services.pair_throttle import PairThrottle
-
     application.extensions["register_throttle"] = PairThrottle(max_events=10_000)
     yield application
-
-    from broker.db import db
 
     with application.app_context():
         db.engine.dispose()
@@ -34,12 +37,15 @@ def app(tmp_path, monkeypatch):
 
 USER = "user-1"
 USERNAME = "tester"
+DEVICE_SECRET = "a-very-long-device-secret-value"
 
 
 @pytest.fixture
 def client(app):
-    """A browser signed in as USER: the header the login proxy sets (see auth.current_user). Device API
-    calls ignore it."""
+    """Return a browser signed in as USER.
+
+    It sends the header the login proxy sets (see auth.current_user); device API calls ignore it.
+    """
     client = app.test_client()
     client.environ_base["HTTP_X_AUTHENTIK_UID"] = USER
     client.environ_base["HTTP_X_AUTHENTIK_USERNAME"] = USERNAME
@@ -48,13 +54,16 @@ def client(app):
 
 @pytest.fixture
 def anonymous_client(app):
-    """A request that didn't come through the login proxy."""
+    """Return a client whose requests didn't come through the login proxy."""
     return app.test_client()
 
 
 @pytest.fixture
 def cli(app):
-    """Runs a `flask devices ...` command against the test app: cli("list"), cli("unpair", device_id)."""
+    """Run a `flask devices ...` command against the test app.
+
+    For example: cli("list"), cli("unpair", device_id).
+    """
     runner = app.test_cli_runner()
 
     def _invoke(*args: str):
@@ -65,19 +74,13 @@ def cli(app):
 
 @pytest.fixture
 def claim_renderer(app, client):
-    """Gives a registered screen a renderer the way the orchestrator does: its owner names it (here the
-    assignment is made directly), then the renderer claims its device with the token. Returns the claim response."""
+    """Give a registered screen a renderer the way the orchestrator does; return the claim response.
+
+    Its owner names it (here the assignment is made directly), then the renderer claims its device with
+    the token.
+    """
 
     def _claim(display_secret: str, renderer_secret: str):
-        import secrets
-
-        from sqlalchemy import select
-
-        from broker.auth import hash_secret
-        from broker.db import db
-        from broker.models import Device
-        from broker.services import assignments
-
         with app.app_context():
             device = db.session.scalar(select(Device).where(Device.display_secret_hash == hash_secret(display_secret)))
             token = assignments.create(device, secrets.token_hex(3), None).claim_token
@@ -88,10 +91,12 @@ def claim_renderer(app, client):
 
 @pytest.fixture
 def register_device(client, claim_renderer):
-    """Registers a screen (whose secret is "display-" plus the given one) and then a renderer with the given secret,
-    returning (device_id, secret)."""
+    """Register a screen and then a renderer with the given secret, returning (device_id, secret).
 
-    def _register(secret: str = "a-very-long-device-secret-value"):
+    The screen's secret is "display-" plus the given one.
+    """
+
+    def _register(secret: str = DEVICE_SECRET):
         screen = client.post("/api/devices/register", json={"secret": "display-" + secret, "width": 480, "height": 800})
         assert screen.status_code == 201
         response = claim_renderer("display-" + secret, secret)
@@ -103,8 +108,10 @@ def register_device(client, claim_renderer):
 
 @pytest.fixture
 def split_device(client, claim_renderer):
-    """A device whose screen registered and then had a renderer claim it: returns (device_id,
-    renderer_secret, display_secret)."""
+    """Register a screen and have a renderer claim it.
+
+    Returns (device_id, renderer_secret, display_secret).
+    """
     renderer_secret, display_secret = "renderer-secret-0123456789", "display-secret-0123456789"
     screen = client.post("/api/devices/register", json={"secret": display_secret, "width": 480, "height": 800})
     assert screen.status_code == 201
@@ -116,7 +123,7 @@ def split_device(client, claim_renderer):
 
 @pytest.fixture
 def paired_client(client, register_device):
-    """A test client whose user is already paired with a freshly-registered device."""
+    """Return a test client whose user is already paired with a freshly-registered device."""
     device_id, device_secret = register_device()
 
     code_response = client.post(

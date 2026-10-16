@@ -1,5 +1,7 @@
 from unittest.mock import Mock, patch
 
+import pytest
+
 from broker.clients import entur
 
 
@@ -67,9 +69,6 @@ def test_a_bus_stop_pole_is_a_stop_not_a_platform(app):
 def test_query_raises_on_graphql_errors():
     http = Mock()
     http.post.return_value = _response({"errors": [{"message": "bad id"}]})
-    try:
+    with pytest.raises(RuntimeError) as excinfo:
         entur._query("query", {}, http)
-    except RuntimeError as e:
-        assert str(e) == "bad id"
-    else:
-        raise AssertionError("expected a RuntimeError")
+    assert str(excinfo.value) == "bad id"

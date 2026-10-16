@@ -13,7 +13,7 @@ SCREEN_SECRET = "display-" + SECRET  # what register_device gives the device's s
 
 
 def token_for_secret(secret=SCREEN_SECRET):
-    """What the device computes: SHA-256 of "pairing:" and the hex SHA-256 of its secret."""
+    """Compute what the device does: SHA-256 of "pairing:" and the hex SHA-256 of its secret."""
     return hashlib.sha256(f"pairing:{hashlib.sha256(secret.encode()).hexdigest()}".encode()).hexdigest()
 
 
@@ -107,7 +107,8 @@ def test_pairing_by_token_needs_the_login_proxy_header(anonymous_client, registe
 
 def test_the_pairing_page_carries_the_token_script_and_a_code_fallback(client):
     page = client.get("/pair").get_data(as_text=True)
-    assert "location.hash" in page and 'name="code"' in page
+    assert "location.hash" in page
+    assert 'name="code"' in page
 
 
 def test_the_pairing_page_passes_on_a_query_token(client):

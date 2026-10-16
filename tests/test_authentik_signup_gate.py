@@ -1,9 +1,13 @@
-"""The sign-up gate in authentik/authentik-config.yaml, run here the way Authentik does: its text is the body of a
-function of `request`. It offers the sign-up only to a login that will return to the broker's /pair page."""
+"""Test the sign-up gate in authentik/authentik-config.yaml, run here the way Authentik does.
+
+Its text is the body of a function of `request`. It offers the sign-up only to a login that will return to the
+broker's /pair page.
+"""
 
 import base64
 import json
 import textwrap
+from pathlib import Path
 from types import SimpleNamespace
 from urllib.parse import urlencode
 
@@ -13,12 +17,12 @@ BLUEPRINT = "authentik/authentik-config.yaml"
 
 
 def _gate():
-    text = open(BLUEPRINT).read()
+    text = Path(BLUEPRINT).read_text()
     start = text.index("      name: broker-enrollment-from-broker")
     body = text[text.index("      expression: |\n", start) + len("      expression: |\n") :]
     body = body[: body.index("\n  - model:")]
     namespace = {}
-    exec("def gate(request):\n" + textwrap.indent(textwrap.dedent(body), "    "), namespace)  # noqa: S102
+    exec("def gate(request):\n" + textwrap.indent(textwrap.dedent(body), "    "), namespace)  # noqa: S102 -- builds the gate from the blueprint text under test
     return namespace["gate"]
 
 

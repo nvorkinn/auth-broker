@@ -19,7 +19,7 @@ def test_login_requires_paired_session(client):
 
 
 def test_login_redirects_to_spotify_with_state(paired_client):
-    client, device_id, _ = paired_client
+    client, _device_id, _ = paired_client
     response = client.get("/auth/spotify/login")
     assert response.status_code == 302
     location = response.headers["Location"]
@@ -29,13 +29,13 @@ def test_login_redirects_to_spotify_with_state(paired_client):
 
 
 def test_callback_rejects_state_mismatch(paired_client):
-    client, device_id, _ = paired_client
+    client, _device_id, _ = paired_client
     response = client.get("/auth/spotify/callback?code=abc&state=wrong")
     assert response.status_code == 400
 
 
 def test_callback_surfaces_spotify_error(paired_client):
-    client, device_id, _ = paired_client
+    client, _device_id, _ = paired_client
     response = client.get("/auth/spotify/callback?error=access_denied")
     assert response.status_code == 400
 

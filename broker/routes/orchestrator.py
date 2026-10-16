@@ -1,19 +1,26 @@
-"""What the orchestrator that starts renderers calls (see services/assignments.py), with its own bearer
-token rather than a device secret."""
+"""What the orchestrator that starts renderers calls (see services/assignments.py).
+
+It uses its own bearer token rather than a device secret.
+"""
+
+from typing import TYPE_CHECKING
 
 from flask import Blueprint, jsonify, request
 
-from ..auth import require_orchestrator_token
-from ..db import db
-from ..models import RendererAssignment
-from ..services import assignments
+from broker.auth import require_orchestrator_token
+from broker.db import db
+from broker.models import RendererAssignment
+from broker.services import assignments
+
+if TYPE_CHECKING:
+    from flask.typing import ResponseReturnValue
 
 bp = Blueprint("orchestrator", __name__, url_prefix="/api/orchestrator")
 
 
 @bp.get("/assignments")
 @require_orchestrator_token
-def list_assignments():
+def list_assignments() -> ResponseReturnValue:
     """Every assignment that isn't deleted. `claim_token` is null once the renderer has claimed it."""
     return jsonify(
         assignments=[
@@ -25,9 +32,12 @@ def list_assignments():
 
 @bp.post("/assignments/<assignment_id>/status")
 @require_orchestrator_token
-def report_status(assignment_id):
-    """{"status": "provisioned" | "failed" | "deleted", "detail": ""}. `deleted` removes the assignment
-    for good, and is only accepted for one that's being deleted."""
+def report_status(assignment_id: str) -> ResponseReturnValue:
+    """Record what the orchestrator did with an assignment.
+
+    {"status": "provisioned" | "failed" | "deleted", "detail": ""}. `deleted` removes the assignment
+    for good, and is only accepted for one that's being deleted.
+    """
     assignment = db.session.get(RendererAssignment, assignment_id)
     if assignment is None:
         return jsonify(error="not found"), 404

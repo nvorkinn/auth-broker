@@ -1,4 +1,6 @@
-"""Manual admin for the broker's devices, for development. Run it inside the container:
+"""Manual admin for the broker's devices, for development.
+
+Run it inside the container:
 
 docker exec auth-broker flask --app wsgi devices list
 docker exec auth-broker flask --app wsgi devices code <device_id>
@@ -26,7 +28,8 @@ devices = AppGroup("devices", help="Manual device admin for development.")
 def _get_device(device_id: str) -> Device:
     device = db.session.get(Device, device_id)
     if device is None:
-        raise click.ClickException(f"No device {device_id}.")
+        msg = f"No device {device_id}."
+        raise click.ClickException(msg)
     return device
 
 
@@ -79,7 +82,7 @@ def owner(device_id: str, user: str) -> None:
 @devices.command()
 @click.argument("device_id")
 @click.option("--config", "wipe_config", is_flag=True, help="Also reset its settings and linked accounts.")
-def unpair(device_id: str, wipe_config: bool) -> None:
+def unpair(device_id: str, *, wipe_config: bool) -> None:
     """Make a device show a pairing code again."""
     device = _get_device(device_id)
     device.paired_at = None

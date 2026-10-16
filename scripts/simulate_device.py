@@ -1,6 +1,7 @@
-"""Stands in for a real screen (e.g. the ESP32) during development: registers as a display and shows
-its pairing code, as the real screen would, so you can test the /pair -> /device browser flow without
-the hardware. Works against a local broker or the deployed one.
+"""Stand in for a real screen (e.g. the ESP32) during development.
+
+It registers as a display and shows its pairing code, as the real screen would, so you can test the
+/pair -> /device browser flow without the hardware. Works against a local broker or the deployed one.
 
 With --token it plays a screen that has just finished WiFi setup instead: it prints the /pair URL its
 owner's browser would be redirected to, and registers only once you've opened it, so you can watch the

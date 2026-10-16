@@ -4,4 +4,36 @@ target-version = "py314"
 extend-exclude = [".venv", "vendor"]
 
 [lint]
-select = ["E", "F", "I", "UP", "B"]
+# Every rule Ruff has. A Ruff upgrade turns on its new rules too, so bumping the
+# pinned version may need a round of fixes.
+select = ["ALL"]
+ignore = [
+    # Contradict D211 and D212, which we keep: no blank line before a class
+    # docstring, and the summary starts on the first line.
+    "D203",
+    "D213",
+    # Conflict with `ruff format`, which owns trailing commas and string joins.
+    "COM812",
+    "ISC001",
+    # Licence header in every file: a private project, nothing to put there.
+    "CPY001",
+]
+
+[lint.per-file-ignores]
+"tests/**" = [
+    "S101",    # pytest is built on bare asserts
+    "ANN",     # fixtures and test functions gain nothing from annotations
+    "D1",      # test names say what they check
+    "PLR2004", # expected values are literals by nature
+    "S105",    # fake credentials in fixtures
+    "S106",
+    "ARG001",  # fixtures requested only for their side effects
+    "SLF001",  # tests inspect internals on purpose
+    "INP001",  # pytest collects test files by path, not as a package
+    "PLR0913", # a test's arguments are its fixtures and parametrize values
+    "PLR0917",
+]
+# Alembic loads migrations by path, they are not a package.
+"broker/migrations/**" = ["INP001"]
+# Stand-alone command-line tools run by path; print is their output.
+"scripts/**" = ["INP001", "T201"]
