@@ -33,6 +33,14 @@
     </div>
 {% endif %}
 
+<a class="screen-link card" href="{{ url_for('pages.screen_view', device_id=device_id) }}">
+    <span>
+        <span class="card-title">See what's on the screen</span>
+        <span class="card-subtitle">The picture the screen is showing now, kept up to date</span>
+    </span>
+    <span aria-hidden="true">›</span>
+</a>
+
 <!-- Lives outside the settings form because forms can't nest; the Disconnect button points at it. -->
 <form id="spotifyDisconnectForm" method="POST" action="{{ url_for('pages.spotify_disconnect', device_id=device_id) }}"></form>
 <form id="displayUnlinkForm" method="POST" action="{{ url_for('pages.display_unlink', device_id=device_id) }}"></form>
