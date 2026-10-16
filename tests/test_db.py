@@ -543,3 +543,19 @@ def test_0017_downgrade_gives_every_panel_the_one_style(app, register_device):
         downgrade(revision="0016")
 
         assert _styles(("tfl_style", "spotify_style", "notices_style")) == {airy: ("grouped", "airy", "airy")}
+
+
+# --- 0018: airy by default --------------------------------------------------------------------------
+
+
+def test_0018_starts_new_devices_on_airy_and_keeps_the_others(app):
+    with app.app_context():
+        downgrade(revision="0017")
+        with db.engine.begin() as conn:
+            _insert_device(conn, "before")
+            _insert_device(conn, "picked", style="card")
+        upgrade()
+        with db.engine.begin() as conn:
+            _insert_device(conn, "after")
+
+        assert _styles(("style",)) == {"before": ("hero",), "picked": ("card",), "after": ("airy",)}

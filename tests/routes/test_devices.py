@@ -77,13 +77,13 @@ def test_get_config_returns_defaults_and_shared_keys(client, register_device):
         "clock_format": "24h",
         "language": "en",
         "timezone": "Europe/London",
-        "style": "hero",
+        "style": "airy",
         "screen": {"orientation": "vertical", "width": 480, "height": 800},
         "weather": {"api_key": "test-weather-key", "location": ""},
-        "notice_board": {"postcode": None, "country": None, "style": "hero"},
-        "tfl": {"app_key": "test-tfl-key", "stop_ids": [], "style": "hero"},
-        "departures": {"stops": [], "style": "hero"},
-        "spotify": {"enabled": False, "style": "hero"},
+        "notice_board": {"postcode": None, "country": None, "style": "airy"},
+        "tfl": {"app_key": "test-tfl-key", "stop_ids": [], "style": "grouped"},
+        "departures": {"stops": [], "style": "grouped"},
+        "spotify": {"enabled": False, "style": "airy"},
         "glowmarkt": {"username": None, "password": None},
         "pairing_code": body["pairing_code"],
     }
@@ -130,7 +130,7 @@ def test_get_config_time_zone_follows_postcode_then_first_stop(
     _set_config(app, device_id, postcode=postcode, tfl_stop_ids=stop_ids)
     body = client.get("/api/config", headers={"Authorization": f"Bearer {secret}"}).get_json()
 
-    assert body["notice_board"] == {"postcode": postcode or None, "country": country, "style": "hero"}
+    assert body["notice_board"] == {"postcode": postcode or None, "country": country, "style": "airy"}
     assert body["timezone"] == timezone
 
 
@@ -354,7 +354,7 @@ def test_get_config_is_valid_with_no_location_postcode_or_stops(app, client, reg
     ConfigResponse.model_validate(body)
     assert "setup_missing" not in body
     assert body["weather"]["location"] == ""
-    assert body["notice_board"] == {"postcode": None, "country": None, "style": "hero"}
+    assert body["notice_board"] == {"postcode": None, "country": None, "style": "airy"}
     assert body["tfl"]["stop_ids"] == []
 
 
@@ -365,7 +365,7 @@ def test_get_config_returns_the_saved_postcode(app, client, register_device):
         db.session.commit()
 
     response = client.get("/api/config", headers={"Authorization": f"Bearer {secret}"})
-    assert response.get_json()["notice_board"] == {"postcode": "SW1A 1AA", "country": "GB", "style": "hero"}
+    assert response.get_json()["notice_board"] == {"postcode": "SW1A 1AA", "country": "GB", "style": "airy"}
 
 
 def test_get_config_returns_the_saved_orientation(app, client, register_device):
@@ -419,10 +419,10 @@ def test_get_config_returns_the_saved_style_for_every_panel(app, client, registe
     assert (config["tfl"]["style"], config["departures"]["style"]) == (departures_style, departures_style)
 
 
-def test_get_config_returns_hero_for_a_new_device(client, register_device):
+def test_get_config_returns_airy_for_a_new_device(client, register_device):
     _, secret = register_device()
     config = client.get("/api/config", headers={"Authorization": f"Bearer {secret}"}).get_json()
-    assert config["style"] == "hero"
+    assert config["style"] == "airy"
 
 
 @pytest.mark.parametrize("clock_format", ["12h", "24h"])
