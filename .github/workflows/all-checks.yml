@@ -62,5 +62,5 @@ jobs:
               settled=0
               echo "Waiting on: $(jq -r 'join(", ")' <<<"$pending")"
             fi
-            sleep 20
+            sleep 10
           done
