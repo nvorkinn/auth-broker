@@ -81,6 +81,14 @@ SPOTIFY_STYLES = {
     "hero": ("Hero", "Bold, with your #1 big"),
     "card": ("Card", "In a rounded card"),
 }
+# How the screen draws the notice board: the API contract's notice_board.style, shown the same way
+# (broker/static/notices-styles/<style>.png, cut from the renderer's snapshots of it).
+NOTICE_STYLES = {
+    "hero": ("Hero", "A bold header over a heavy rule"),
+    "airy": ("Airy", "Light labels, like the weather"),
+    "card": ("Card", "In a rounded card"),
+    "boxed": ("Boxed", "In a square box, with a count"),
+}
 
 
 class DeviceConfig(db.Model):
@@ -96,6 +104,8 @@ class DeviceConfig(db.Model):
     weather_location: Mapped[str] = mapped_column(String, default="", server_default=text("''"))
     # A UK postcode ("SW1A 1AA") or a Norwegian one ("0150"); see pages.normalize_postcode.
     postcode: Mapped[str] = mapped_column(String, default="", server_default=text("''"))
+    # How the notice board is drawn, one of NOTICE_STYLES.
+    notices_style: Mapped[str] = mapped_column(String, default="hero", server_default=text("'hero'"))
     spotify_enabled: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("0"))
     # How Spotify is drawn, one of SPOTIFY_STYLES.
     spotify_style: Mapped[str] = mapped_column(String, default="hero", server_default=text("'hero'"))

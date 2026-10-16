@@ -493,3 +493,23 @@ def test_0015_moves_classic_devices_to_hero_and_keeps_the_others(app):
 
         styles = {c.device_id: (c.tfl_style, c.spotify_style) for c in db.session.scalars(select(DeviceConfig))}
         assert styles == {"old": ("hero", "hero"), "picked": ("card", "airy")}
+
+
+# --- 0016: the notice board style ------------------------------------------------------------------
+
+
+def test_0016_starts_every_device_on_the_hero_notices_style(app, register_device):
+    device_id, _ = register_device()
+    with app.app_context():
+        config = db.session.get(DeviceConfig, device_id)
+        config.postcode, config.spotify_style = "SW1A 1AA", "card"
+        db.session.commit()
+        db.session.remove()
+
+        downgrade(revision="0015")
+        assert "notices_style" not in {column["name"] for column in inspect(db.engine).get_columns("device_config")}
+        upgrade()
+
+        config = db.session.get(DeviceConfig, device_id)
+        assert config.notices_style == "hero"
+        assert (config.postcode, config.spotify_style) == ("SW1A 1AA", "card")
