@@ -77,6 +77,7 @@ def test_get_config_returns_defaults_and_shared_keys(client, register_device):
         "clock_format": "24h",
         "language": "en",
         "timezone": "Europe/London",
+        "style": "hero",
         "screen": {"orientation": "vertical", "width": 480, "height": 800},
         "weather": {"api_key": "test-weather-key", "location": ""},
         "notice_board": {"postcode": None, "country": None, "style": "hero"},
@@ -403,37 +404,25 @@ def test_register_rejects_a_missing_or_bad_screen_size(client, extra):
     assert response.status_code == 400
 
 
-def test_get_config_returns_the_saved_spotify_style(app, client, register_device):
+@pytest.mark.parametrize(("style", "departures_style"), [("airy", "grouped"), ("hero", "hero"), ("card", "card")])
+def test_get_config_returns_the_saved_style_for_every_panel(app, client, register_device, style, departures_style):
+    """The one style, and each panel's own for renderers that predate it: airy is grouped to the departures."""
     device_id, secret = register_device()
     headers = {"Authorization": f"Bearer {secret}"}
-    assert client.get("/api/config", headers=headers).get_json()["spotify"]["style"] == "hero"
     with app.app_context():
-        db.session.get(DeviceConfig, device_id).spotify_style = "card"
+        db.session.get(DeviceConfig, device_id).style = style
         db.session.commit()
 
-    assert client.get("/api/config", headers=headers).get_json()["spotify"]["style"] == "card"
+    config = client.get("/api/config", headers=headers).get_json()
+    assert config["style"] == style
+    assert (config["spotify"]["style"], config["notice_board"]["style"]) == (style, style)
+    assert (config["tfl"]["style"], config["departures"]["style"]) == (departures_style, departures_style)
 
 
-def test_get_config_returns_the_saved_notices_style(app, client, register_device):
-    device_id, secret = register_device()
-    headers = {"Authorization": f"Bearer {secret}"}
-    assert client.get("/api/config", headers=headers).get_json()["notice_board"]["style"] == "hero"
-    with app.app_context():
-        db.session.get(DeviceConfig, device_id).notices_style = "boxed"
-        db.session.commit()
-
-    assert client.get("/api/config", headers=headers).get_json()["notice_board"]["style"] == "boxed"
-
-
-def test_get_config_returns_the_saved_tfl_style(app, client, register_device):
-    device_id, secret = register_device()
-    headers = {"Authorization": f"Bearer {secret}"}
-    assert client.get("/api/config", headers=headers).get_json()["tfl"]["style"] == "hero"
-    with app.app_context():
-        db.session.get(DeviceConfig, device_id).tfl_style = "grouped"
-        db.session.commit()
-
-    assert client.get("/api/config", headers=headers).get_json()["tfl"]["style"] == "grouped"
+def test_get_config_returns_hero_for_a_new_device(client, register_device):
+    _, secret = register_device()
+    config = client.get("/api/config", headers={"Authorization": f"Bearer {secret}"}).get_json()
+    assert config["style"] == "hero"
 
 
 @pytest.mark.parametrize("clock_format", ["12h", "24h"])

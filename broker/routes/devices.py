@@ -132,20 +132,28 @@ def get_config(*, device_id: str, x_device_name: str | None = None) -> ConfigRes
         timezone=_timezone(country, stop_ids),
         screen=Screen(orientation=config.orientation, width=config.width, height=config.height),
         weather=Weather(api_key=current_app.config["WEATHER_API_KEY"], location=config.weather_location),
-        notice_board=NoticeBoard(postcode=config.postcode or None, country=country, style=config.notices_style),
+        style=config.style,
+        # The panels' own styles, for renderers that predate `style`, in the names they know.
+        notice_board=NoticeBoard(postcode=config.postcode or None, country=country, style=config.style),
         # For renderers that predate `departures`: only the stops they can show.
         tfl=Tfl(
             app_key=current_app.config["TFL_APP_KEY"],
             stop_ids=[s for s in stop_ids if stops.source_of(s) == "tfl"],
-            style=config.tfl_style,
+            style=_departures_style(config.style),
         ),
         departures=Departures(
-            stops=[DepartureStop(source=stops.source_of(s), id=s) for s in stop_ids], style=config.tfl_style
+            stops=[DepartureStop(source=stops.source_of(s), id=s) for s in stop_ids],
+            style=_departures_style(config.style),
         ),
-        spotify=Spotify(enabled=config.spotify_enabled, style=config.spotify_style),
+        spotify=Spotify(enabled=config.spotify_enabled, style=config.style),
         glowmarkt=Glowmarkt(username=(creds and creds.username) or None, password=creds.password if creds else None),
         pairing_code=pairing.current_code_for(device_id),
     )
+
+
+def _departures_style(style: str) -> str:
+    """Return `style` as the departures' own field names it: airy was called grouped there."""
+    return "grouped" if style == "airy" else style
 
 
 def _timezone(country: str | None, stop_ids: list[str]) -> str:

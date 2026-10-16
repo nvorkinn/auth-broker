@@ -100,6 +100,14 @@
         </div>
     </div>
 
+    <!-- Style: one look for every panel -->
+    <div class="card">
+        <div class="card-header">
+            <h2 class="card-title">Style</h2>
+        </div>
+        {{ style_picker("style", "How your screen draws its departures, Spotify and notice board.", styles, config.style, "styles", 360, 396) }}
+    </div>
+
     <!-- Weather -->
     <div class="card">
         <div class="card-header">
@@ -138,7 +146,6 @@
                 <p id="postcode_hint" class="form-hint">Used for local information on your screen's notice board, in the UK or Norway.</p>
             </div>
         </div>
-        {{ style_picker("notices_style", "How your screen draws the notice board.", notice_styles, config.notices_style, "notices-styles", 536, 155) }}
     </div>
 
     <!-- Departures: London's stops (TfL) and Norway's (Entur), in any mix -->
@@ -146,7 +153,6 @@
         <div class="card-header">
             <h2 class="card-title">Departures</h2>
         </div>
-        {{ style_picker("tfl_style", "How your screen draws each stop's departures.", tfl_styles, config.tfl_style, "tfl-styles", 267, 195) }}
         <div class="search-container">
             <input type="text" id="searchInput" class="search-input" placeholder="Search for a station or stop in London or Norway" autocomplete="off">
             <span id="searchSpinner" class="search-spinner">Searching…</span>
@@ -207,7 +213,6 @@
                 {% endif %}
             </div>
         </div>
-        {{ style_picker("spotify_style", "How your screen draws what's playing and your top tracks.", spotify_styles, config.spotify_style, "spotify-styles", 536, 250) }}
     </div>
 
     <!-- Energy -->

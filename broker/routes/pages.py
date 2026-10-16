@@ -23,10 +23,8 @@ from broker.models import (
     LANGUAGES,
     MAX_INTERVAL,
     MIN_INTERVAL,
-    NOTICE_STYLES,
     ORIENTATIONS,
-    SPOTIFY_STYLES,
-    TFL_STYLES,
+    STYLES,
     Device,
     DeviceConfig,
     Frame,
@@ -163,9 +161,7 @@ CHOICES = {
     "language": (LANGUAGES, "The language"),
     "clock_format": (CLOCK_FORMATS, "The clock format"),
     "orientation": (ORIENTATIONS, "Orientation"),
-    "tfl_style": (TFL_STYLES, "The TfL style"),
-    "spotify_style": (SPOTIFY_STYLES, "The Spotify style"),
-    "notices_style": (NOTICE_STYLES, "The notice board style"),
+    "style": (STYLES, "The style"),
 }
 
 
@@ -374,9 +370,7 @@ def _render_device_config(device_id: str, errors: list[str] | None = None) -> st
         min_interval=MIN_INTERVAL,
         max_interval=MAX_INTERVAL,
         orientations=ORIENTATIONS,
-        tfl_styles=TFL_STYLES,
-        spotify_styles=SPOTIFY_STYLES,
-        notice_styles=NOTICE_STYLES,
+        styles=STYLES,
         page_orientation=PAGE_ORIENTATION,
         stops=stops.resolve(config.tfl_stop_ids),
         MODE_ICONS=stops.MODE_ICONS,
