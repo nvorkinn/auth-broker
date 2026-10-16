@@ -1,9 +1,10 @@
 """The recipient-facing site: pairing the signed-in user with a device, and the device's settings page."""
 
 import re
+from http import HTTPStatus
 from typing import TYPE_CHECKING
 
-from flask import Blueprint, current_app, g, jsonify, redirect, render_template, request, url_for
+from flask import Blueprint, Response, current_app, g, jsonify, redirect, render_template, request, url_for
 
 from broker.auth import (
     current_user,
@@ -28,10 +29,11 @@ from broker.models import (
     TFL_STYLES,
     Device,
     DeviceConfig,
+    Frame,
     GlowmarktCredentials,
     SpotifyToken,
 )
-from broker.services import assignments, geoip, pairing, stops
+from broker.services import assignments, frame_image, geoip, pairing, stops
 
 if TYPE_CHECKING:
     from flask.typing import ResponseReturnValue
@@ -274,6 +276,50 @@ def name_screen() -> ResponseReturnValue:
         max_length=assignments.max_suffix_length(current_username()),
         error=error,
     ), 400 if error else 200
+
+
+@bp.get("/device/screen", defaults={"device_id": None})
+@bp.get("/device/<device_id>/screen")
+@require_paired_user
+def screen_view() -> ResponseReturnValue:
+    """Show what a screen shows, as its latest frame, and keep it current as the screen does."""
+    config = db.session.get(DeviceConfig, g.device_id)
+    frame = db.session.get(Frame, g.device_id)
+    upright = config.orientation != "horizontal"
+    width, height = (frame_image.HEIGHT, frame_image.WIDTH) if upright else (frame_image.WIDTH, frame_image.HEIGHT)
+    return render_template(
+        "screen.html",
+        device_id=g.device_id,
+        has_frame=frame is not None,
+        rendered_at=frame.rendered_at if frame else None,
+        interval=config.interval,
+        width=width,
+        height=height,
+    )
+
+
+@bp.get("/device/screen/frame.png", defaults={"device_id": None})
+@bp.get("/device/<device_id>/screen/frame.png")
+@require_paired_user
+def screen_frame() -> ResponseReturnValue:
+    """Serve a screen's latest frame as a PNG, the right way up for how the screen is hung.
+
+    Conditional on the frame's ETag (and the orientation, which changes the picture), so a page polling it only
+    downloads a frame that changed. rendered_at moves on every upload, frame changed or not, so it rides along in a
+    header for the page to say how fresh the picture is.
+    """
+    frame = db.session.get(Frame, g.device_id)
+    if frame is None:
+        return jsonify(error="no frame yet"), 404
+    upright = db.session.get(DeviceConfig, g.device_id).orientation != "horizontal"
+    resp = Response(mimetype="image/png")
+    resp.set_etag(f"{frame.etag}-{'v' if upright else 'h'}")
+    resp.headers["Cache-Control"] = "private, no-cache"
+    resp.headers["X-Rendered-At"] = frame.rendered_at.isoformat(timespec="seconds")
+    resp = resp.make_conditional(request)
+    if resp.status_code == HTTPStatus.OK:  # a 304 needs no picture
+        resp.set_data(frame_image.to_png(frame.frame, upright=upright))
+    return resp
 
 
 @bp.post("/api/displays/<device_id>/renderer")

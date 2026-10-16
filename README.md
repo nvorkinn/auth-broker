@@ -206,6 +206,11 @@ best-effort: a destination being down is logged and never fails the poll.
 A wrong or missing secret gets 401. A valid secret for the wrong role gets
 403.
 
+`/device/<id>/screen` shows the owner the screen's latest frame in the browser, behind the same Authentik
+login as the rest of the site, and checks for a new one at the screen's refresh interval. The picture comes from
+`/device/<id>/screen/frame.png`: the 1-bit frame as a PNG, turned upright for a screen hung vertically, with the
+frame's ETag so an unchanged frame is a 304.
+
 "Unlink screen" on `/device` revokes the screen's secret. Bringing a
 replacement screen back to an existing device isn't built yet: registering
 it creates a new device.

@@ -1,0 +1,181 @@
+{% extends "base.html" %}
+
+{% block title %}Your screen{% endblock %}
+{% block heading %}{% endblock %}
+
+{% block content %}
+<style>
+    /* The picture sits in a dark bezel, like the panel on the wall. */
+    .screen-bezel {
+        background: var(--tfl-dark);
+        border-radius: 14px;
+        padding: 14px;
+        margin: 0 auto;
+        width: 100%;
+        max-width: calc({{ width }}px + 28px);
+    }
+
+    .screen-picture {
+        display: block;
+        width: 100%;
+        height: auto;
+        background: #fff;
+        border-radius: 2px;
+    }
+
+    .screen-empty {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        aspect-ratio: {{ width }} / {{ height }};
+        width: 100%;
+        background: #fff;
+        border-radius: 2px;
+        padding: 24px;
+        text-align: center;
+        color: var(--text-muted);
+        font-size: 14px;
+    }
+
+    .screen-empty[hidden] {
+        display: none;
+    }
+
+    .screen-meta {
+        margin-top: 14px;
+        text-align: center;
+        font-size: 13px;
+        color: var(--text-muted);
+    }
+
+    .screen-meta a {
+        color: var(--tfl-blue);
+    }
+
+    .screen-warning {
+        color: #991b1b;
+    }
+
+    .screen-links {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 12px;
+        flex-wrap: wrap;
+    }
+
+    .screen-links a {
+        font-size: 14px;
+        font-weight: 600;
+        color: var(--tfl-blue);
+        text-decoration: none;
+    }
+
+    @media (max-width: 600px) {
+        .screen-card {
+            padding: 16px;
+        }
+
+        .screen-bezel {
+            padding: 8px;
+            border-radius: 10px;
+        }
+    }
+</style>
+
+<div class="card screen-card">
+    <div class="card-header screen-links">
+        <div>
+            <h2 class="card-title">On the screen now</h2>
+            <p class="card-subtitle">The picture the screen paints, checked every {{ interval }} seconds as the screen does.</p>
+        </div>
+        <a href="{{ url_for('pages.device_config', device_id=device_id) }}">Settings ›</a>
+    </div>
+
+    <div class="screen-bezel">
+        <img id="screenPicture" class="screen-picture" alt="What the screen shows"
+             width="{{ width }}" height="{{ height }}" style="max-width: {{ width }}px{% if not has_frame %}; display: none{% endif %}"
+             {% if has_frame %}src="{{ url_for('pages.screen_frame', device_id=device_id) }}"{% endif %}>
+        <div id="screenEmpty" class="screen-empty"{% if has_frame %} hidden{% endif %}>
+            Nothing drawn yet. The renderer sends the first picture shortly after the screen is named.
+        </div>
+    </div>
+
+    <p class="screen-meta">
+        <span id="screenStatus">{% if rendered_at %}Drawn <time id="renderedAt" datetime="{{ rendered_at.isoformat(timespec='seconds') }}">{{ rendered_at.strftime('%H:%M:%S') }} UTC</time>{% else %}Waiting for the first picture{% endif %}</span>
+        · <a href="{{ url_for('pages.screen_frame', device_id=device_id) }}" target="_blank" rel="noopener">Full size</a>
+    </p>
+</div>
+
+<script>
+(() => {
+    const url = {{ url_for('pages.screen_frame', device_id=device_id) | tojson }};
+    const intervalMs = {{ interval }} * 1000;
+    const picture = document.getElementById('screenPicture');
+    const empty = document.getElementById('screenEmpty');
+    const status = document.getElementById('screenStatus');
+    let etag = null;
+    let objectUrl = null;
+    let timer = null;
+
+    const timeFormat = new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+
+    function showDrawn(iso) {
+        status.className = '';
+        status.textContent = 'Drawn ' + timeFormat.format(new Date(iso));
+    }
+
+    function showProblem(text) {
+        status.className = 'screen-warning';
+        status.textContent = text;
+    }
+
+    async function refresh() {
+        try {
+            // no-cache: the browser asks again with the ETag it has, and a 304 comes back as the picture it kept.
+            const response = await fetch(url, { cache: 'no-cache', credentials: 'same-origin', redirect: 'error' });
+            if (response.status === 404) {
+                showProblem('Waiting for the first picture');
+                return;
+            }
+            if (!response.ok) {
+                throw new Error(response.status);
+            }
+            const tag = response.headers.get('ETag');
+            if (tag !== etag) {
+                const blob = await response.blob();
+                if (objectUrl) URL.revokeObjectURL(objectUrl);
+                objectUrl = URL.createObjectURL(blob);
+                picture.src = objectUrl;
+                picture.style.display = '';
+                empty.hidden = true;
+                etag = tag;
+            }
+            const renderedAt = response.headers.get('X-Rendered-At');
+            if (renderedAt) showDrawn(renderedAt);
+        } catch (error) {
+            // Most likely the sign-in expired, which only a reload can renew.
+            showProblem("Couldn't check for a new picture. Reload the page to try again.");
+        }
+    }
+
+    function schedule() {
+        clearInterval(timer);
+        timer = null;
+        if (!document.hidden) {
+            timer = setInterval(refresh, intervalMs);
+        }
+    }
+
+    // Only poll while the page is in view, and catch up as soon as it is again.
+    document.addEventListener('visibilitychange', () => {
+        if (!document.hidden) refresh();
+        schedule();
+    });
+
+    const drawn = document.getElementById('renderedAt');
+    if (drawn) showDrawn(drawn.dateTime);
+    schedule();
+})();
+</script>
+{% endblock %}

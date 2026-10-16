@@ -571,6 +571,31 @@
             font-size: 14px;
         }
 
+        /* A whole card that links to another page about the screen. */
+        .screen-link {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            padding: 16px 24px;
+            color: var(--text-main);
+            text-decoration: none;
+            font-size: 22px;
+        }
+
+        .screen-link > span:first-child {
+            display: flex;
+            flex-direction: column;
+        }
+
+        .screen-link .card-title {
+            margin-bottom: 2px;
+        }
+
+        .screen-link:hover {
+            border-color: var(--tfl-blue);
+        }
+
         .status-row {
             display: flex;
             align-items: center;
