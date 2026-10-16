@@ -1,4 +1,4 @@
-FROM victoriametrics/victoria-metrics:v1.153.0
+FROM victoriametrics/victoria-metrics:v1.154.0
 
 # Upstream's entrypoint is the binary, as with the Caddy and Fluent Bit images,
 # so a check is just `docker run --rm <image> <args>`. It scrapes nothing;
