@@ -28,7 +28,7 @@ erDiagram
     }
     device_config {
         string device_id PK, FK
-        int interval "seconds, default 15"
+        int interval "seconds, 20 to 300, default 20"
         string clock_format "12h or 24h, default 24h"
         string language "en or nb, default en"
         string weather_location
@@ -115,7 +115,7 @@ These rows were recorded by running the broker, one action at a time (secrets an
 
 | Action | Rows |
 |---|---|
-| Screen registers (A3) | insert `devices` (`display_secret_hash`, `pairing_token`), insert `device_config` (the size it reported, interval 15) |
+| Screen registers (A3) | insert `devices` (`display_secret_hash`, `pairing_token`), insert `device_config` (the size it reported, interval 20) |
 | Screen's first poll, before any frame (A4) | `devices.last_seen_at` and `display_last_seen_at` set |
 | Owner's browser pairs by token (A5) | `devices.owner` = the authentik uid, `paired_at` set |
 | Owner names the screen (A7) | insert `renderer_assignments` (`status` pending, `claim_token` set) |

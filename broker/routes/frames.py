@@ -16,8 +16,9 @@ from ..models import DeviceConfig, Frame
 bp = Blueprint("frames", __name__, url_prefix="/api")
 
 FRAME_BYTES = 800 * 480 // 8  # 1-bit packed; better to share this via the protocol package
-# Retry-After, in seconds, on a GET before the renderer's first frame: it's expected any moment.
-NO_FRAME_RETRY_AFTER = 5
+# Retry-After, in seconds, on a GET before the renderer's first frame: it's expected soon, but a screen
+# never polls more often than every 20 seconds.
+NO_FRAME_RETRY_AFTER = 20
 
 # Where a screen's reports go. Logs: VictoriaLogs' JSON lines endpoint, with the fields the dashboards
 # group by (see the README's Logs section). Telemetry: VictoriaMetrics' InfluxDB line protocol endpoint.

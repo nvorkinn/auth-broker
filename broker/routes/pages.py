@@ -17,7 +17,10 @@ from ..clients import weather
 from ..db import db
 from ..models import (
     CLOCK_FORMATS,
+    DEFAULT_INTERVAL,
     LANGUAGES,
+    MAX_INTERVAL,
+    MIN_INTERVAL,
     ORIENTATIONS,
     SPOTIFY_STYLES,
     TFL_STYLES,
@@ -138,8 +141,11 @@ def device_config():
         raw_stops = request.form.get("stops_order", "")
         stop_ids = [s.strip() for s in raw_stops.split(",") if s.strip()]
 
-        interval_val = request.form.get("interval", "15").strip()
-        interval = int(interval_val) if interval_val.isdigit() and int(interval_val) > 0 else 15
+        interval_val = request.form.get("interval", "").strip()
+        # Kept in range rather than refused: a screen never refreshes more often or more seldom than that.
+        interval = DEFAULT_INTERVAL
+        if interval_val.isdigit():
+            interval = min(max(int(interval_val), MIN_INTERVAL), MAX_INTERVAL)
 
         weather_location = request.form.get("weather_location", "").strip()
         spotify_enabled = request.form.get("spotify_enabled") == "on"
@@ -284,6 +290,8 @@ def _render_device_config(device_id: str, errors: list[str] | None = None):
         weather_suggestion=weather_suggestion,
         clock_formats=CLOCK_FORMATS,
         languages=LANGUAGES,
+        min_interval=MIN_INTERVAL,
+        max_interval=MAX_INTERVAL,
         orientations=ORIENTATIONS,
         tfl_styles=TFL_STYLES,
         spotify_styles=SPOTIFY_STYLES,

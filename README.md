@@ -122,10 +122,10 @@ A screen therefore needs no logic beyond:
    (201 straight away; the screen has a device even before its renderer runs).
 2. Loop on `GET /api/frame` with `If-None-Match`, handling the status and then
    sleeping for the response's `Retry-After` seconds:
-   - 200: draw the frame. `Retry-After` is the device's refresh interval
+   - 200: draw the frame. `Retry-After` is the device's refresh interval, 20 s to 5 min
      (set on `/device`).
    - 304: unchanged. Same `Retry-After`.
-   - 404: no frame yet (its renderer is still being set up). `Retry-After: 5`.
+   - 404: no frame yet (its renderer is still being set up). `Retry-After: 20`.
    - 401: unknown secret (an unpaired screen is forgotten after 24 hours, or the
      screen was unlinked), so register again.
 
@@ -136,7 +136,7 @@ A screen therefore needs no logic beyond:
 | 201 / 200 | `{device_id}`: a new device, or a repeat of a registered secret | start polling |
 | 400 | bad secret | fix the request; a firmware bug |
 | 409 | secret already registered as a renderer | generate a new secret |
-| 429 | over 5 calls a minute from this IP | wait `Retry-After` (lockouts double, up to 1h) |
+| 429 | over 5 calls a minute from this IP | wait `Retry-After` (lockouts double, up to 10 min) |
 | 503 | too many unpaired screens | wait `Retry-After` (60s) |
 
 `/api/renderers/claim` answers 201 / 200 `{device_id}`, 400 for a bad secret or no `claim_token`,
@@ -151,7 +151,7 @@ else to show.
 
 What anyone can add is bounded:
 - `/register` allows 5 calls a minute per IP, every call counting (429 with
-  `Retry-After`, lockouts doubling like `/pair`).
+  `Retry-After`, lockouts doubling like `/pair` but capped at 10 min).
 - At most 20 screens may sit unpaired with no renderer or assignment at once (503).
 - A screen unpaired after 24 hours is dropped.
 

@@ -532,7 +532,7 @@ def test_post_before_any_frame_is_404_with_retry_after_but_still_ships(client, r
     response = _post(client, {"metrics": LINES, "logs": ["boot"]})
 
     assert response.status_code == 404
-    assert response.headers["Retry-After"] == "5"
+    assert response.headers["Retry-After"] == "20"
     assert len(shipped) == 2
 
 

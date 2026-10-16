@@ -1,6 +1,6 @@
 """Throttles guessing at /pair: each client IP gets a limited number of failed codes a minute,
 and each time it hits that limit it's locked out for twice as long as the time before. /register
-uses a second instance with its own limit, recording every call rather than only failures.
+uses a second instance with its own limit and a lower cap, recording every call rather than only failures.
 
 State lives in memory, so it's per process and resets on restart. That fits the single gunicorn
 worker the broker runs with; several workers would each keep their own count."""
@@ -17,6 +17,9 @@ REGISTRATIONS_PER_MINUTE = 5
 # Lockouts run 1, 2, 4, ... minutes, capped here; a client that stays quiet this long after
 # its last lockout ends starts again from one minute.
 MAX_LOCKOUT_SECONDS = 60 * 60.0
+# /register's cap is lower: a screen that's locked out retries after Retry-After, and a screen
+# never waits more than ten minutes between tries.
+MAX_REGISTRATION_LOCKOUT_SECONDS = 10 * 60.0
 
 
 @dataclass
@@ -27,8 +30,15 @@ class _Client:
 
 
 class PairThrottle:
-    def __init__(self, clock=time.monotonic, max_events: int = MAX_FAILURES, window: float = WINDOW_SECONDS):
+    def __init__(
+        self,
+        clock=time.monotonic,
+        max_events: int = MAX_FAILURES,
+        window: float = WINDOW_SECONDS,
+        max_lockout: float = MAX_LOCKOUT_SECONDS,
+    ):
         self._clock = clock
+        self._max_lockout = max_lockout
         self._max_events = max_events
         self._window = window
         self._clients: dict[str, _Client] = {}
@@ -49,7 +59,7 @@ class PairThrottle:
             now = self._clock()
             self._prune(now)
             client = self._clients.setdefault(ip, _Client())
-            if client.lockouts and now - client.locked_until > MAX_LOCKOUT_SECONDS:
+            if client.lockouts and now - client.locked_until > self._max_lockout:
                 client.lockouts = 0
 
             client.failures.append(now)
@@ -58,7 +68,7 @@ class PairThrottle:
             if len(client.failures) < self._max_events:
                 return None
 
-            lockout = min(self._window * 2**client.lockouts, MAX_LOCKOUT_SECONDS)
+            lockout = min(self._window * 2**client.lockouts, self._max_lockout)
             client.lockouts += 1
             client.locked_until = now + lockout
             client.failures.clear()
@@ -72,6 +82,6 @@ class PairThrottle:
         self._last_prune = now
         for ip, client in list(self._clients.items()):
             stale_failures = not client.failures or client.failures[-1] <= now - self._window
-            lockouts_forgotten = not client.lockouts or now - client.locked_until > MAX_LOCKOUT_SECONDS
+            lockouts_forgotten = not client.lockouts or now - client.locked_until > self._max_lockout
             if stale_failures and lockouts_forgotten:
                 del self._clients[ip]

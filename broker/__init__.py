@@ -29,10 +29,12 @@ def create_app() -> Flask:
     request_log.init_app(app)
     app.context_processor(lambda: {"username": current_username()})
 
-    from .services.pair_throttle import REGISTRATIONS_PER_MINUTE, PairThrottle
+    from .services.pair_throttle import MAX_REGISTRATION_LOCKOUT_SECONDS, REGISTRATIONS_PER_MINUTE, PairThrottle
 
     app.extensions["pair_throttle"] = PairThrottle()
-    app.extensions["register_throttle"] = PairThrottle(max_events=REGISTRATIONS_PER_MINUTE)
+    app.extensions["register_throttle"] = PairThrottle(
+        max_events=REGISTRATIONS_PER_MINUTE, max_lockout=MAX_REGISTRATION_LOCKOUT_SECONDS
+    )
 
     from .routes import (
         devices,

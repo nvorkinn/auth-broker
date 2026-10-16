@@ -1,5 +1,11 @@
 from broker.services import pair_throttle
-from broker.services.pair_throttle import MAX_FAILURES, MAX_LOCKOUT_SECONDS, WINDOW_SECONDS, PairThrottle
+from broker.services.pair_throttle import (
+    MAX_FAILURES,
+    MAX_LOCKOUT_SECONDS,
+    MAX_REGISTRATION_LOCKOUT_SECONDS,
+    WINDOW_SECONDS,
+    PairThrottle,
+)
 
 
 class FakeClock:
@@ -61,6 +67,19 @@ def test_each_lockout_doubles_up_to_the_cap():
         clock.advance(lockout)
 
     assert lockouts == [60, 120, 240, 480, 960, 1920, 3600, 3600, 3600]
+
+
+def test_a_lower_cap_stops_the_doubling_sooner():
+    clock = FakeClock()
+    throttle = PairThrottle(clock=clock, max_lockout=MAX_REGISTRATION_LOCKOUT_SECONDS)
+
+    lockouts = []
+    for _ in range(6):
+        lockout = _fail(throttle, "1.2.3.4", MAX_FAILURES)
+        lockouts.append(lockout)
+        clock.advance(lockout)
+
+    assert lockouts == [60, 120, 240, 480, 600, 600]
 
 
 def test_lockouts_start_over_after_a_quiet_spell():

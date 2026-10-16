@@ -81,7 +81,7 @@ def test_unpair_with_config_also_resets_settings_and_linked_accounts(app, client
 
     config = _config(client, device_id, secret)
     assert config["pairing_code"] is not None
-    assert (config["interval"], config["weather"]["location"], config["tfl"]["stop_ids"]) == (15, "", [])
+    assert (config["interval"], config["weather"]["location"], config["tfl"]["stop_ids"]) == (20, "", [])
     assert config["clock_format"] == "24h"
     assert config["glowmarkt"] == {"username": None, "password": None}
     assert config["notice_board"] == {"postcode": None, "country": None}
