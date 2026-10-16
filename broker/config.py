@@ -1,12 +1,16 @@
+"""The broker's settings, read from the environment into the app's config."""
+
 import os
 from datetime import timedelta
 from pathlib import Path
+from typing import TYPE_CHECKING
 
-from flask import Flask
+if TYPE_CHECKING:
+    from flask import Flask
 
 
 def load(app: Flask) -> None:
-    """Reads the broker's settings from the environment. A missing required one fails startup."""
+    """Read the broker's settings from the environment. A missing required one fails startup."""
     app.secret_key = os.environ["FLASK_SECRET_KEY"]
     app.permanent_session_lifetime = timedelta(days=30)
     # Unset (the default) keeps the session cookie host-only. Set it to a parent domain, e.g.

@@ -1,9 +1,12 @@
-"""The broker's schema. Change it here, then generate a migration with
-`flask --app wsgi db migrate -m "..."` -- the app applies it on next start.
+"""The broker's schema.
 
-Timestamps are timezone-aware UTC datetimes (see UTCDateTime)."""
+Change it here, then generate a migration with `flask --app wsgi db migrate -m "..."` -- the app applies it on
+next start.
 
-from datetime import datetime
+Timestamps are timezone-aware UTC datetimes (see UTCDateTime).
+"""
+
+from datetime import datetime  # noqa: TC003 -- SQLAlchemy resolves the Mapped[...] annotations at runtime
 
 from sqlalchemy import JSON, Boolean, Float, ForeignKey, Integer, LargeBinary, String, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -13,6 +16,8 @@ from .db import UTCDateTime, db
 
 
 class Device(db.Model):
+    """A screen and its renderer, known by their secrets, and who it is paired with."""
+
     __tablename__ = "devices"
 
     device_id: Mapped[str] = mapped_column(String, primary_key=True)
@@ -43,6 +48,8 @@ class Device(db.Model):
 
 
 class PairingCode(db.Model):
+    """A code a device shows so its owner can pair with it, until it expires."""
+
     __tablename__ = "pairing_codes"
 
     code: Mapped[str] = mapped_column(String, primary_key=True)
@@ -76,6 +83,8 @@ SPOTIFY_STYLES = {
 
 
 class DeviceConfig(db.Model):
+    """A device's settings, as its owner sets them on the config page."""
+
     __tablename__ = "device_config"
 
     device_id: Mapped[str] = mapped_column(ForeignKey("devices.device_id"), primary_key=True)
@@ -104,6 +113,8 @@ class DeviceConfig(db.Model):
 
 
 class SpotifyToken(db.Model):
+    """The Spotify account linked to a device: its OAuth tokens."""
+
     __tablename__ = "spotify_tokens"
 
     device_id: Mapped[str] = mapped_column(ForeignKey("devices.device_id"), primary_key=True)
@@ -114,6 +125,8 @@ class SpotifyToken(db.Model):
 
 
 class GlowmarktCredentials(db.Model):
+    """The Glowmarkt account linked to a device, its password encrypted at rest."""
+
     __tablename__ = "glowmarkt_credentials"
 
     device_id: Mapped[str] = mapped_column(ForeignKey("devices.device_id"), primary_key=True)
@@ -131,6 +144,8 @@ class GlowmarktCredentials(db.Model):
 
 
 class Frame(db.Model):
+    """The latest frame rendered for a device's screen."""
+
     __tablename__ = "frames"
 
     device_id: Mapped[str] = mapped_column(ForeignKey("devices.device_id"), primary_key=True)
@@ -140,8 +155,10 @@ class Frame(db.Model):
 
 
 class RendererAssignment(db.Model):
-    """The renderer a screen is to have, which the orchestrator turns into a running container (see
-    services/assignments.py). Created when the screen's owner names it; the slug can't change after."""
+    """The renderer a screen is to have, which the orchestrator turns into a running container.
+
+    See services/assignments.py. Created when the screen's owner names it; the slug can't change after.
+    """
 
     __tablename__ = "renderer_assignments"
 

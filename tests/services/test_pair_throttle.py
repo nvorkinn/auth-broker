@@ -14,7 +14,7 @@ class FakeClock:
 
 
 def _fail(throttle, ip, times):
-    """Records `times` failures and returns the last result."""
+    """Record `times` failures and return the last result."""
     result = None
     for _ in range(times):
         result = throttle.record_failure(ip)

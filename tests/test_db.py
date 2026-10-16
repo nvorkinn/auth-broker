@@ -10,6 +10,8 @@ from alembic.script import ScriptDirectory
 from flask_migrate import downgrade, upgrade
 from sqlalchemy import inspect, select
 
+from broker import create_app
+from broker import db as db_module
 from broker.auth import hash_secret
 from broker.db import db
 from broker.models import Device, DeviceConfig, Frame, PairingCode, SpotifyToken
@@ -31,8 +33,11 @@ def _schema_diff(app):
 
 
 def _ddl(app):
-    """Each table's CREATE TABLE statement. SQLite quotes the name of a table it has renamed, as
-    rebuilding a table does, so the name is unquoted to compare like with like."""
+    """Return each table's CREATE TABLE statement.
+
+    SQLite quotes the name of a table it has renamed, as rebuilding a table does, so the name is
+    unquoted to compare like with like.
+    """
     with app.app_context(), db.engine.connect() as conn:
         rows = conn.exec_driver_sql("SELECT name, sql FROM sqlite_master WHERE type = 'table'").all()
     return {name: sql.replace(f'CREATE TABLE "{name}"', f"CREATE TABLE {name}") for name, sql in rows}
@@ -62,9 +67,6 @@ def test_migrations_downgrade_and_upgrade_again(app):
 
 
 def test_concurrent_app_startup_serializes_migrations(app, monkeypatch):
-    from broker import create_app
-    from broker import db as db_module
-
     with app.app_context():
         downgrade(revision="0005")
         db.engine.dispose()
@@ -168,19 +170,18 @@ CREATE TABLE device_config (device_id TEXT PRIMARY KEY REFERENCES devices(device
 
 @pytest.fixture
 def adopt(app, tmp_path, monkeypatch):
-    """Writes a pre-Alembic DB with `script`, then starts an app on it (as a deploy would)."""
+    """Write a pre-Alembic DB with `scripts`, then start an app on it (as a deploy would)."""
     started = []
 
-    def _adopt(script: str):
+    def _adopt(*scripts: str):
         path = tmp_path / "legacy.db"
         conn = sqlite3.connect(path)
-        conn.executescript(script)
+        for script in scripts:
+            conn.executescript(script)
         conn.commit()
         conn.close()
 
         monkeypatch.setenv("BROKER_DB_PATH", str(path))
-        from broker import create_app
-
         started.append(create_app())
         return started[-1]
 
@@ -192,12 +193,12 @@ def adopt(app, tmp_path, monkeypatch):
 
 def test_a_legacy_db_keeps_its_data(adopt):
     legacy_app = adopt(
-        LEGACY_SCHEMA
-        + """
+        LEGACY_SCHEMA,
+        """
         INSERT INTO devices VALUES ('d', 'hash', '2026-01-01', '2026-01-02', 'kitchen');
         INSERT INTO device_config (device_id, tfl_stop_ids, spotify_enabled) VALUES ('d', '["S1"]', 1);
         INSERT INTO frames VALUES ('d', x'AA55', 'etag', '2026-01-03T00:00:00Z');
-        """
+        """,
     )
 
     with legacy_app.app_context():
@@ -223,18 +224,18 @@ def test_a_legacy_db_ends_up_with_the_same_schema_as_a_fresh_one(app, adopt):
 
 
 def test_an_early_legacy_db_gets_the_missing_columns_and_tables(app, adopt):
-    legacy_app = adopt(OLD_DEVICES_SCHEMA + "INSERT INTO device_config (device_id) VALUES ('d');")
+    legacy_app = adopt(OLD_DEVICES_SCHEMA, "INSERT INTO device_config (device_id) VALUES ('d');")
 
     assert _ddl(legacy_app) == _ddl(app)
 
 
 def test_adopting_an_early_legacy_db_marks_existing_devices_paired(adopt):
     legacy_app = adopt(
-        OLD_DEVICES_SCHEMA
-        + """
+        OLD_DEVICES_SCHEMA,
+        """
         INSERT INTO devices VALUES ('paired', 'hash1', '2026-01-01T00:00:00'), ('mid-pairing', 'hash2', '2026-02-01');
         INSERT INTO pairing_codes VALUES ('ABC234', 'mid-pairing', '2026-02-01T00:10:00');
-        """
+        """,
     )
 
     with legacy_app.app_context():
@@ -244,7 +245,7 @@ def test_adopting_an_early_legacy_db_marks_existing_devices_paired(adopt):
 
 
 def test_adopting_an_early_legacy_db_defaults_the_postcode(adopt):
-    legacy_app = adopt(OLD_DEVICES_SCHEMA + "INSERT INTO devices VALUES ('d', 'hash', '2026-01-01');")
+    legacy_app = adopt(OLD_DEVICES_SCHEMA, "INSERT INTO devices VALUES ('d', 'hash', '2026-01-01');")
 
     with legacy_app.app_context():
         db.session.add(DeviceConfig(device_id="d"))
@@ -255,8 +256,8 @@ def test_adopting_an_early_legacy_db_defaults_the_postcode(adopt):
 def test_a_legacy_db_with_paired_at_but_no_device_name_gets_device_name(adopt):
     """paired_at and device_name were added in different releases, so a DB can have one and not the other."""
     legacy_app = adopt(
-        LEGACY_SCHEMA.replace(",\n                      paired_at TEXT, device_name TEXT", ", paired_at TEXT")
-        + "INSERT INTO devices VALUES ('d', 'hash', '2026-01-01', NULL);"
+        LEGACY_SCHEMA.replace(",\n                      paired_at TEXT, device_name TEXT", ", paired_at TEXT"),
+        "INSERT INTO devices VALUES ('d', 'hash', '2026-01-01', NULL);",
     )
 
     with legacy_app.app_context():
@@ -265,9 +266,7 @@ def test_a_legacy_db_with_paired_at_but_no_device_name_gets_device_name(adopt):
 
 
 def test_starting_twice_leaves_an_adopted_db_alone(adopt, monkeypatch):
-    legacy_app = adopt(LEGACY_SCHEMA + "INSERT INTO devices VALUES ('d', 'hash', '2026-01-01', NULL, NULL);")
-    from broker import create_app
-
+    legacy_app = adopt(LEGACY_SCHEMA, "INSERT INTO devices VALUES ('d', 'hash', '2026-01-01', NULL, NULL);")
     again = create_app()
 
     assert _ddl(again) == _ddl(legacy_app)
@@ -281,7 +280,7 @@ def test_starting_twice_leaves_an_adopted_db_alone(adopt, monkeypatch):
 
 
 def _at_0001_with(app, statements: str) -> None:
-    """Takes the DB back to 0001, where timestamps were strings, and inserts rows there."""
+    """Take the DB back to 0001, where timestamps were strings, and insert rows there."""
     with app.app_context():
         downgrade(revision="0001")
         with db.engine.begin() as conn:
@@ -371,7 +370,8 @@ def test_0002_fails_on_a_timestamp_it_cannot_read_and_changes_nothing(app):
 
 def test_utc_datetime_refuses_a_naive_datetime(app):
     with app.app_context():
-        db.session.add(Device(device_id="d", renderer_secret_hash="h", created_at=datetime(2026, 1, 1)))
+        naive = datetime(2026, 1, 1)  # noqa: DTZ001 -- the naive datetime is what is under test
+        db.session.add(Device(device_id="d", renderer_secret_hash="h", created_at=naive))
         with pytest.raises(Exception, match="naive datetime"):
             db.session.commit()
 
@@ -398,7 +398,7 @@ def test_0004_keeps_existing_devices_and_their_secret_as_the_renderer(app):
 
 
 def test_0004_downgrade_and_upgrade_keep_split_devices(app, split_device):
-    device_id, _, display_secret = split_device
+    device_id, _, _display_secret = split_device
     with app.app_context():
         downgrade(revision="0003")
         upgrade()

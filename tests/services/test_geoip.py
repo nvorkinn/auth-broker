@@ -1,7 +1,7 @@
 import gzip
 import importlib.util
 import io
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -25,7 +25,8 @@ class FakeReader:
 
     def get(self, ip):
         if not ip[0].isdigit():
-            raise ValueError(f"{ip} is not a valid IP address")
+            msg = f"{ip} is not a valid IP address"
+            raise ValueError(msg)
         return self.records.get(ip)
 
 
@@ -39,7 +40,7 @@ def _record(lat, lon, city=None):
 @pytest.fixture
 def geodata(monkeypatch):
     records = {}
-    monkeypatch.setattr(geoip, "_load", lambda directory: GeoData(FakeReader(records), PLACES))
+    monkeypatch.setattr(geoip, "_load", lambda _directory: GeoData(FakeReader(records), PLACES))
     return records
 
 
@@ -99,8 +100,8 @@ def test_fetch_keeps_towns_and_cities_but_not_parts_of_them():
 
 def test_fetch_tries_this_month_then_last():
     fetch = _fetch_geodata()
-    assert fetch._months(datetime(2026, 10, 1)) == ["2026-10", "2026-09"]
-    assert fetch._months(datetime(2027, 1, 1)) == ["2027-01", "2026-12"]
+    assert fetch._months(datetime(2026, 10, 1, tzinfo=UTC)) == ["2026-10", "2026-09"]
+    assert fetch._months(datetime(2027, 1, 1, tzinfo=UTC)) == ["2027-01", "2026-12"]
 
 
 def test_fetch_dbip_sends_a_user_agent_and_writes_the_database(monkeypatch, tmp_path):
@@ -113,6 +114,6 @@ def test_fetch_dbip_sends_a_user_agent_and_writes_the_database(monkeypatch, tmp_
         return io.BytesIO(gzip.compress(b"database"))
 
     monkeypatch.setattr(fetch.urllib.request, "urlopen", urlopen)
-    fetch.fetch_dbip(tmp_path, datetime(2026, 10, 1))
+    fetch.fetch_dbip(tmp_path, datetime(2026, 10, 1, tzinfo=UTC))
 
     assert (tmp_path / "dbip-city-lite.mmdb").read_bytes() == b"database"

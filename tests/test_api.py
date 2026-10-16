@@ -1,5 +1,7 @@
-"""The routes of the countdown API contract (vendor/countdown-api), which the broker serves through the registry
-in broker/api.py rather than as plain blueprints."""
+"""Test the routes of the countdown API contract (vendor/countdown-api).
+
+The broker serves them through the registry in broker/api.py rather than as plain blueprints.
+"""
 
 import pytest
 from countdown_api.blueprints import Api, RegistrationError
@@ -8,6 +10,8 @@ from flask import Flask
 
 from broker import create_app
 from broker.api import BrokerApi, api
+from broker.db import db
+from broker.models import Device, DeviceConfig
 
 
 def test_the_broker_answers_every_operation_of_the_contract(app):
@@ -18,8 +22,11 @@ def test_the_broker_answers_every_operation_of_the_contract(app):
 
 
 def test_the_app_wont_start_if_an_operation_has_no_answer(app, monkeypatch):
-    """What a contract change the broker hasn't caught up with does: the submodule gains an operation, nothing here
-    registers it, and the app stops, so the build fails rather than the first request."""
+    """Check what a contract change the broker hasn't caught up with does.
+
+    The submodule gains an operation, nothing here registers it, and the app stops, so the build fails
+    rather than the first request.
+    """
     monkeypatch.setattr("broker.api.api", BrokerApi())
 
     with pytest.raises(RegistrationError) as caught:
@@ -78,9 +85,6 @@ def test_a_missing_credential_is_challenged(client):
 
 
 def test_a_device_without_config_is_a_404_that_still_records_its_name(app, client, register_device):
-    from broker.db import db
-    from broker.models import Device, DeviceConfig
-
     device_id, secret = register_device()
     with app.app_context():
         db.session.delete(db.session.get(DeviceConfig, device_id))

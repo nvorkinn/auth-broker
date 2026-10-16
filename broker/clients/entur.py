@@ -1,6 +1,8 @@
-"""Looks up Norwegian stops (Entur's NSR stop places and quays) for the settings page: naming a device's saved
-stops, and searching for new ones. Entur covers every operator in Norway, Ruter in Oslo among them, and needs no key,
-only an ET-Client-Name header (https://developer.entur.org/pages-intro-authentication)."""
+"""Looks up Norwegian stops (Entur's NSR stop places and quays) for the settings page.
+
+Both for naming a device's saved stops, and for searching for new ones. Entur covers every operator in Norway, Ruter in
+Oslo among them, and needs no key, only an ET-Client-Name header (https://developer.entur.org/pages-intro-authentication).
+"""
 
 import re
 from typing import Any
@@ -17,6 +19,8 @@ _STOP_ID = re.compile(r"NSR:(StopPlace|Quay):\d+")
 MODE_NAMES = {"metro": "T-bane", "tram": "Tram", "bus": "Bus", "rail": "Train", "water": "Boat", "coach": "Coach"}
 # Majorstuen's quays are its platforms; a bus stop's are its stop poles.
 PLATFORM_MODES = {"metro", "rail"}
+# How many of a stop's lines its subtitle names before "(+n more)".
+SUBTITLE_LINES = 6
 
 _QUAY_FIELDS = """
       id
@@ -49,6 +53,7 @@ query Quays($ids: [String]!) {{
 
 
 def is_stop_id(stop_id: str) -> bool:
+    """Whether the id is an Entur stop place or quay (NSR:StopPlace:n or NSR:Quay:n)."""
     return bool(_STOP_ID.fullmatch(stop_id))
 
 
@@ -61,12 +66,12 @@ def _query(query: str, variables: dict[str, Any], http: requests.Session) -> dic
     return payload.get("data") or {}
 
 
-def _modes(raw: Any) -> list[str]:
+def _modes(raw: object) -> list[str]:
     return [m for m in (raw if isinstance(raw, list) else [raw] if raw else []) if isinstance(m, str)]
 
 
 def _mode(modes: list[str]) -> str:
-    """The stop's mode for its icon: its first (Entur lists the main one first), or bus."""
+    """Return the stop's mode for its icon: its first (Entur lists the main one first), or bus."""
     return modes[0] if modes else "bus"
 
 
@@ -104,7 +109,9 @@ def _stop_place_result(place: dict[str, Any], area: str = "") -> dict[str, Any]:
     kinds = " & ".join(MODE_NAMES.get(m, m.title()) for m in modes) or "Stop"
     subtitle = f"{kinds} • All platforms" if len(quays) > 1 else kinds
     if lines:
-        subtitle += f" • {', '.join(lines[:6])}" + (f" (+{len(lines) - 6} more)" if len(lines) > 6 else "")
+        subtitle += f" • {', '.join(lines[:SUBTITLE_LINES])}" + (
+            f" (+{len(lines) - SUBTITLE_LINES} more)" if len(lines) > SUBTITLE_LINES else ""
+        )
     return {
         "id": place["id"],
         "source": "entur",
@@ -127,7 +134,7 @@ def _quay_result(quay: dict[str, Any], place_name: str, mode: str) -> dict[str, 
     elif quay.get("description"):
         parts.append(quay["description"])
     if lines:
-        parts.append(", ".join(lines[:6]))
+        parts.append(", ".join(lines[:SUBTITLE_LINES]))
     return {
         "id": quay["id"],
         "source": "entur",
@@ -142,8 +149,11 @@ def _quay_result(quay: dict[str, Any], place_name: str, mode: str) -> dict[str, 
 
 
 def search_stops(query: str) -> list[dict[str, Any]]:
-    """Norwegian stations and stops matching the query, each followed by its platforms (or stop poles), indented
-    under it when it has more than one. Raises if Entur's search itself fails."""
+    """Norwegian stations and stops matching the query, each followed by its platforms (or stop poles).
+
+    The platforms are indented under it, and listed only when it has more than one. Raises if Entur's search itself
+    fails.
+    """
     http = requests.Session()
     response = http.get(
         GEOCODER_URL,
@@ -177,8 +187,10 @@ def search_stops(query: str) -> list[dict[str, Any]]:
 
 
 def resolve_stops(stop_ids: list[str]) -> dict[str, dict[str, Any]]:
-    """Details for saved stops, by id, formatted for the settings page. An id Entur can't say anything about is
-    left out; so are all of them if Entur can't be reached."""
+    """Details for saved stops, by id, formatted for the settings page.
+
+    An id Entur can't say anything about is left out; so are all of them if Entur can't be reached.
+    """
     http = requests.Session()
     resolved: dict[str, dict[str, Any]] = {}
     places = [s for s in stop_ids if s.startswith("NSR:StopPlace:")]

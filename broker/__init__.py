@@ -1,13 +1,30 @@
+"""The auth broker: a Flask app that pairs screens with their owners and serves them config and frames."""
+
 import logging
 
 from flask import Flask
 from werkzeug.middleware.proxy_fix import ProxyFix
 
-from . import config
+from . import api as api_module
+from . import cli, config, request_log
 from . import db as db_module
+from .auth import current_username
+from .routes import (
+    devices,
+    frames,
+    orchestrator,
+    pages,
+    renderers,
+    spotify_oauth,
+    spotify_proxy,
+    status,
+    stop_search,
+)
+from .services.pair_throttle import REGISTRATIONS_PER_MINUTE, PairThrottle
 
 
 def create_app() -> Flask:
+    """Build the app: logging, config, database, throttles, blueprints and the CLI."""
     app = Flask(__name__)
     # Route app.logger through gunicorn's handlers so it lands in `docker logs`.
     gunicorn_logger = logging.getLogger("gunicorn.error")
@@ -23,28 +40,11 @@ def create_app() -> Flask:
     config.load(app)
     db_module.init_app(app)
 
-    from . import request_log
-    from .auth import current_username
-
     request_log.init_app(app)
     app.context_processor(lambda: {"username": current_username()})
 
-    from .services.pair_throttle import REGISTRATIONS_PER_MINUTE, PairThrottle
-
     app.extensions["pair_throttle"] = PairThrottle()
     app.extensions["register_throttle"] = PairThrottle(max_events=REGISTRATIONS_PER_MINUTE)
-
-    from .routes import (
-        devices,
-        frames,
-        orchestrator,
-        pages,
-        renderers,
-        spotify_oauth,
-        spotify_proxy,
-        status,
-        stop_search,
-    )
 
     app.register_blueprint(devices.bp)
     app.register_blueprint(renderers.bp)
@@ -58,11 +58,7 @@ def create_app() -> Flask:
 
     # The routes of the countdown API contract (vendor/countdown-api). This also checks that the broker answers
     # every one of them, and refuses to start if it doesn't.
-    from .api import api
-
-    api.register(app)
-
-    from . import cli
+    api_module.api.register(app)
 
     app.cli.add_command(cli.devices)
 

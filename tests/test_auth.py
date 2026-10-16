@@ -1,23 +1,24 @@
 import pytest
 from flask import g, jsonify
 
+from broker import create_app
 from broker.auth import require_device_auth
 
 
 def test_require_device_auth_rejects_missing_header(client, register_device):
-    device_id, _ = register_device()
+    _device_id, _ = register_device()
     response = client.get("/api/config")
     assert response.status_code == 401
 
 
 def test_require_device_auth_rejects_non_bearer_header(client, register_device):
-    device_id, secret = register_device()
+    _device_id, secret = register_device()
     response = client.get("/api/config", headers={"Authorization": secret})
     assert response.status_code == 401
 
 
 def test_require_device_auth_accepts_correct_secret(client, register_device):
-    device_id, secret = register_device()
+    _device_id, secret = register_device()
     response = client.get("/api/config", headers={"Authorization": f"Bearer {secret}"})
     assert response.status_code == 200
 
@@ -35,13 +36,13 @@ def test_require_paired_user_allows_the_paired_user(paired_client):
 
 
 def test_require_device_auth_rejects_an_empty_bearer_secret(client, register_device):
-    device_id, _ = register_device()
+    _device_id, _ = register_device()
     response = client.get("/api/config", headers={"Authorization": "Bearer "})
     assert response.status_code == 401
 
 
 def test_require_device_auth_forbids_a_valid_secret_for_the_wrong_role(client, split_device):
-    device_id, _, display_secret = split_device
+    _device_id, _, display_secret = split_device
     response = client.get("/api/config", headers={"Authorization": f"Bearer {display_secret}"})
     assert response.status_code == 403
     assert response.get_json() == {"error": "forbidden"}
@@ -62,6 +63,4 @@ def test_require_device_auth_sets_device_id_and_role(app, split_device, role):
 
 def test_session_cookie_domain_comes_from_the_environment(monkeypatch, app):
     monkeypatch.setenv("SESSION_COOKIE_DOMAIN", ".example.com")
-    from broker import create_app
-
     assert create_app().config["SESSION_COOKIE_DOMAIN"] == ".example.com"

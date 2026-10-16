@@ -170,7 +170,8 @@ def test_search_still_answers_when_one_source_fails(paired_client):
 
     def fake_get(self, url, params=None, timeout=None, headers=None):
         if "geocoder" in url:
-            raise ConnectionError("Entur is down")
+            msg = "Entur is down"
+            raise ConnectionError(msg)
         if "Search" in url:
             return _mock_get({"matches": [{"id": "1", "commonName": "Kings Cross"}]})
         return _mock_get({"id": "1", "commonName": "Kings Cross", "stopType": "NaptanMetroStation", "children": []})

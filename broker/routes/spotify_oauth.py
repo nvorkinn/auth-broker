@@ -1,18 +1,25 @@
-"""Browser-facing Spotify linking: sends the recipient to Spotify to approve access, then
-stores the tokens Spotify hands back against the device the signed-in user is paired with."""
+"""Browser-facing Spotify linking.
+
+Sends the recipient to Spotify to approve access, then stores the tokens Spotify hands back against the device
+the signed-in user is paired with.
+"""
 
 import secrets
+from typing import TYPE_CHECKING
 
 from flask import Blueprint, redirect, request, session, url_for
 
-from ..auth import current_user, user_devices
-from ..clients import spotify
+from broker.auth import current_user, user_devices
+from broker.clients import spotify
+
+if TYPE_CHECKING:
+    from flask.typing import ResponseReturnValue
 
 bp = Blueprint("spotify_oauth", __name__, url_prefix="/auth/spotify")
 
 
 def _owned(device_id: str | None) -> str | None:
-    """The device to link: the one asked for if it's the signed-in user's, else their most recently paired."""
+    """Return the device to link: the one asked for if it's the signed-in user's, else their most recently paired."""
     owned = [device.device_id for device in user_devices()]
     if device_id in owned:
         return device_id
@@ -20,7 +27,8 @@ def _owned(device_id: str | None) -> str | None:
 
 
 @bp.get("/login")
-def login():
+def login() -> ResponseReturnValue:
+    """Send the signed-in user to Spotify to approve access for one of their screens."""
     if current_user() is None:
         return "Sign in required.", 401
     device_id = _owned(request.args.get("device"))
@@ -34,7 +42,8 @@ def login():
 
 
 @bp.get("/callback")
-def callback():
+def callback() -> ResponseReturnValue:
+    """Store the tokens Spotify hands back, for the screen the login was started for."""
     error = request.args.get("error")
     if error:
         return f"Spotify authorization failed: {error}", 400
