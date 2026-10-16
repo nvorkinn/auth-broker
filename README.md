@@ -215,6 +215,14 @@ frame's ETag so an unchanged frame is a 304.
 replacement screen back to an existing device isn't built yet: registering
 it creates a new device.
 
+## The page about the display
+
+`GET /about` is a public page about the display, for showing people what it does. It needs no login: Caddy leaves
+`/about` and its pictures (`/static/display/*`) out of forward auth, and the view reads nothing about the visitor. It's
+`broker/templates/about.html`, with its pictures in `broker/static/display/`: frames from pi-dashboard's renderer, drawn
+with its snapshot-test helpers (`tests/test_display_snapshots.py`) from sample data in English and Norwegian, and
+screenshots of the settings page. The page's EN / NO switch swaps the pictures; its own text is English.
+
 ## Email (Resend)
 
 Authentik sends two kinds of email: the confirmation link a new user has to follow to finish
@@ -440,8 +448,8 @@ side, and pushes each with the release tag (and `:latest`):
 
 - `ghcr.io/nvorkinn/auth-broker:<tag>`: the broker itself (`Dockerfile`).
 - `ghcr.io/nvorkinn/auth-broker-caddy:<tag>`: [Caddy](https://caddyserver.com/)
-  with this repo's `caddy/Caddyfile` and `caddy/site/` baked in. It terminates TLS for
-  `auth.nikolaivorkinn.com` and reverse-proxies to the broker, and serves the public page (see [Caddy](#caddy)).
+  with this repo's `caddy/Caddyfile` baked in. It terminates TLS for
+  `auth.nikolaivorkinn.com` and reverse-proxies to the broker.
 - `ghcr.io/nvorkinn/auth-broker-fluent-bit:<tag>`: Fluent Bit with this repo's
   `fluent-bit/` config baked in (see [Logs](#logs)).
 - `ghcr.io/nvorkinn/auth-broker-victoria-logs:<tag>`: single-node
@@ -668,11 +676,6 @@ the Caddyfile means the host: it reaches the broker (also host-networked, bound 
 share the Caddyfile's `admin_only` snippet: an Authentik login in the admin
 group, then the upstream. A Caddyfile change ships like code: edit
 `caddy/Caddyfile`, tag a release, bump `CADDY_VERSION`.
-
-`countdown.nikolaivorkinn.com` is the public page about the display, with no login. It's static: `caddy/site/`
-is baked into the Caddy image at `/srv/countdown`, so it ships the same way. Its screen pictures are frames from
-pi-dashboard's renderer (`tests/test_display_snapshots.py`'s helpers, in English and Norwegian). Its DNS name needs an
-A record for the host before Caddy can get its certificate.
 
 Its certificates and ACME account live in the named volume `caddy_data`
 (config state in `caddy_config`). Never replace those with throwaway storage

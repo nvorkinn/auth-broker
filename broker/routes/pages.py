@@ -85,6 +85,12 @@ def index() -> ResponseReturnValue:
     return redirect(url_for("pages.device_config") if paired_device_id() else url_for("pages.pair"))
 
 
+@bp.get("/about")
+def about() -> ResponseReturnValue:
+    """Show the public page about the display, to anyone: no login, and nothing about the visitor or their screens."""
+    return render_template("about.html")
+
+
 @bp.route("/pair", methods=["GET", "POST"])
 @require_user
 def pair() -> ResponseReturnValue:

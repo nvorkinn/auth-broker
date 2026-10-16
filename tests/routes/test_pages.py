@@ -695,3 +695,28 @@ def test_device_config_post_rejects_an_unknown_or_old_style(app, paired_client, 
     assert b"The style must be one of airy, hero, card." in response.data
     with app.app_context():
         assert db.session.get(DeviceConfig, device_id).style == "airy"
+
+
+# --- the public page about the display ------------------------------------------------------------------
+
+
+def test_about_page_needs_no_login(anonymous_client):
+    response = anonymous_client.get("/about")
+    assert response.status_code == 200
+    assert b"<title>Countdown Display</title>" in response.data
+
+
+def test_about_page_pictures_are_all_there(anonymous_client):
+    html = anonymous_client.get("/about").get_data(as_text=True)
+    pictures = set(re.findall(r'"(/static/display/\w+\.(?:png|jpg))"', html))
+    # The weather tabs' pictures are named by the page's script.
+    pictures |= {
+        f"/static/display/weather_{tab}_{lang}.png"
+        for tab in ("now", "tonight", "tomorrow", "weekend")
+        for lang in ("en", "nb")
+    }
+    assert len(pictures) > 20
+    for picture in sorted(pictures):
+        response = anonymous_client.get(picture)
+        assert response.status_code == 200, picture
+        assert response.mimetype in {"image/png", "image/jpeg"}

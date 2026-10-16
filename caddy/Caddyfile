@@ -36,11 +36,11 @@ auth.nikolaivorkinn.com {
 	request_header -X-Authentik-Username
 	request_header -X-Authentik-Email
 
-	# Everything but the device API (Bearer secrets, no login), the status endpoint (its own token) and
-	# the orchestrator's (its own too) is for browsers and needs an Authentik login. The stop search
-	# under /api/tfl is a browser call.
+	# Everything but the device API (Bearer secrets, no login), the status endpoint (its own token),
+	# the orchestrator's (its own too) and the public page about the display (/about and its pictures)
+	# is for browsers and needs an Authentik login. The stop search under /api/tfl is a browser call.
 	@browser {
-		not path /api/config /api/frame /api/frame/* /api/devices/* /api/renderers/* /api/spotify/* /api/status/* /api/orchestrator/*
+		not path /api/config /api/frame /api/frame/* /api/devices/* /api/renderers/* /api/spotify/* /api/status/* /api/orchestrator/* /about /static/display/*
 	}
 	handle @browser {
 		reverse_proxy /outpost.goauthentik.io/* 127.0.0.1:9000
@@ -92,12 +92,4 @@ sso.nikolaivorkinn.com {
 	import access_log
 	# Authentik, published on loopback only.
 	reverse_proxy 127.0.0.1:9000
-}
-
-# The public page about the display: static files baked into this image from caddy/site/. No login.
-countdown.nikolaivorkinn.com {
-	import access_log
-	encode zstd gzip
-	root * /srv/countdown
-	file_server
 }

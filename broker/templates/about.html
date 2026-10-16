@@ -1,4 +1,6 @@
 <!doctype html>
+{# The public page about the display: no login (Caddy lets /about and /static/display/ through). #}
+{% set img = url_for('static', filename='display/') %}
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -147,7 +149,7 @@ footer { border-top: 1px solid var(--rule); padding-block: 36px 48px; color: var
       <div class="specs"><span>7.5″ e-paper</span><span>800 × 480</span><span>black &amp; white</span><span>London + Oslo</span><span>English / norsk</span></div>
     </div>
     <div>
-      <div class="frame"><img data-en="img/oslo_landscape_en.png" data-nb="img/oslo_landscape_nb.png" src="img/oslo_landscape_en.png" width="800" height="480" alt="The Countdown screen showing Oslo metro and tram departures, the weather, Spotify now playing, an energy chart and three notices"></div>
+      <div class="frame"><img data-en="{{ img }}oslo_landscape_en.png" data-nb="{{ img }}oslo_landscape_nb.png" src="{{ img }}oslo_landscape_en.png" width="800" height="480" alt="The Countdown screen showing Oslo metro and tram departures, the weather, Spotify now playing, an energy chart and three notices"></div>
       <p class="caption">A real frame from the renderer, with sample data. Switch <b>EN / NO</b> at the top to see the same screen in Norwegian.</p>
     </div>
   </div>
@@ -166,7 +168,7 @@ footer { border-top: 1px solid var(--rule); padding-block: 36px 48px; color: var
         </ul>
       </div>
       <div>
-        <div class="frame"><img src="img/london.png" width="800" height="480" alt="Countdown screen with Elephant & Castle bus stop W and Kennington Northern line departures, Spotify playing and two notices"></div>
+        <div class="frame"><img src="{{ img }}london.png" width="800" height="480" alt="Countdown screen with Elephant & Castle bus stop W and Kennington Northern line departures, Spotify playing and two notices"></div>
         <p class="caption">Elephant &amp; Castle and Kennington, in London.</p>
       </div>
     </div>
@@ -187,7 +189,7 @@ footer { border-top: 1px solid var(--rule); padding-block: 36px 48px; color: var
         </div>
       </div>
       <div>
-        <div class="frame"><img id="wx-img" src="img/weather_now_en.png" width="470" height="210" alt="Weather panel, Now page"></div>
+        <div class="frame"><img id="wx-img" src="{{ img }}weather_now_en.png" width="470" height="210" alt="Weather panel, Now page"></div>
         <p class="caption">The weather panel as a portrait screen draws it.</p>
       </div>
     </div>
@@ -205,7 +207,7 @@ footer { border-top: 1px solid var(--rule); padding-block: 36px 48px; color: var
         </ul>
       </div>
       <div>
-        <div class="frame"><img data-en="img/oslo_top_en.png" data-nb="img/oslo_top_nb.png" src="img/oslo_top_en.png" width="800" height="480" alt="Countdown screen in the card style with Oslo departures, Spotify top tracks and artists, and two notices"></div>
+        <div class="frame"><img data-en="{{ img }}oslo_top_en.png" data-nb="{{ img }}oslo_top_nb.png" src="{{ img }}oslo_top_en.png" width="800" height="480" alt="Countdown screen in the card style with Oslo departures, Spotify top tracks and artists, and two notices"></div>
         <p class="caption">An orange wind warning and a tram disruption, in the card style.</p>
       </div>
     </div>
@@ -219,7 +221,7 @@ footer { border-top: 1px solid var(--rule); padding-block: 36px 48px; color: var
         <p><b>Spotify.</b> Connect your account once and the screen shows the track that's playing, with its album art and what's up next. It takes turns with your top five tracks and artists of the last four weeks and the last twelve months. Your Spotify login stays on the server; the screen never holds it.</p>
         <p><b>Energy.</b> With a Glowmarkt smart-meter account, the screen charts your electricity use over the last 24 hours, and pages on to this month and this year.</p>
       </div>
-      <div class="frame portrait"><img data-en="img/oslo_portrait_en.png" data-nb="img/oslo_portrait_nb.png" src="img/oslo_portrait_en.png" width="480" height="800" alt="Countdown screen hung vertically: weather on top, two Oslo stops, Spotify now playing and notices"></div>
+      <div class="frame portrait"><img data-en="{{ img }}oslo_portrait_en.png" data-nb="{{ img }}oslo_portrait_nb.png" src="{{ img }}oslo_portrait_en.png" width="480" height="800" alt="Countdown screen hung vertically: weather on top, two Oslo stops, Spotify now playing and notices"></div>
     </div>
   </section>
 
@@ -230,9 +232,9 @@ footer { border-top: 1px solid var(--rule); padding-block: 36px 48px; color: var
       <p>One style dresses the whole screen. New screens start on <b>Airy</b>, with light labels like the weather panel. <b>Hero</b> has bold headers and makes the first item big, and <b>Card</b> puts each panel in a rounded card. The settings page shows a preview of each before you save. Choose a 24-hour or 12-hour clock, English or Norwegian text, and hang the screen landscape or portrait.</p>
     </div>
     <div class="trio">
-      <figure><div class="frame"><img src="img/style_airy.png" width="800" height="480" alt="The whole screen in the Airy style"></div><figcaption><b>Airy</b> Light labels, like the weather. The default.</figcaption></figure>
-      <figure><div class="frame"><img src="img/style_hero.png" width="800" height="480" alt="The whole screen in the Hero style"></div><figcaption><b>Hero</b> Bold headers, with the first item big</figcaption></figure>
-      <figure><div class="frame"><img src="img/style_card.png" width="800" height="480" alt="The whole screen in the Card style"></div><figcaption><b>Card</b> Each panel in a rounded card</figcaption></figure>
+      <figure><div class="frame"><img src="{{ img }}style_airy.png" width="800" height="480" alt="The whole screen in the Airy style"></div><figcaption><b>Airy</b> Light labels, like the weather. The default.</figcaption></figure>
+      <figure><div class="frame"><img src="{{ img }}style_hero.png" width="800" height="480" alt="The whole screen in the Hero style"></div><figcaption><b>Hero</b> Bold headers, with the first item big</figcaption></figure>
+      <figure><div class="frame"><img src="{{ img }}style_card.png" width="800" height="480" alt="The whole screen in the Card style"></div><figcaption><b>Card</b> Each panel in a rounded card</figcaption></figure>
     </div>
   </section>
 
@@ -249,14 +251,14 @@ footer { border-top: 1px solid var(--rule); padding-block: 36px 48px; color: var
         </ol>
       </div>
       <div>
-        <div class="frame"><img data-en="img/pairing_en.png" data-nb="img/pairing_nb.png" src="img/pairing_en.png" width="800" height="480" alt="Pairing screen: Set up this display, with a six-letter code"></div>
+        <div class="frame"><img data-en="{{ img }}pairing_en.png" data-nb="{{ img }}pairing_nb.png" src="{{ img }}pairing_en.png" width="800" height="480" alt="Pairing screen: Set up this display, with a six-letter code"></div>
         <p class="caption">The fallback pairing screen.</p>
       </div>
     </div>
     <div class="phones" style="margin-top: 36px;">
-      <img class="phone" src="img/config_general.jpg" width="700" height="708" alt="Settings page, General: refresh interval, clock format, language English or Norsk">
-      <img class="phone" src="img/config_style.jpg" width="700" height="928" alt="Settings page, Style: a preview of the Airy style">
-      <img class="phone" src="img/config_departures.jpg" width="700" height="996" alt="Settings page, Departures: a stop list mixing Majorstuen, Frogner plass and Kennington">
+      <img class="phone" src="{{ img }}config_general.jpg" width="700" height="708" alt="Settings page, General: refresh interval, clock format, language English or Norsk">
+      <img class="phone" src="{{ img }}config_style.jpg" width="700" height="928" alt="Settings page, Style: a preview of the Airy style">
+      <img class="phone" src="{{ img }}config_departures.jpg" width="700" height="996" alt="Settings page, Departures: a stop list mixing Majorstuen, Frogner plass and Kennington">
     </div>
     <p class="caption" style="text-align:center;">The settings page on a phone, with Oslo and London stops in one list.</p>
   </section>
@@ -298,7 +300,7 @@ footer { border-top: 1px solid var(--rule); padding-block: 36px 48px; color: var
   }
   function render() {
     document.querySelectorAll("img[data-en]").forEach(img => setSrc(img, img.dataset[lang]));
-    setSrc(wxImg, `img/weather_${wx}_${lang}.png`);
+    setSrc(wxImg, `{{ img }}weather_${wx}_${lang}.png`);
     wxImg.alt = `Weather panel, ${wxNames[wx]} page`;
     document.querySelectorAll(".lang button").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.lang === lang)));
     document.querySelectorAll(".tabs button").forEach(b => {
@@ -314,7 +316,7 @@ footer { border-top: 1px solid var(--rule); padding-block: 36px 48px; color: var
   document.querySelectorAll(".tabs button").forEach(b => b.addEventListener("click", () => { wx = b.dataset.wx; render(); }));
   try { const saved = localStorage.getItem("countdown-lang"); if (saved === "nb" || saved === "en") lang = saved; } catch (e) {}
   // Preload the other language so switching is instant.
-  ["en", "nb"].forEach(l => ["now", "tonight", "tomorrow", "weekend"].forEach(p => { const i = new Image(); i.src = `img/weather_${p}_${l}.png`; }));
+  ["en", "nb"].forEach(l => ["now", "tonight", "tomorrow", "weekend"].forEach(p => { const i = new Image(); i.src = `{{ img }}weather_${p}_${l}.png`; }));
   render();
 })();
 </script>
