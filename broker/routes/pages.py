@@ -15,7 +15,7 @@ from ..auth import (
 )
 from ..clients import tfl, weather
 from ..db import db
-from ..models import ORIENTATIONS, TFL_STYLES, Device, DeviceConfig, GlowmarktCredentials, SpotifyToken
+from ..models import ORIENTATIONS, SPOTIFY_STYLES, TFL_STYLES, Device, DeviceConfig, GlowmarktCredentials, SpotifyToken
 from ..services import assignments, geoip, pairing
 
 bp = Blueprint("pages", __name__)
@@ -128,6 +128,7 @@ def device_config():
         config = db.session.get(DeviceConfig, device_id)
         orientation = request.form.get("orientation", config.orientation)
         tfl_style = request.form.get("tfl_style", config.tfl_style)
+        spotify_style = request.form.get("spotify_style", config.spotify_style)
 
         errors = []
         # Only a location Open-Meteo resolves is ever stored, so a stored one is one the device can use;
@@ -146,6 +147,8 @@ def device_config():
             errors.append(f"Orientation must be one of {', '.join(ORIENTATIONS)}.")
         if tfl_style not in TFL_STYLES:
             errors.append(f"The TfL style must be one of {', '.join(TFL_STYLES)}.")
+        if spotify_style not in SPOTIFY_STYLES:
+            errors.append(f"The Spotify style must be one of {', '.join(SPOTIFY_STYLES)}.")
         if errors:
             return _render_device_config(device_id, errors=[*errors, "Nothing was saved."]), 400
 
@@ -156,6 +159,7 @@ def device_config():
         config.tfl_stop_ids = stop_ids
         config.orientation = orientation
         config.tfl_style = tfl_style
+        config.spotify_style = spotify_style
 
         # A blank password field keeps the stored password.
         glowmarkt_password = request.form.get("glowmarkt_password", "")
@@ -250,6 +254,7 @@ def _render_device_config(device_id: str, errors: list[str] | None = None):
         weather_suggestion=weather_suggestion,
         orientations=ORIENTATIONS,
         tfl_styles=TFL_STYLES,
+        spotify_styles=SPOTIFY_STYLES,
         page_orientation=PAGE_ORIENTATION,
         stops=tfl.resolve_stops(config.tfl_stop_ids),
         spotify_linked=db.session.get(SpotifyToken, device_id) is not None,

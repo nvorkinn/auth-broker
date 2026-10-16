@@ -370,9 +370,13 @@
             color: var(--text-muted);
         }
 
-        /* The TfL style picker: a carousel of pictures, one style in view at a time. */
+        /* The style pickers (TfL, Spotify): a carousel of pictures, one style in view at a time. */
         fieldset.style-picker {
             margin-bottom: 16px;
+        }
+
+        .status-row + fieldset.style-picker {
+            margin-top: 16px;
         }
 
         .style-carousel {
@@ -413,7 +417,6 @@
 
         .style-option img {
             width: 100%;
-            max-width: 267px;
             height: auto;
             border: 1px solid var(--border);
             border-radius: 4px;

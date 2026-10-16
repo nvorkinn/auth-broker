@@ -62,6 +62,14 @@ TFL_STYLES = {
     "grouped": ("Grouped", "A row per route, with its next few times"),
     "card": ("Card", "Each stop in a rounded card"),
 }
+# How the screen draws Spotify, now playing and top tracks alike: the API contract's spotify.style, shown the same
+# way (broker/static/spotify-styles/<style>.png, both pages cut from the renderer's snapshots of it).
+SPOTIFY_STYLES = {
+    "classic": ("Classic", "The original look"),
+    "airy": ("Airy", "Light labels, like the weather"),
+    "hero": ("Hero", "Bold, with your #1 big"),
+    "card": ("Card", "In a rounded card"),
+}
 
 
 class DeviceConfig(db.Model):
@@ -72,6 +80,8 @@ class DeviceConfig(db.Model):
     weather_location: Mapped[str] = mapped_column(String, default="", server_default=text("''"))
     postcode: Mapped[str] = mapped_column(String, default="", server_default=text("''"))
     spotify_enabled: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("0"))
+    # How Spotify is drawn, one of SPOTIFY_STYLES.
+    spotify_style: Mapped[str] = mapped_column(String, default="classic", server_default=text("'classic'"))
     tfl_stop_ids: Mapped[list[str]] = mapped_column(JSON, default=list, server_default=text("'[]'"))
     # How each stop's departures are drawn, one of TFL_STYLES.
     tfl_style: Mapped[str] = mapped_column(String, default="classic", server_default=text("'classic'"))
