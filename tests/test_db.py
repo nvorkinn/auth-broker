@@ -425,8 +425,7 @@ def test_0012_backfills_clock_format_and_keeps_existing_settings(app, register_d
     device_id, _ = register_device()
     with app.app_context():
         config = db.session.get(DeviceConfig, device_id)
-        config.interval, config.weather_location, config.tfl_style = 30, "London", "card"
-        config.spotify_style = "hero"
+        config.interval, config.weather_location, config.style = 30, "London", "card"
         db.session.commit()
         db.session.remove()
 
@@ -436,8 +435,7 @@ def test_0012_backfills_clock_format_and_keeps_existing_settings(app, register_d
 
         config = db.session.get(DeviceConfig, device_id)
         assert config.clock_format == "24h"
-        assert (config.interval, config.weather_location, config.tfl_style) == (30, "London", "card")
-        assert config.spotify_style == "hero"
+        assert (config.interval, config.weather_location, config.style) == (30, "London", "card")
 
 
 def test_clock_format_defaults_to_24_hour_for_orm_and_raw_inserts(app):
@@ -477,39 +475,71 @@ def test_0013_backfills_english_and_keeps_existing_settings(app, register_device
 # --- 0015: classic retired --------------------------------------------------------------------------
 
 
+def _styles(columns):
+    """Every device's values of `columns`, read with SQL, as the models no longer have the old style columns."""
+    with db.engine.begin() as conn:
+        rows = conn.exec_driver_sql(f"SELECT device_id, {', '.join(columns)} FROM device_config").all()  # noqa: S608
+    return {row[0]: tuple(row[1:]) for row in rows}
+
+
+def _insert_device(conn, device_id, **columns):
+    conn.exec_driver_sql("INSERT INTO devices (device_id, created_at) VALUES (?, '2026-10-01 12:00:00')", (device_id,))
+    names = ", ".join(["device_id", *columns])
+    marks = ", ".join("?" * (len(columns) + 1))
+    conn.exec_driver_sql(f"INSERT INTO device_config ({names}) VALUES ({marks})", (device_id, *columns.values()))  # noqa: S608
+
+
 def test_0015_moves_classic_devices_to_hero_and_keeps_the_others(app):
     with app.app_context():
         downgrade(revision="0014")
         with db.engine.begin() as conn:
-            for device_id, tfl_style, spotify_style in [("old", "classic", "classic"), ("picked", "card", "airy")]:
-                conn.exec_driver_sql(
-                    "INSERT INTO devices (device_id, created_at) VALUES (?, '2026-10-01 12:00:00')", (device_id,)
-                )
-                conn.exec_driver_sql(
-                    "INSERT INTO device_config (device_id, tfl_style, spotify_style) VALUES (?, ?, ?)",
-                    (device_id, tfl_style, spotify_style),
-                )
-        upgrade()
+            _insert_device(conn, "old", tfl_style="classic", spotify_style="classic")
+            _insert_device(conn, "picked", tfl_style="card", spotify_style="airy")
+        upgrade(revision="0015")
 
-        styles = {c.device_id: (c.tfl_style, c.spotify_style) for c in db.session.scalars(select(DeviceConfig))}
-        assert styles == {"old": ("hero", "hero"), "picked": ("card", "airy")}
+        assert _styles(("tfl_style", "spotify_style")) == {"old": ("hero", "hero"), "picked": ("card", "airy")}
 
 
 # --- 0016: the notice board style ------------------------------------------------------------------
 
 
-def test_0016_starts_every_device_on_the_hero_notices_style(app, register_device):
-    device_id, _ = register_device()
+def test_0016_starts_every_device_on_the_hero_notices_style(app):
     with app.app_context():
-        config = db.session.get(DeviceConfig, device_id)
-        config.postcode, config.spotify_style = "SW1A 1AA", "card"
+        downgrade(revision="0015")
+        assert "notices_style" not in {column["name"] for column in inspect(db.engine).get_columns("device_config")}
+        with db.engine.begin() as conn:
+            _insert_device(conn, "screen", postcode="SW1A 1AA", spotify_style="card")
+        upgrade(revision="0016")
+
+        assert _styles(("notices_style", "postcode", "spotify_style")) == {"screen": ("hero", "SW1A 1AA", "card")}
+
+
+# --- 0017: one style for every panel ----------------------------------------------------------------
+
+
+def test_0017_gives_each_device_the_style_of_its_departures(app):
+    """Grouped is airy's old name; the Spotify and notice board styles give way to the departures'."""
+    with app.app_context():
+        downgrade(revision="0016")
+        with db.engine.begin() as conn:
+            _insert_device(conn, "grouped", tfl_style="grouped", spotify_style="card", notices_style="hero")
+            _insert_device(conn, "card", tfl_style="card", spotify_style="airy", notices_style="boxed")
+            _insert_device(conn, "hero", tfl_style="hero", spotify_style="airy", notices_style="airy")
+        upgrade()
+
+        styles = {c.device_id: c.style for c in db.session.scalars(select(DeviceConfig))}
+        assert styles == {"grouped": "airy", "card": "card", "hero": "hero"}
+        columns = {column["name"] for column in inspect(db.engine).get_columns("device_config")}
+        assert not columns & {"tfl_style", "spotify_style", "notices_style"}
+
+
+def test_0017_downgrade_gives_every_panel_the_one_style(app, register_device):
+    airy, _ = register_device()
+    with app.app_context():
+        db.session.get(DeviceConfig, airy).style = "airy"
         db.session.commit()
         db.session.remove()
 
-        downgrade(revision="0015")
-        assert "notices_style" not in {column["name"] for column in inspect(db.engine).get_columns("device_config")}
-        upgrade()
+        downgrade(revision="0016")
 
-        config = db.session.get(DeviceConfig, device_id)
-        assert config.notices_style == "hero"
-        assert (config.postcode, config.spotify_style) == ("SW1A 1AA", "card")
+        assert _styles(("tfl_style", "spotify_style", "notices_style")) == {airy: ("grouped", "airy", "airy")}

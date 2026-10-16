@@ -115,9 +115,10 @@ def test_device_config_groups_fields_into_sections(paired_client):
     client, _, _ = paired_client
     html = client.get("/device").get_data(as_text=True)
     titles = re.findall(r'<h2 class="card-title">([^<]+)</h2>', html)
-    assert titles[:3] == ["General", "Weather", "Notice board"]
-    general, weather, notice_board = re.split(r'<h2 class="card-title">', html)[1:4]
+    assert titles[:4] == ["General", "Style", "Weather", "Notice board"]
+    general, style, weather, notice_board = re.split(r'<h2 class="card-title">', html)[1:5]
     assert 'id="interval"' in general
+    assert 'name="style"' in style
     assert 'name="orientation"' in general
     assert 'name="clock_format"' in general
     assert 'id="weather_location"' in weather
@@ -217,7 +218,7 @@ def test_device_config_post_rejects_invalid_clock_formats_without_saving_anythin
             "interval": "20",
             "weather_location": "London",
             "spotify_enabled": "on",
-            "spotify_style": "hero",
+            "style": "card",
             "glowmarkt_username": "new-account",
             "glowmarkt_password": "new-password",
         },
@@ -234,7 +235,7 @@ def test_device_config_post_rejects_invalid_clock_formats_without_saving_anythin
             "",
             False,
         )
-        assert config.spotify_style == "hero"
+        assert config.style == "hero"
         assert db.session.get(GlowmarktCredentials, device_id) is None
 
 
@@ -643,150 +644,54 @@ def test_unlink_screen_requires_pairing(client):
     assert response.headers["Location"] == "/pair"
 
 
-def test_device_config_shows_the_stored_tfl_style_selected(app, paired_client):
+def test_device_config_shows_one_style_picker_with_the_stored_style_selected(app, paired_client):
     client, device_id, _ = paired_client
+    html = client.get("/device").get_data(as_text=True)
+    assert re.findall(r'name="style" value="(\w+)"', html) == ["airy", "hero", "card"]
+    assert re.findall(r'name="style" value="(\w+)" checked', html) == ["hero"]  # the default
+    # The panels' own pickers are gone: the one style is for all of them.
+    assert not re.search(r'name="(tfl|spotify|notices)_style"', html)
     with app.app_context():
-        db.session.get(DeviceConfig, device_id).tfl_style = "card"
+        db.session.get(DeviceConfig, device_id).style = "airy"
         db.session.commit()
     html = client.get("/device").get_data(as_text=True)
-    assert re.findall(r'name="tfl_style" value="(\w+)"', html) == ["hero", "grouped", "card"]
-    assert re.findall(r'name="tfl_style" value="(\w+)" checked', html) == ["card"]
+    assert re.findall(r'name="style" value="(\w+)" checked', html) == ["airy"]
 
 
-def test_device_config_shows_a_picture_of_every_tfl_style(app, paired_client):
+def test_device_config_shows_a_picture_of_every_style(app, paired_client):
     client, _, _ = paired_client
     html = client.get("/device").get_data(as_text=True)
-    pictures = re.findall(r'<img src="(/static/tfl-styles/\w+\.png)"', html)
-    assert pictures == [f"/static/tfl-styles/{style}.png" for style in ("hero", "grouped", "card")]
+    pictures = re.findall(r'<img src="(/static/styles/\w+\.png)"', html)
+    assert pictures == [f"/static/styles/{style}.png" for style in ("airy", "hero", "card")]
     for picture in pictures:
         response = client.get(picture)
         assert response.status_code == 200
         assert response.mimetype == "image/png"
 
 
-def test_device_config_post_persists_the_tfl_style(app, paired_client):
+def test_device_config_post_persists_the_style(app, paired_client):
     client, device_id, _ = paired_client
-    response = client.post("/device", data={"interval": "15", "tfl_style": "hero"})
+    response = client.post("/device", data={"interval": "15", "style": "card"})
     assert response.status_code == 302
     with app.app_context():
-        assert db.session.get(DeviceConfig, device_id).tfl_style == "hero"
+        assert db.session.get(DeviceConfig, device_id).style == "card"
 
 
-def test_device_config_post_without_a_tfl_style_keeps_the_stored_one(app, paired_client):
+def test_device_config_post_without_a_style_keeps_the_stored_one(app, paired_client):
     client, device_id, _ = paired_client
     with app.app_context():
-        db.session.get(DeviceConfig, device_id).tfl_style = "grouped"
+        db.session.get(DeviceConfig, device_id).style = "airy"
         db.session.commit()
     client.post("/device", data={"interval": "15"})
     with app.app_context():
-        assert db.session.get(DeviceConfig, device_id).tfl_style == "grouped"
+        assert db.session.get(DeviceConfig, device_id).style == "airy"
 
 
-def test_device_config_post_rejects_an_unknown_tfl_style(app, paired_client):
+@pytest.mark.parametrize("style", ["fancy", "grouped", "classic", "boxed"])
+def test_device_config_post_rejects_an_unknown_or_old_style(app, paired_client, style):
     client, device_id, _ = paired_client
-    response = client.post("/device", data={"interval": "15", "tfl_style": "fancy"})
+    response = client.post("/device", data={"interval": "15", "style": style})
     assert response.status_code == 400
-    assert b"The TfL style must be one of hero, grouped, card." in response.data
+    assert b"The style must be one of airy, hero, card." in response.data
     with app.app_context():
-        assert db.session.get(DeviceConfig, device_id).tfl_style == "hero"
-
-
-def test_device_config_shows_the_stored_spotify_style_selected(app, paired_client):
-    client, device_id, _ = paired_client
-    with app.app_context():
-        db.session.get(DeviceConfig, device_id).spotify_style = "hero"
-        db.session.commit()
-    html = client.get("/device").get_data(as_text=True)
-    assert re.findall(r'name="spotify_style" value="(\w+)"', html) == ["airy", "hero", "card"]
-    assert re.findall(r'name="spotify_style" value="(\w+)" checked', html) == ["hero"]
-    # The TfL picker beside it keeps its own choice.
-    assert re.findall(r'name="tfl_style" value="(\w+)" checked', html) == ["hero"]
-
-
-def test_device_config_shows_a_picture_of_every_spotify_style(app, paired_client):
-    client, _, _ = paired_client
-    html = client.get("/device").get_data(as_text=True)
-    pictures = re.findall(r'<img src="(/static/spotify-styles/\w+\.png)"', html)
-    assert pictures == [f"/static/spotify-styles/{style}.png" for style in ("airy", "hero", "card")]
-    for picture in pictures:
-        response = client.get(picture)
-        assert response.status_code == 200
-        assert response.mimetype == "image/png"
-
-
-def test_device_config_post_persists_the_spotify_style(app, paired_client):
-    client, device_id, _ = paired_client
-    response = client.post("/device", data={"interval": "15", "spotify_style": "airy"})
-    assert response.status_code == 302
-    with app.app_context():
-        assert db.session.get(DeviceConfig, device_id).spotify_style == "airy"
-
-
-def test_device_config_post_without_a_spotify_style_keeps_the_stored_one(app, paired_client):
-    client, device_id, _ = paired_client
-    with app.app_context():
-        db.session.get(DeviceConfig, device_id).spotify_style = "card"
-        db.session.commit()
-    client.post("/device", data={"interval": "15"})
-    with app.app_context():
-        assert db.session.get(DeviceConfig, device_id).spotify_style == "card"
-
-
-def test_device_config_post_rejects_an_unknown_spotify_style(app, paired_client):
-    client, device_id, _ = paired_client
-    response = client.post("/device", data={"interval": "15", "spotify_style": "fancy"})
-    assert response.status_code == 400
-    assert b"The Spotify style must be one of airy, hero, card." in response.data
-    with app.app_context():
-        assert db.session.get(DeviceConfig, device_id).spotify_style == "hero"
-
-
-def test_device_config_shows_the_stored_notices_style_selected(app, paired_client):
-    client, device_id, _ = paired_client
-    html = client.get("/device").get_data(as_text=True)
-    assert re.findall(r'name="notices_style" value="(\w+)"', html) == ["hero", "airy", "card", "boxed"]
-    assert re.search(r'name="notices_style" value="hero" checked', html)  # the default
-    with app.app_context():
-        db.session.get(DeviceConfig, device_id).notices_style = "boxed"
-        db.session.commit()
-    html = client.get("/device").get_data(as_text=True)
-    assert re.search(r'name="notices_style" value="boxed" checked', html)
-    assert not re.search(r'name="notices_style" value="hero" checked', html)
-
-
-def test_device_config_shows_a_picture_of_every_notices_style(app, paired_client):
-    client, _, _ = paired_client
-    html = client.get("/device").get_data(as_text=True)
-    pictures = re.findall(r'<img src="(/static/notices-styles/\w+\.png)"', html)
-    assert pictures == [f"/static/notices-styles/{style}.png" for style in ("hero", "airy", "card", "boxed")]
-    for picture in pictures:
-        response = client.get(picture)
-        assert response.status_code == 200
-        assert response.mimetype == "image/png"
-
-
-def test_device_config_post_persists_the_notices_style(app, paired_client):
-    client, device_id, _ = paired_client
-    response = client.post("/device", data={"interval": "15", "notices_style": "airy"})
-    assert response.status_code == 302
-    with app.app_context():
-        assert db.session.get(DeviceConfig, device_id).notices_style == "airy"
-
-
-def test_device_config_post_without_a_notices_style_keeps_the_stored_one(app, paired_client):
-    client, device_id, _ = paired_client
-    with app.app_context():
-        db.session.get(DeviceConfig, device_id).notices_style = "card"
-        db.session.commit()
-    client.post("/device", data={"interval": "15"})
-    with app.app_context():
-        assert db.session.get(DeviceConfig, device_id).notices_style == "card"
-
-
-def test_device_config_post_rejects_an_unknown_notices_style(app, paired_client):
-    client, device_id, _ = paired_client
-    response = client.post("/device", data={"interval": "15", "notices_style": "classic"})
-    assert response.status_code == 400
-    assert b"The notice board style must be one of hero, airy, card, boxed." in response.data
-    with app.app_context():
-        assert db.session.get(DeviceConfig, device_id).notices_style == "hero"
+        assert db.session.get(DeviceConfig, device_id).style == "hero"
