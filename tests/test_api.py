@@ -48,7 +48,7 @@ def test_config_is_what_the_contract_says(client, register_device):
 
     assert response.status_code == 200
     assert set(response.get_json()) == set(ConfigResponse.model_fields)
-    assert ConfigResponse.model_validate(response.get_json()).interval == 15
+    assert ConfigResponse.model_validate(response.get_json()).interval == 20
 
 
 @pytest.mark.parametrize("authorization", [None, "", "Bearer ", "Bearer nope", "bearer nope", "nope"])

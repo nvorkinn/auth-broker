@@ -20,7 +20,7 @@ from .routes import (
     status,
     stop_search,
 )
-from .services.pair_throttle import REGISTRATIONS_PER_MINUTE, PairThrottle
+from .services.pair_throttle import MAX_REGISTRATION_LOCKOUT_SECONDS, REGISTRATIONS_PER_MINUTE, PairThrottle
 
 
 def create_app() -> Flask:
@@ -44,7 +44,9 @@ def create_app() -> Flask:
     app.context_processor(lambda: {"username": current_username()})
 
     app.extensions["pair_throttle"] = PairThrottle()
-    app.extensions["register_throttle"] = PairThrottle(max_events=REGISTRATIONS_PER_MINUTE)
+    app.extensions["register_throttle"] = PairThrottle(
+        max_events=REGISTRATIONS_PER_MINUTE, max_lockout=MAX_REGISTRATION_LOCKOUT_SECONDS
+    )
 
     app.register_blueprint(devices.bp)
     app.register_blueprint(renderers.bp)

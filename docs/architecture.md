@@ -322,8 +322,8 @@ sequenceDiagram
     end
 ```
 
-- The screen sleeps for the `Retry-After` the broker sends, which is the device's `interval` (15 s unless the owner
-  changed it), or 5 s while there is no frame yet.
+- The screen sleeps for the `Retry-After` the broker sends, which is the device's `interval` (20 s unless the owner
+  changed it, never under 20 s or over 5 min), or 20 s while there is no frame yet.
 - The renderer uploads only when its picture changed. If the same frame is uploaded again, only `frames.rendered_at`
   moves, which says the renderer is alive.
 - Metrics and logs the screen reports are forwarded in the background to VictoriaMetrics and VictoriaLogs, and never
