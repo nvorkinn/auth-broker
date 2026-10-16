@@ -74,6 +74,7 @@ def test_get_config_returns_defaults_and_shared_keys(client, register_device):
     assert body == {
         "device_id": device_id,
         "interval": 15,
+        "clock_format": "24h",
         "screen": {"orientation": "vertical", "width": 480, "height": 800},
         "weather": {"api_key": "test-weather-key", "location": ""},
         "notice_board": {"postcode": None},
@@ -356,3 +357,16 @@ def test_get_config_returns_the_saved_tfl_style(app, client, register_device):
         db.session.commit()
 
     assert client.get("/api/config", headers=headers).get_json()["tfl"]["style"] == "grouped"
+
+
+@pytest.mark.parametrize("clock_format", ["12h", "24h"])
+def test_get_config_returns_the_clock_format_saved_on_the_website(paired_client, clock_format):
+    client, _, secret = paired_client
+    assert client.post("/device", data={"clock_format": clock_format}).status_code == 302
+
+    response = client.get("/api/config", headers={"Authorization": f"Bearer {secret}"})
+
+    assert response.status_code == 200
+    body = response.get_json()
+    assert body["clock_format"] == clock_format
+    assert ConfigResponse.model_validate(body).clock_format == clock_format

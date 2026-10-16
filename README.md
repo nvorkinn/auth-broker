@@ -76,6 +76,12 @@ Every browser page shows the signed-in user's username at the top, from the
 `AUTH_USERNAME_HEADER` to change the name). It is only shown and used to name their
 screens; the user's identity stays the uid.
 
+On each screen's settings page, **General → Clock format** selects **24-hour (13:00)** or
+**12-hour (1:00 PM)** for all clock times on that screen. Existing and new screens default to 24-hour
+time, and each screen keeps its own choice. The setting does not change time zones, durations,
+machine timestamps or logs. The renderer receives it as the top-level `clock_format` field from
+`GET /api/config`; older responses without the field default to `"24h"`.
+
 Every device-facing endpoint is authenticated with `Authorization: Bearer
 <secret>`; every browser-facing page needs an Authentik login: Caddy
 forward-auths them and sets `X-Authentik-Uid` (setting `AUTH_USER_HEADER`

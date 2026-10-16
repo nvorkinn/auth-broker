@@ -118,6 +118,7 @@ def test_device_config_groups_fields_into_sections(paired_client):
     assert titles[:3] == ["General", "Weather", "Notice board"]
     general, weather, notice_board = re.split(r'<h2 class="card-title">', html)[1:4]
     assert 'id="interval"' in general and 'name="orientation"' in general
+    assert 'name="clock_format"' in general
     assert 'id="weather_location"' in weather
     assert 'id="postcode"' in notice_board
 
@@ -158,6 +159,90 @@ def test_device_config_post_rejects_an_unknown_orientation(app, paired_client):
     assert b"Orientation must be one of horizontal, vertical." in response.data
     with app.app_context():
         assert db.session.get(DeviceConfig, device_id).orientation == "vertical"
+
+
+def test_device_config_shows_both_clock_formats_and_defaults_to_24_hour(paired_client):
+    client, _, _ = paired_client
+    html = client.get("/device").get_data(as_text=True)
+    assert re.findall(r'name="clock_format" value="([^"]+)"', html) == ["24h", "12h"]
+    assert re.search(r'id="clock_format_24h"[^>]*checked', html)
+    assert not re.search(r'id="clock_format_12h"[^>]*checked', html)
+    assert "24-hour (13:00)" in html and "12-hour (1:00 PM)" in html
+
+
+@pytest.mark.parametrize("clock_format", ["12h", "24h"])
+def test_device_config_post_persists_and_shows_the_clock_format(app, paired_client, clock_format):
+    client, device_id, _ = paired_client
+    with app.app_context():
+        db.session.get(DeviceConfig, device_id).clock_format = "24h" if clock_format == "12h" else "12h"
+        db.session.commit()
+
+    response = client.post("/device", data={"clock_format": clock_format})
+
+    assert response.status_code == 302
+    with app.app_context():
+        assert db.session.get(DeviceConfig, device_id).clock_format == clock_format
+    html = client.get(response.headers["Location"]).get_data(as_text=True)
+    assert re.search(rf'id="clock_format_{clock_format}"[^>]*checked', html)
+    assert len(re.findall(r'name="clock_format"[^>]*checked', html)) == 1
+
+
+def test_device_config_post_without_clock_format_keeps_the_stored_one(app, paired_client):
+    client, device_id, _ = paired_client
+    with app.app_context():
+        db.session.get(DeviceConfig, device_id).clock_format = "12h"
+        db.session.commit()
+
+    assert client.post("/device", data={"interval": "20"}).status_code == 302
+
+    with app.app_context():
+        config = db.session.get(DeviceConfig, device_id)
+        assert config.clock_format == "12h"
+        assert config.interval == 20
+
+
+@pytest.mark.parametrize("clock_format", ["", "invalid", "12", "24"])
+def test_device_config_post_rejects_invalid_clock_formats_without_saving_anything(app, paired_client, clock_format):
+    client, device_id, _ = paired_client
+    with app.app_context():
+        db.session.get(DeviceConfig, device_id).clock_format = "12h"
+        db.session.commit()
+
+    response = client.post(
+        "/device",
+        data={
+            "clock_format": clock_format,
+            "interval": "20",
+            "weather_location": "London",
+            "spotify_enabled": "on",
+            "glowmarkt_username": "new-account",
+            "glowmarkt_password": "new-password",
+        },
+    )
+
+    assert response.status_code == 400
+    assert b"The clock format must be one of 24h, 12h." in response.data
+    assert b"Nothing was saved." in response.data
+    with app.app_context():
+        config = db.session.get(DeviceConfig, device_id)
+        assert (config.clock_format, config.interval, config.weather_location, config.spotify_enabled) == (
+            "12h",
+            15,
+            "",
+            False,
+        )
+        assert db.session.get(GlowmarktCredentials, device_id) is None
+
+
+def test_device_config_does_not_save_clock_format_when_another_field_is_invalid(app, paired_client):
+    client, device_id, _ = paired_client
+
+    response = client.post("/device", data={"clock_format": "12h", "postcode": "invalid"})
+
+    assert response.status_code == 400
+    assert b"Nothing was saved." in response.data
+    with app.app_context():
+        assert db.session.get(DeviceConfig, device_id).clock_format == "24h"
 
 
 def test_device_config_post_persists_settings(app, paired_client):

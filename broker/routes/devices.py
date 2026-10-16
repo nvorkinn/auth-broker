@@ -94,6 +94,7 @@ def get_config(*, device_id: str, x_device_name: str | None = None) -> ConfigRes
     return ConfigResponse(
         device_id=device_id,
         interval=config.interval,
+        clock_format=config.clock_format,
         screen=Screen(orientation=config.orientation, width=config.width, height=config.height),
         weather=Weather(api_key=current_app.config["WEATHER_API_KEY"], location=config.weather_location),
         notice_board=NoticeBoard(postcode=config.postcode or None),

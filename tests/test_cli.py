@@ -53,7 +53,9 @@ def test_list_shows_device_name_when_set_and_unnamed_otherwise(client, register_
 def test_unpair_brings_the_device_back_to_showing_a_code_but_keeps_its_settings(app, client, register_device, cli):
     device_id, secret = _paired_device(client, register_device)
     with app.app_context():
-        db.session.get(DeviceConfig, device_id).weather_location = "London"
+        config = db.session.get(DeviceConfig, device_id)
+        config.weather_location = "London"
+        config.clock_format = "12h"
         db.session.commit()
     assert _config(client, device_id, secret)["pairing_code"] is None
 
@@ -62,6 +64,7 @@ def test_unpair_brings_the_device_back_to_showing_a_code_but_keeps_its_settings(
     config = _config(client, device_id, secret)
     assert len(config["pairing_code"]) == 6
     assert config["weather"]["location"] == "London"
+    assert config["clock_format"] == "12h"
 
 
 def test_unpair_with_config_also_resets_settings_and_linked_accounts(app, client, register_device, cli):
@@ -69,6 +72,7 @@ def test_unpair_with_config_also_resets_settings_and_linked_accounts(app, client
     with app.app_context():
         config = db.session.get(DeviceConfig, device_id)
         config.weather_location, config.tfl_stop_ids, config.interval = "London", ["940GZZLUKNG"], 60
+        config.clock_format = "12h"
         db.session.add(SpotifyToken(device_id=device_id, refresh_token="r"))
         db.session.add(GlowmarktCredentials(device_id=device_id, username="me"))
         db.session.commit()
@@ -78,6 +82,7 @@ def test_unpair_with_config_also_resets_settings_and_linked_accounts(app, client
     config = _config(client, device_id, secret)
     assert config["pairing_code"] is not None
     assert (config["interval"], config["weather"]["location"], config["tfl"]["stop_ids"]) == (15, "", [])
+    assert config["clock_format"] == "24h"
     assert config["glowmarkt"] == {"username": None, "password": None}
     assert config["notice_board"] == {"postcode": None}
     with app.app_context():
@@ -108,6 +113,9 @@ def test_forget_leaves_other_devices_alone(app, client, register_device, cli):
 
 def test_code_hands_an_already_paired_device_to_another_user(app, client, register_device, cli):
     device_id, secret = _paired_device(client, register_device)
+    with app.app_context():
+        db.session.get(DeviceConfig, device_id).clock_format = "12h"
+        db.session.commit()
 
     result = cli("code", device_id)
 
@@ -119,6 +127,8 @@ def test_code_hands_an_already_paired_device_to_another_user(app, client, regist
     new_owner.post("/pair", data={"code": code})
     assert new_owner.get("/device").status_code == 200
     assert client.get("/device").status_code == 302  # one owner at a time
+    assert _config(client, device_id, secret)["clock_format"] == "12h"
+    assert b'name="clock_format" value="12h" checked' in new_owner.get("/device").data
 
 
 def test_owner_pairs_a_device_with_a_user(app, client, register_device, cli):
