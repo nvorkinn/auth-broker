@@ -49,6 +49,19 @@
                 <input type="number" id="interval" name="interval" value="{{ config.interval }}" min="5" max="300" required>
             </div>
 
+            <fieldset class="form-group" aria-describedby="clock_format_hint">
+                <legend class="form-legend">Clock format</legend>
+                <div class="checkbox-group" style="gap: 20px; flex-wrap: wrap;">
+                    {% for value, label in clock_formats.items() %}
+                        <span class="checkbox-group">
+                            <input type="radio" id="clock_format_{{ value }}" name="clock_format" value="{{ value }}" {% if config.clock_format == value %}checked{% endif %} required>
+                            <label for="clock_format_{{ value }}" style="margin: 0; font-size: 14px; font-weight: normal;">{{ label }}</label>
+                        </span>
+                    {% endfor %}
+                </div>
+                <p id="clock_format_hint" class="form-hint">Used for all clock times on this screen.</p>
+            </fieldset>
+
             <!-- Read-only for now: the page always submits its own orientation, shown below but not editable.
                  A disabled fieldset isn't submitted, so the value goes in this hidden input instead. -->
             <input type="hidden" name="orientation" value="{{ page_orientation }}">

@@ -53,6 +53,7 @@ class PairingCode(db.Model):
 
 
 ORIENTATIONS = ("horizontal", "vertical")
+CLOCK_FORMATS = {"24h": "24-hour (13:00)", "12h": "12-hour (1:00 PM)"}
 # How the screen draws each stop's departures: the API contract's tfl.style, with the name and description the
 # config page shows beside each one's picture (broker/static/tfl-styles/<style>.png, cut from the renderer's own
 # snapshot of it).
@@ -77,6 +78,7 @@ class DeviceConfig(db.Model):
 
     device_id: Mapped[str] = mapped_column(ForeignKey("devices.device_id"), primary_key=True)
     interval: Mapped[int] = mapped_column(Integer, default=15, server_default=text("15"))
+    clock_format: Mapped[str] = mapped_column(String, default="24h", server_default=text("'24h'"))
     weather_location: Mapped[str] = mapped_column(String, default="", server_default=text("''"))
     postcode: Mapped[str] = mapped_column(String, default="", server_default=text("''"))
     spotify_enabled: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("0"))

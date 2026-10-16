@@ -15,7 +15,16 @@ from ..auth import (
 )
 from ..clients import tfl, weather
 from ..db import db
-from ..models import ORIENTATIONS, SPOTIFY_STYLES, TFL_STYLES, Device, DeviceConfig, GlowmarktCredentials, SpotifyToken
+from ..models import (
+    CLOCK_FORMATS,
+    ORIENTATIONS,
+    SPOTIFY_STYLES,
+    TFL_STYLES,
+    Device,
+    DeviceConfig,
+    GlowmarktCredentials,
+    SpotifyToken,
+)
 from ..services import assignments, geoip, pairing
 
 bp = Blueprint("pages", __name__)
@@ -126,6 +135,7 @@ def device_config():
         postcode = normalize_postcode(raw_postcode)
 
         config = db.session.get(DeviceConfig, device_id)
+        clock_format = request.form.get("clock_format", config.clock_format)
         orientation = request.form.get("orientation", config.orientation)
         tfl_style = request.form.get("tfl_style", config.tfl_style)
         spotify_style = request.form.get("spotify_style", config.spotify_style)
@@ -143,6 +153,8 @@ def device_config():
             errors.append("We couldn't check the weather location just now. Please try again in a minute.")
         if postcode is None:
             errors.append(f'"{raw_postcode.strip()}" isn\'t a valid UK postcode.')
+        if clock_format not in CLOCK_FORMATS:
+            errors.append(f"The clock format must be one of {', '.join(CLOCK_FORMATS)}.")
         if orientation not in ORIENTATIONS:
             errors.append(f"Orientation must be one of {', '.join(ORIENTATIONS)}.")
         if tfl_style not in TFL_STYLES:
@@ -153,6 +165,7 @@ def device_config():
             return _render_device_config(device_id, errors=[*errors, "Nothing was saved."]), 400
 
         config.interval = interval
+        config.clock_format = clock_format
         config.weather_location = weather_location
         config.postcode = postcode
         config.spotify_enabled = spotify_enabled
@@ -252,6 +265,7 @@ def _render_device_config(device_id: str, errors: list[str] | None = None):
         assignment=device.assignment,
         config=config,
         weather_suggestion=weather_suggestion,
+        clock_formats=CLOCK_FORMATS,
         orientations=ORIENTATIONS,
         tfl_styles=TFL_STYLES,
         spotify_styles=SPOTIFY_STYLES,

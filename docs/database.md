@@ -1,7 +1,7 @@
 # The database
 
 One SQLite file, `data/broker.db` (`/app/data/broker.db` in the container), owned by the broker. Alembic migrations
-(`broker/migrations/`, nine so far) run under a file lock every time the app starts, and
+(`broker/migrations/`) run under a file lock every time the app starts, and
 `tests/test_db.py::test_migrations_match_the_models` fails if they drift from `broker/models.py`. Timestamps are UTC.
 [How the pieces fit together](architecture.md) shows when each row is written.
 
@@ -29,6 +29,7 @@ erDiagram
     device_config {
         string device_id PK, FK
         int interval "seconds, default 15"
+        string clock_format "12h or 24h, default 24h"
         string weather_location
         string postcode
         bool spotify_enabled
@@ -91,6 +92,9 @@ Things the diagram can't say:
   Only the Glowmarkt password is encrypted (Fernet).
 - `device_config.width` and `height` are what the screen reported when it registered. Their column defaults (480x800) apply to
   rows from before screens reported a size, and to `flask devices unpair --config`, which replaces the row.
+- `device_config.clock_format` applies to all user-facing clock times on that screen, independently of its owner or
+  their other screens. New and migrated rows default to `24h`; `12h` is the other supported choice. Ordinary unpairing
+  and ownership transfer keep it, while `flask devices unpair --config` resets it to `24h`.
 
 ## Tables
 

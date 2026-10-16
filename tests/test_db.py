@@ -209,6 +209,7 @@ def test_a_legacy_db_keeps_its_data(adopt):
         )
         config = db.session.get(DeviceConfig, "d")
         assert (config.tfl_stop_ids, config.spotify_enabled, config.interval) == (["S1"], True, 15)
+        assert config.clock_format == "24h"
         frame = db.session.get(Frame, "d")
         assert (frame.frame, frame.rendered_at) == (b"\xaa\x55", datetime(2026, 1, 3, tzinfo=UTC))
 
@@ -417,3 +418,39 @@ def test_0008_backfills_existing_devices_with_a_480_by_800_screen(app):
 
         config = db.session.get(DeviceConfig, "old-pi")
         assert (config.width, config.height) == (480, 800)
+
+
+def test_0012_backfills_clock_format_and_keeps_existing_settings(app, register_device):
+    device_id, _ = register_device()
+    with app.app_context():
+        config = db.session.get(DeviceConfig, device_id)
+        config.interval, config.weather_location, config.tfl_style = 30, "London", "card"
+        config.spotify_style = "hero"
+        db.session.commit()
+        db.session.remove()
+
+        downgrade(revision="0011")
+        assert "clock_format" not in {column["name"] for column in inspect(db.engine).get_columns("device_config")}
+        upgrade()
+
+        config = db.session.get(DeviceConfig, device_id)
+        assert config.clock_format == "24h"
+        assert (config.interval, config.weather_location, config.tfl_style) == (30, "London", "card")
+        assert config.spotify_style == "hero"
+
+
+def test_clock_format_defaults_to_24_hour_for_orm_and_raw_inserts(app):
+    with app.app_context():
+        for device_id in ("orm", "raw"):
+            db.session.add(Device(device_id=device_id, created_at=datetime.now(UTC)))
+        db.session.flush()
+        db.session.add(DeviceConfig(device_id="orm"))
+        db.session.execute(db.text("INSERT INTO device_config (device_id) VALUES ('raw')"))
+        db.session.commit()
+
+        for device_id in ("orm", "raw"):
+            assert db.session.get(DeviceConfig, device_id).clock_format == "24h"
+        column = next(
+            column for column in inspect(db.engine).get_columns("device_config") if column["name"] == "clock_format"
+        )
+        assert column["nullable"] is False

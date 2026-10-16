@@ -99,6 +99,20 @@ def test_saving_one_screen_leaves_the_other_alone(app, client, two_screens):
     assert _weather(app, second) == "Secondtown"
 
 
+def test_each_screen_keeps_its_own_clock_format(app, client, two_screens):
+    first, second = two_screens
+
+    assert client.post(f"/device/{first}", data={"clock_format": "12h"}).status_code == 302
+
+    with app.app_context():
+        assert db.session.get(DeviceConfig, first).clock_format == "12h"
+        assert db.session.get(DeviceConfig, second).clock_format == "24h"
+    for device_id, secret, expected in [(first, FIRST_SECRET, "12h"), (second, SECOND_SECRET, "24h")]:
+        page = client.get(f"/device/{device_id}").get_data(as_text=True)
+        assert f'name="clock_format" value="{expected}" checked' in page
+        assert client.get("/api/config", headers=_bearer(secret)).get_json()["clock_format"] == expected
+
+
 def test_disconnecting_spotify_and_unlinking_act_on_the_chosen_screen(app, client, two_screens):
     first, second = two_screens
     with app.app_context():
@@ -147,11 +161,12 @@ def test_a_second_screen_is_named_on_its_own_page(app, client, two_screens):
     ],
 )
 def test_someone_elses_screen_is_not_found(app, client, two_screens, other_screen, method, suffix):
-    response = getattr(client, method)(f"/device/{other_screen}{suffix}", data={"slug": "mine"})
+    response = getattr(client, method)(f"/device/{other_screen}{suffix}", data={"slug": "mine", "clock_format": "12h"})
 
     assert response.status_code == 404
     with app.app_context():
         assert db.session.get(Device, other_screen).owner == "user-2"
+        assert db.session.get(DeviceConfig, other_screen).clock_format == "24h"
 
 
 def test_an_unknown_screen_is_not_found(client, two_screens):
