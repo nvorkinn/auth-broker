@@ -1,5 +1,6 @@
 import json
 import re
+import threading
 from datetime import UTC, datetime, timedelta
 from hashlib import blake2b
 
@@ -8,6 +9,7 @@ from sqlalchemy import inspect, select
 
 from broker.db import db
 from broker.models import Device, Frame
+from broker.routes import frames
 from broker.routes.frames import FRAME_BYTES
 
 SECRET = "a-very-long-device-secret-value"  # register_device's default
@@ -459,10 +461,9 @@ class _Response:
         self.status = status
 
     def raise_for_status(self):
-        from broker.routes import frames
-
         if self.status >= 400:
-            raise frames.requests.HTTPError(f"{self.status} error")
+            msg = f"{self.status} error"
+            raise frames.requests.HTTPError(msg)
 
 
 class _Inline:
@@ -474,9 +475,7 @@ class _Inline:
 
 @pytest.fixture
 def shipped(monkeypatch):
-    """Runs forwarding inline and records each (url, kwargs) the broker posts."""
-    from broker.routes import frames
-
+    """Run forwarding inline and record each (url, kwargs) the broker posts."""
     calls = []
 
     def fake_post(url, **kwargs):
@@ -501,7 +500,7 @@ def _logs_calls(shipped):
 
 
 def _log_records(shipped):
-    """The records of the one logs call, decoded from its JSON lines."""
+    """Return the records of the one logs call, decoded from its JSON lines."""
     [call] = _logs_calls(shipped)
     assert call["headers"] == {"Content-Type": "application/json"}
     return [json.loads(line) for line in call["data"].decode().split("\n")]
@@ -740,9 +739,7 @@ def test_post_uses_destinations_from_the_environment(client, register_device, sh
 
 @pytest.fixture
 def failing(monkeypatch):
-    """Makes every forward fail the given way; returns the list of attempted URLs."""
-    from broker.routes import frames
-
+    """Make every forward fail the given way; return the list of attempted URLs."""
     attempts = []
 
     def install(effect):
@@ -769,8 +766,6 @@ def failing(monkeypatch):
     ],
 )
 def test_post_survives_a_failing_destination(client, register_device, failing, caplog, effect):
-    from broker.routes import frames
-
     effect = {
         "connection": frames.requests.ConnectionError("refused"),
         "timeout": frames.requests.Timeout("slow"),
@@ -789,13 +784,12 @@ def test_post_survives_a_failing_destination(client, register_device, failing, c
 
 
 def test_one_failing_destination_does_not_stop_the_other(client, register_device, monkeypatch):
-    from broker.routes import frames
-
     sent = []
 
     def fake_post(url, **kwargs):
         if url == METRICS_URL:
-            raise frames.requests.ConnectionError("down")
+            msg = "down"
+            raise frames.requests.ConnectionError(msg)
         sent.append(url)
         return _Response()
 
@@ -810,10 +804,6 @@ def test_one_failing_destination_does_not_stop_the_other(client, register_device
 
 def test_post_does_not_wait_for_a_slow_destination(client, register_device, monkeypatch):
     """The real executor hands the request to a worker thread; the response doesn't depend on it."""
-    import threading
-
-    from broker.routes import frames
-
     release, started = threading.Event(), threading.Event()
 
     def slow(url, **kwargs):

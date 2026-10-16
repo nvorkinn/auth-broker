@@ -1,5 +1,8 @@
-"""Naming a screen, which asks the orchestrator for its renderer: the /device/name page, the API behind
-it, the orchestrator's endpoints, and the renderer claiming its screen."""
+"""Test naming a screen, which asks the orchestrator for its renderer.
+
+Covers the /device/name page, the API behind it, the orchestrator's endpoints, and the renderer
+claiming its screen.
+"""
 
 from datetime import UTC, datetime, timedelta
 
@@ -23,12 +26,12 @@ def _bearer(secret):
 @pytest.fixture
 def orchestrator(app, client):
     app.config["ORCHESTRATOR_TOKEN"] = TOKEN
-    return lambda: app.test_client()
+    return app.test_client
 
 
 @pytest.fixture
 def screen(app, client):
-    """A screen that registered and was paired by the signed-in user, which has no renderer yet: its device_id."""
+    """Register a screen paired by the signed-in user, with no renderer yet: return its device_id."""
     device_id = client.post("/api/devices/register", json={"secret": DISPLAY, "width": 480, "height": 800}).get_json()[
         "device_id"
     ]
@@ -286,8 +289,10 @@ def test_forgetting_a_device_has_its_renderer_removed(app, orchestrator, client,
 
 
 def test_a_slug_taken_between_the_check_and_the_insert_is_refused(app, client, screen, monkeypatch):
-    """Two owners naming their screens the same thing at once: both pass the check, the second insert hits
-    the unique index."""
+    """Check two owners naming their screens the same thing at once.
+
+    Both pass the check, the second insert hits the unique index.
+    """
     other = app.test_client()
     other.environ_base["HTTP_X_AUTHENTIK_UID"] = "user-2"
     other.environ_base["HTTP_X_AUTHENTIK_USERNAME"] = USERNAME
@@ -315,7 +320,7 @@ def test_a_slug_taken_between_the_check_and_the_insert_is_refused(app, client, s
 
 def test_naming_a_screen_that_got_its_renderer_meanwhile_goes_to_the_settings(client, screen, monkeypatch):
     def already_has_one(device, slug, username):
-        raise assignments.NotNeeded(device.device_id)
+        raise assignments.NotNeededError(device.device_id)
 
     monkeypatch.setattr(assignments, "create", already_has_one)
 
@@ -348,8 +353,9 @@ def test_a_full_slug_always_fits_the_orchestrators_limit():
     for username in ["a", "x" * 100, "Nikolai V."]:
         suffix = "s" * assignments.max_suffix_length(username)
         slug = assignments.full_slug(username, suffix)
-        assert assignments.SLUG_RE.match(slug) and len(slug) <= assignments.SLUG_MAX
-        with pytest.raises(assignments.InvalidSlug):
+        assert assignments.SLUG_RE.match(slug)
+        assert len(slug) <= assignments.SLUG_MAX
+        with pytest.raises(assignments.InvalidSlugError):
             assignments.full_slug(username, suffix + "s")
 
 

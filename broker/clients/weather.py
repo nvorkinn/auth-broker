@@ -1,3 +1,5 @@
+"""Checks a weather location with Open-Meteo, the way the device itself looks it up."""
+
 import requests
 from flask import current_app
 
@@ -5,8 +7,10 @@ OPEN_METEO_GEOCODING_URL = "https://geocoding-api.open-meteo.com/v1/search"
 
 
 def location_found(location: str) -> bool | None:
-    """Whether Open-Meteo's geocoding finds the location, using the same lookup the device does
-    (WeatherClient._geocode in countdown). None if Open-Meteo couldn't be asked."""
+    """Whether Open-Meteo's geocoding finds the location; None if Open-Meteo couldn't be asked.
+
+    It uses the same lookup the device does (WeatherClient._geocode in countdown).
+    """
     try:
         response = requests.get(
             OPEN_METEO_GEOCODING_URL, params={"name": location, "count": 1, "format": "json"}, timeout=5

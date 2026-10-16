@@ -48,7 +48,7 @@ def test_pair_rejects_unknown_code(client):
 
 
 def test_pair_code_is_single_use(client, register_device):
-    device_id, secret = register_device()
+    _device_id, secret = register_device()
     code = client.post("/api/devices/pairing-code", headers={"Authorization": f"Bearer {secret}"}).get_json()["code"]
 
     first = client.post("/pair", data={"code": code})
@@ -59,7 +59,7 @@ def test_pair_code_is_single_use(client, register_device):
 
 
 def test_pair_accepts_lowercase_code(client, register_device):
-    device_id, secret = register_device()
+    _device_id, secret = register_device()
     code = client.post("/api/devices/pairing-code", headers={"Authorization": f"Bearer {secret}"}).get_json()["code"]
 
     response = client.post("/pair", data={"code": code.lower()})
@@ -73,7 +73,7 @@ def test_device_config_requires_pairing(client):
 
 
 def test_device_config_get_renders_settings(paired_client):
-    client, device_id, _ = paired_client
+    client, _device_id, _ = paired_client
     response = client.get("/device")
     assert response.status_code == 200
     assert b"Not connected" in response.data
@@ -117,7 +117,8 @@ def test_device_config_groups_fields_into_sections(paired_client):
     titles = re.findall(r'<h2 class="card-title">([^<]+)</h2>', html)
     assert titles[:3] == ["General", "Weather", "Notice board"]
     general, weather, notice_board = re.split(r'<h2 class="card-title">', html)[1:4]
-    assert 'id="interval"' in general and 'name="orientation"' in general
+    assert 'id="interval"' in general
+    assert 'name="orientation"' in general
     assert 'name="clock_format"' in general
     assert 'id="weather_location"' in weather
     assert 'id="postcode"' in notice_board
@@ -167,7 +168,8 @@ def test_device_config_shows_both_clock_formats_and_defaults_to_24_hour(paired_c
     assert re.findall(r'name="clock_format" value="([^"]+)"', html) == ["24h", "12h"]
     assert re.search(r'id="clock_format_24h"[^>]*checked', html)
     assert not re.search(r'id="clock_format_12h"[^>]*checked', html)
-    assert "24-hour (13:00)" in html and "12-hour (1:00 PM)" in html
+    assert "24-hour (13:00)" in html
+    assert "12-hour (1:00 PM)" in html
 
 
 @pytest.mark.parametrize("clock_format", ["12h", "24h"])
@@ -292,7 +294,7 @@ def test_device_config_page_offers_only_the_allowed_intervals(paired_client):
 
 
 def test_device_config_shows_resolved_stop_names(paired_client):
-    client, device_id, _ = paired_client
+    client, _device_id, _ = paired_client
     client.post("/device", data={"stops_order": "940GZZLUEUS", "interval": "15"})
 
     stop_detail = {
@@ -343,7 +345,7 @@ def test_device_config_post_stores_encrypted_glowmarkt_password(app, paired_clie
 
 
 def test_device_config_get_never_shows_saved_password(paired_client):
-    client, device_id, _ = paired_client
+    client, _device_id, _ = paired_client
     client.post(
         "/device", data={"interval": "15", "glowmarkt_username": "someone@example.com", "glowmarkt_password": "hunter2"}
     )
@@ -415,7 +417,7 @@ def test_pages_need_the_login_proxy_header(anonymous_client, paired_client):
 
 
 def test_a_code_hands_a_device_to_the_user_who_enters_it(app, paired_client):
-    client, device_id, secret = paired_client
+    client, _device_id, secret = paired_client
     code = client.post("/api/devices/pairing-code", headers={"Authorization": f"Bearer {secret}"}).get_json()["code"]
     new_owner = app.test_client()
     new_owner.environ_base["HTTP_X_AUTHENTIK_UID"] = "someone-else"
@@ -554,7 +556,7 @@ def test_device_config_post_reports_every_invalid_field_at_once(paired_client, w
 
 
 def _wrong_codes(client, times, ip="203.0.113.7"):
-    """Posts `times` wrong codes as if from `ip` (as Caddy forwards it) and returns the last response."""
+    """Post `times` wrong codes as if from `ip` (as Caddy forwards it) and return the last response."""
     response = None
     for _ in range(times):
         response = client.post("/pair", data={"code": "NOPE12"}, headers={"X-Forwarded-For": ip})
@@ -573,7 +575,7 @@ def test_pair_locks_out_an_ip_after_ten_wrong_codes(client):
 
 
 def test_a_locked_out_ip_is_refused_even_with_the_right_code(client, register_device):
-    device_id, secret = register_device()
+    _device_id, secret = register_device()
     code = client.post("/api/devices/pairing-code", headers={"Authorization": f"Bearer {secret}"}).get_json()["code"]
     _wrong_codes(client, 10)
 

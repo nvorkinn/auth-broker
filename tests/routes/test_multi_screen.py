@@ -1,10 +1,14 @@
-"""A user can own several screens: each has its own pages at /device/<id>, /device alone is the one paired
-most recently, and nobody can reach a screen that isn't theirs."""
+"""Test that a user can own several screens.
+
+Each has its own pages at /device/<id>, /device alone is the one paired most recently, and nobody can
+reach a screen that isn't theirs.
+"""
 
 from unittest.mock import patch
 
 import pytest
 
+from broker.auth import user_devices
 from broker.db import db
 from broker.models import Device, DeviceConfig, SpotifyToken
 from tests.conftest import USER
@@ -19,8 +23,10 @@ def _bearer(secret):
 
 
 def _pair(client, claim_renderer, secret):
-    """Registers a screen and its renderer (as the shared register_device fixture does) and pairs the client's
-    user with them: returns the device's id."""
+    """Register a screen and its renderer and pair the client's user with them; return the device's id.
+
+    The registration is the one the shared register_device fixture does.
+    """
     client.post("/api/devices/register", json={"secret": "display-" + secret, "width": 480, "height": 800})
     registered = claim_renderer("display-" + secret, secret)
     code = client.post("/api/devices/pairing-code", headers=_bearer(secret)).get_json()["code"]
@@ -30,13 +36,13 @@ def _pair(client, claim_renderer, secret):
 
 @pytest.fixture
 def two_screens(client, claim_renderer):
-    """The signed-in user's two screens: returns (first_id, second_id), the second paired most recently."""
+    """Pair the signed-in user's two screens: return (first_id, second_id), the second paired most recently."""
     return _pair(client, claim_renderer, FIRST_SECRET), _pair(client, claim_renderer, SECOND_SECRET)
 
 
 @pytest.fixture
 def other_screen(app, claim_renderer):
-    """A screen that belongs to someone else: returns its id."""
+    """Pair a screen to someone else: return its id."""
     stranger = app.test_client()
     stranger.environ_base["HTTP_X_AUTHENTIK_UID"] = "user-2"
     stranger.environ_base["HTTP_X_AUTHENTIK_USERNAME"] = "stranger"
@@ -64,7 +70,8 @@ def test_plain_device_is_the_screen_paired_most_recently(app, client, two_screen
 
     page = client.get("/device").data.decode()
 
-    assert "Secondtown" in page and "Firstville" not in page
+    assert "Secondtown" in page
+    assert "Firstville" not in page
 
 
 def test_each_screen_has_its_own_page(app, client, two_screens):
@@ -280,8 +287,6 @@ def test_the_users_own_header_is_what_decides_ownership(app, client, two_screens
 
 
 def test_without_a_signed_in_user_there_are_no_screens(app):
-    from broker.auth import user_devices
-
     with app.test_request_context("/"):
         assert user_devices() == []
 

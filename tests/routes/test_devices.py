@@ -27,19 +27,19 @@ def test_register_rejects_missing_body(client):
 
 
 def test_pairing_code_requires_auth(client, register_device):
-    device_id, _ = register_device()
+    _device_id, _ = register_device()
     response = client.post("/api/devices/pairing-code")
     assert response.status_code == 401
 
 
 def test_pairing_code_rejects_wrong_secret(client, register_device):
-    device_id, _ = register_device()
+    _device_id, _ = register_device()
     response = client.post("/api/devices/pairing-code", headers={"Authorization": "Bearer wrong-secret"})
     assert response.status_code == 401
 
 
 def test_pairing_code_uses_unambiguous_alphabet(client, register_device):
-    device_id, secret = register_device()
+    _device_id, secret = register_device()
     response = client.post("/api/devices/pairing-code", headers={"Authorization": f"Bearer {secret}"})
     assert response.status_code == 200
     body = response.get_json()
@@ -50,7 +50,7 @@ def test_pairing_code_uses_unambiguous_alphabet(client, register_device):
 
 
 def test_requesting_new_pairing_code_invalidates_old_one(client, register_device):
-    device_id, secret = register_device()
+    _device_id, secret = register_device()
     headers = {"Authorization": f"Bearer {secret}"}
 
     first = client.post("/api/devices/pairing-code", headers=headers).get_json()["code"]
@@ -61,7 +61,7 @@ def test_requesting_new_pairing_code_invalidates_old_one(client, register_device
 
 
 def test_get_config_requires_auth(client, register_device):
-    device_id, _ = register_device()
+    _device_id, _ = register_device()
     response = client.get("/api/config")
     assert response.status_code == 401
 
@@ -285,7 +285,7 @@ def test_get_config_blank_device_name_header_does_not_overwrite(app, client, reg
 
 
 def test_get_config_returns_decrypted_glowmarkt_credentials(paired_client):
-    client, device_id, secret = paired_client
+    client, _device_id, secret = paired_client
     client.post("/device", data={"glowmarkt_username": "someone@example.com", "glowmarkt_password": "hunter2"})
 
     response = client.get("/api/config", headers={"Authorization": f"Bearer {secret}"})
@@ -388,8 +388,15 @@ def test_register_stores_the_size_it_is_given(app, client):
 
 @pytest.mark.parametrize(
     "extra",
-    [{}, {"width": 100}, {"height": 100}, {"width": 100, "height": 0}, {"width": "100", "height": 100}]
-    + [{"width": True, "height": 100}, {"width": 1.5, "height": 100}],
+    [
+        {},
+        {"width": 100},
+        {"height": 100},
+        {"width": 100, "height": 0},
+        {"width": "100", "height": 100},
+        {"width": True, "height": 100},
+        {"width": 1.5, "height": 100},
+    ],
 )
 def test_register_rejects_a_missing_or_bad_screen_size(client, extra):
     response = client.post("/api/devices/register", json={"secret": "display-secret-0123456789", **extra})

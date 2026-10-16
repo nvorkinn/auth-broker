@@ -1,14 +1,20 @@
-"""Throttles guessing at /pair: each client IP gets a limited number of failed codes a minute,
-and each time it hits that limit it's locked out for twice as long as the time before. /register
-uses a second instance with its own limit and a lower cap, recording every call rather than only failures.
+"""Throttles guessing at /pair: each client IP gets a limited number of failed codes a minute.
+
+Each time it hits that limit it's locked out for twice as long as the time before. /register uses a
+second instance with its own limit and a lower cap, recording every call rather than only failures.
 
 State lives in memory, so it's per process and resets on restart. That fits the single gunicorn
-worker the broker runs with; several workers would each keep their own count."""
+worker the broker runs with; several workers would each keep their own count.
+"""
 
 import threading
 import time
 from collections import deque
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 MAX_FAILURES = 10
 WINDOW_SECONDS = 60.0
@@ -30,13 +36,16 @@ class _Client:
 
 
 class PairThrottle:
+    """Per-IP counts of events in a sliding window, with lockouts that double each time the limit is hit."""
+
     def __init__(
         self,
-        clock=time.monotonic,
+        clock: Callable[[], float] = time.monotonic,
         max_events: int = MAX_FAILURES,
         window: float = WINDOW_SECONDS,
         max_lockout: float = MAX_LOCKOUT_SECONDS,
-    ):
+    ) -> None:
+        """Allow each IP `max_events` events every `window` seconds, as told by `clock`, up to `max_lockout` locked."""
         self._clock = clock
         self._max_lockout = max_lockout
         self._max_events = max_events
@@ -53,8 +62,10 @@ class PairThrottle:
             return max(1, round(remaining)) if remaining > 0 else None
 
     def record_failure(self, ip: str) -> int | None:
-        """Counts a wrong code from this IP. Returns the lockout in seconds if this failure
-        triggered one, otherwise None."""
+        """Count a wrong code from this IP.
+
+        Returns the lockout in seconds if this failure triggered one, otherwise None.
+        """
         with self._lock:
             now = self._clock()
             self._prune(now)
@@ -75,8 +86,10 @@ class PairThrottle:
             return round(lockout)
 
     def _prune(self, now: float) -> None:
-        """Drops clients with nothing left worth remembering, at most once a window, so the
-        table doesn't grow with every IP that ever got a code wrong."""
+        """Drop clients with nothing left worth remembering, at most once a window.
+
+        That way the table doesn't grow with every IP that ever got a code wrong.
+        """
         if now - self._last_prune < self._window:
             return
         self._last_prune = now

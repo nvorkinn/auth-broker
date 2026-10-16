@@ -1,21 +1,26 @@
-"""Talks to Spotify on a device's behalf: the OAuth token exchange, keeping each device's tokens
-fresh, and the Web API calls the device-facing endpoints proxy."""
+"""Talks to Spotify on a device's behalf.
+
+It does the OAuth token exchange, keeps each device's tokens fresh, and makes the Web API calls the device-facing
+endpoints proxy.
+"""
 
 import urllib.parse
 from datetime import UTC, datetime
+from http import HTTPStatus
 
 import requests
 from flask import current_app
 
-from ..db import db
-from ..models import SpotifyToken
+from broker.db import db
+from broker.models import SpotifyToken
 
 SCOPE = "user-read-currently-playing user-read-playback-state user-top-read"
 AUTHORIZE_URL = "https://accounts.spotify.com/authorize"
-TOKEN_URL = "https://accounts.spotify.com/api/token"
+TOKEN_URL = "https://accounts.spotify.com/api/token"  # noqa: S105 -- a URL, not a password
 
 
 def authorize_url(state: str) -> str:
+    """Return the URL that sends the browser to Spotify's consent page, carrying `state` to the callback."""
     params = {
         "client_id": current_app.config["SPOTIFY_CLIENT_ID"],
         "response_type": "code",
@@ -27,7 +32,7 @@ def authorize_url(state: str) -> str:
 
 
 def exchange_code(device_id: str, code: str | None) -> None:
-    """Swaps the code from Spotify's OAuth callback for tokens and stores them against the device."""
+    """Swap the code from Spotify's OAuth callback for tokens and store them against the device."""
     response = requests.post(
         TOKEN_URL,
         data={
@@ -77,8 +82,10 @@ def _refresh_access_token(device_id: str, refresh_token: str) -> str:
 
 
 def _get_access_token(device_id: str) -> str | None:
-    """Returns a valid access token for the device, refreshing it if needed, or
-    None when the device hasn't linked Spotify."""
+    """Return a valid access token for the device, refreshing it if needed.
+
+    None when the device hasn't linked Spotify.
+    """
     token = db.session.get(SpotifyToken, device_id)
     if token is None:
         return None
@@ -89,9 +96,11 @@ def _get_access_token(device_id: str) -> str | None:
 
 
 def get_current_track(device_id: str) -> dict[str, object] | None:
-    """Mirrors the shape of countdown's SpotifyClient.get_current_track(), so the
-    Pi side can eventually swap a direct spotipy call for a call to this broker
-    without touching the display code that consumes it."""
+    """Return what the device's Spotify is playing, in the shape of countdown's SpotifyClient.get_current_track().
+
+    That way the Pi side can eventually swap a direct spotipy call for a call to this broker
+    without touching the display code that consumes it.
+    """
     access_token = _get_access_token(device_id)
     if access_token is None:
         return None
@@ -101,7 +110,7 @@ def get_current_track(device_id: str) -> dict[str, object] | None:
         headers={"Authorization": f"Bearer {access_token}"},
         timeout=10,
     )
-    if response.status_code == 204 or not response.content:
+    if response.status_code == HTTPStatus.NO_CONTENT or not response.content:
         return None
     response.raise_for_status()
 
@@ -109,8 +118,10 @@ def get_current_track(device_id: str) -> dict[str, object] | None:
 
 
 def get_queue(device_id: str) -> list[dict[str, object]]:
-    """Upcoming items (not the one currently playing), in play order. Empty when
-    Spotify isn't linked or nothing is queued."""
+    """Upcoming items (not the one currently playing), in play order.
+
+    Empty when Spotify isn't linked or nothing is queued.
+    """
     access_token = _get_access_token(device_id)
     if access_token is None:
         return []
@@ -120,13 +131,14 @@ def get_queue(device_id: str) -> list[dict[str, object]]:
         headers={"Authorization": f"Bearer {access_token}"},
         timeout=10,
     )
-    if response.status_code == 204 or not response.content:
+    if response.status_code == HTTPStatus.NO_CONTENT or not response.content:
         return []
     response.raise_for_status()
     return response.json()
 
 
-def get_users_top_items(device_id: str, type_: str, params) -> list[dict[str, object]] | None:
+def get_users_top_items(device_id: str, type_: str, params: dict[str, str]) -> list[dict[str, object]] | None:
+    """Spotify's top artists or tracks (`type_`) for the device's user; None when Spotify isn't linked."""
     access_token = _get_access_token(device_id)
     if access_token is None:
         return None
@@ -136,7 +148,7 @@ def get_users_top_items(device_id: str, type_: str, params) -> list[dict[str, ob
         timeout=10,
         params=params,
     )
-    if response.status_code == 204 or not response.content:
+    if response.status_code == HTTPStatus.NO_CONTENT or not response.content:
         return []
     response.raise_for_status()
     return response.json()

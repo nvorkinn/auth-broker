@@ -1,12 +1,14 @@
-"""A screen's departure stops, London's and Norway's alike: which source each saved id is from, what the settings page
-shows for it, and the stop search across both."""
+"""A screen's departure stops, London's and Norway's alike.
+
+Which source each saved id is from, what the settings page shows for it, and the stop search across both.
+"""
 
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
 from flask import current_app
 
-from ..clients import entur, tfl
+from broker.clients import entur, tfl
 
 SOURCES = ("tfl", "entur")
 # The settings page's icon for a stop, by mode: its CSS class (mode-<class>) and symbol. A bus stop (or one of a mode
@@ -26,8 +28,10 @@ def source_of(stop_id: str) -> str:
 
 
 def resolve(stop_ids: list[str]) -> list[dict[str, Any]]:
-    """What the settings page shows for each saved stop, in order, with a placeholder for any its source couldn't
-    describe."""
+    """Return what the settings page shows for each saved stop, in order.
+
+    Any its source couldn't describe gets a placeholder.
+    """
     entur_stops = entur.resolve_stops([s for s in stop_ids if source_of(s) == "entur"])
     tfl_stops = iter(tfl.resolve_stops([s for s in stop_ids if source_of(s) == "tfl"]))
     resolved = []
@@ -48,9 +52,11 @@ def _norwegian_first(query: str) -> bool:
 
 
 def search(query: str) -> list[dict[str, Any]]:
-    """Stops matching the query from both sources, asked at once. A query with æ, ø or å lists Norway's first, any
-    other London's. Raises only if both searches fail."""
-    app = current_app._get_current_object()
+    """Return stops matching the query from both sources, asked at once.
+
+    A query with æ, ø or å lists Norway's first, any other London's. Raises only if both searches fail.
+    """
+    app = current_app._get_current_object()  # noqa: SLF001 -- Flask's only way to unwrap it for other threads
 
     def run(source: str) -> list[dict[str, Any]]:
         with app.app_context():
@@ -67,6 +73,7 @@ def search(query: str) -> list[dict[str, Any]]:
         except Exception:
             current_app.logger.exception("Stop search failed at %s", source)
     if not results:
-        raise RuntimeError("Every stop search failed")
+        msg = "Every stop search failed"
+        raise RuntimeError(msg)
     order = ("entur", "tfl") if _norwegian_first(query) else ("tfl", "entur")
     return [result for source in order for result in results.get(source, [])]

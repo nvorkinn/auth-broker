@@ -20,20 +20,23 @@ TIMEOUT = 900
 
 
 def authentik_version() -> str:
-    """The upstream release docker-compose.yml deploys by default."""
+    """Return the upstream release docker-compose.yml deploys by default."""
     match = re.search(r"goauthentik/server:\$\{AUTHENTIK_VERSION:-([^}]+)\}", (ROOT / "docker-compose.yml").read_text())
     if not match:
-        raise ValueError("No default AUTHENTIK_VERSION in docker-compose.yml.")
+        msg = "No default AUTHENTIK_VERSION in docker-compose.yml."
+        raise ValueError(msg)
     return match.group(1)
 
 
-def compose(*args: str, version: str, **kwargs) -> subprocess.CompletedProcess:
+def compose(*args: str, version: str, check: bool, capture_output: bool = False) -> subprocess.CompletedProcess[bytes]:
+    """Run `docker compose` on the validation project with Authentik `version`."""
     env = {**os.environ, "AUTHENTIK_VERSION": version}
     command = ["docker", "compose", "-p", "authentik-validate", "-f", str(COMPOSE_FILE), *args]
-    return subprocess.run(command, env=env, timeout=TIMEOUT, **kwargs)
+    return subprocess.run(command, env=env, timeout=TIMEOUT, check=check, capture_output=capture_output)  # noqa: S603 -- fixed docker command, args from this script
 
 
 def validate_blueprint(version: str) -> None:
+    """Apply the blueprint to a fresh Authentik `version`, then tear the instance down."""
     try:
         compose("up", "-d", "--wait", "postgresql", version=version, check=True)
         compose("up", "-d", "authentik", version=version, check=True)
@@ -55,6 +58,7 @@ def validate_blueprint(version: str) -> None:
 
 
 def main() -> int:
+    """Validate the blueprint and report the outcome; return the exit status."""
     try:
         validate_blueprint(authentik_version())
     except (ValueError, OSError) as exc:

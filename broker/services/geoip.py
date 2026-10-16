@@ -1,10 +1,12 @@
-"""Suggests a weather location from the visitor's IP, to prefill the config page's empty field. It's
-only ever a suggestion: nothing is stored until the user saves the form.
+"""Suggests a weather location from the visitor's IP, to prefill the config page's empty field.
+
+It's only ever a suggestion: nothing is stored until the user saves the form.
 
 The lookup is local, so no IP leaves the server: DB-IP's City Lite database places the IP, and the
 suggestion is the biggest town or city near there from GeoNames, since an IP's place is rough at best
 and the weather is the same across a city anyway. Both files are fetched when the image is built
-(scripts/fetch_geodata.py); without them there's simply no suggestion."""
+(scripts/fetch_geodata.py); without them there's simply no suggestion.
+"""
 
 import math
 from dataclasses import dataclass
@@ -21,6 +23,8 @@ NEARBY_KM = 25
 
 @dataclass(frozen=True)
 class Place:
+    """A town or city from GeoNames."""
+
     name: str
     latitude: float
     longitude: float
@@ -29,6 +33,8 @@ class Place:
 
 @dataclass(frozen=True)
 class GeoData:
+    """The IP database and the places a suggestion is picked from."""
+
     reader: maxminddb.Reader
     places: list[Place]
 
@@ -38,7 +44,7 @@ def _load(directory: str) -> GeoData | None:
     path = Path(directory)
     try:
         reader = maxminddb.open_database(str(path / "dbip-city-lite.mmdb"))
-        with open(path / "places.tsv", encoding="utf-8") as f:
+        with (path / "places.tsv").open(encoding="utf-8") as f:
             places = [
                 Place(name, float(lat), float(lon), int(population or 0))
                 for name, lat, lon, population in (line.rstrip("\n").split("\t") for line in f)
@@ -68,8 +74,10 @@ def _biggest_place_near(places: list[Place], latitude: float, longitude: float) 
 
 
 def suggest_weather_location(ip: str | None) -> str | None:
-    """A town or city name for where the IP is, or None if there's no telling (a private IP, an IP
-    the database doesn't know, or no data)."""
+    """Return a town or city name for where the IP is, or None if there's no telling.
+
+    There's none for a private IP, an IP the database doesn't know, or when there's no data.
+    """
     data = _load(current_app.config["GEODATA_DIR"])
     if data is None or not ip:
         return None

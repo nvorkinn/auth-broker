@@ -1,5 +1,7 @@
-"""POST /api/devices/register (screens), POST /api/renderers/claim (renderers), and the ID-less
-endpoints a registered client polls."""
+"""Test registration: POST /api/devices/register (screens) and POST /api/renderers/claim (renderers).
+
+Also the ID-less endpoints a registered client polls.
+"""
 
 import threading
 from datetime import UTC, datetime, timedelta
@@ -134,8 +136,10 @@ def test_concurrent_registrations_never_share_a_secret(app):
 
 
 def test_a_simultaneous_repeat_of_the_same_secret_is_answered_as_a_repeat(client, monkeypatch):
-    """Both requests pass the "already registered?" check before either writes; the second one's
-    insert then hits the unique secret column."""
+    """Check two requests that both pass the "already registered?" check before either writes.
+
+    The second one's insert then hits the unique secret column.
+    """
     real_device_with = registration._device_with
     calls = []
 
@@ -202,7 +206,7 @@ def test_a_claim_is_not_throttled(app, client):
 
 @pytest.fixture
 def register_throttle(app):
-    """Puts back the real /register limit the app fixture lifts."""
+    """Put back the real /register limit the app fixture lifts."""
     app.extensions["register_throttle"] = PairThrottle(
         max_events=REGISTRATIONS_PER_MINUTE, max_lockout=MAX_REGISTRATION_LOCKOUT_SECONDS
     )
@@ -231,7 +235,7 @@ def test_polling_is_not_throttled(client, split_device):
 
 
 def test_a_matched_display_polls_frames_without_knowing_its_device_id(client, split_device):
-    device_id, renderer_secret, display_secret = split_device
+    _device_id, renderer_secret, display_secret = split_device
     assert client.get("/api/frame", headers=_auth(display_secret)).status_code == 404
 
     frame = bytes([0x5A]) * FRAME_BYTES
@@ -275,7 +279,7 @@ def test_a_renderer_can_use_the_id_less_config(client, register_device):
 
 
 def test_a_renderer_puts_frames_without_its_device_id(client, split_device):
-    device_id, renderer_secret, display_secret = split_device
+    _device_id, renderer_secret, display_secret = split_device
     frame = bytes([0x3C]) * FRAME_BYTES
 
     assert client.put("/api/frame", data=frame, headers=_auth(renderer_secret)).status_code == 204
@@ -285,7 +289,7 @@ def test_a_renderer_puts_frames_without_its_device_id(client, split_device):
 
 
 def test_an_id_less_put_is_forbidden_to_the_display(app, client, split_device):
-    device_id, _, display_secret = split_device
+    _device_id, _, display_secret = split_device
 
     response = client.put("/api/frame", data=bytes(FRAME_BYTES), headers=_auth(display_secret))
 

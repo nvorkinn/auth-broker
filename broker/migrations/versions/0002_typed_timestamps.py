@@ -16,11 +16,14 @@ Create Date: 2026-10-05 10:00:00.000000
 
 """
 
-from collections.abc import Sequence
 from datetime import UTC, datetime
+from typing import TYPE_CHECKING
 
 import sqlalchemy as sa
 from alembic import op
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 # revision identifiers, used by Alembic.
 revision: str = "0002"
@@ -29,7 +32,7 @@ branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
 # Alembic looks these up by name, so export them rather than leave them looking unused.
-__all__ = ["revision", "down_revision", "branch_labels", "depends_on", "upgrade", "downgrade"]
+__all__ = ["branch_labels", "depends_on", "down_revision", "downgrade", "revision", "upgrade"]
 
 # table -> (primary key, [(timestamp column, nullable)])
 TIMESTAMPS = {
@@ -46,12 +49,12 @@ def _to_naive_utc(value: str | None) -> datetime | None:
     return parsed.astimezone(UTC).replace(tzinfo=None) if parsed.tzinfo else parsed
 
 
-def _read(bind, table: str, key: str, columns: list[str], type_: sa.types.TypeEngine) -> list[dict]:
+def _read(bind: sa.Connection, table: str, key: str, columns: list[str], type_: sa.types.TypeEngine) -> list[dict]:
     t = sa.table(table, sa.column(key, sa.String()), *(sa.column(c, type_) for c in columns))
-    return [dict(row._mapping) for row in bind.execute(sa.select(t))]
+    return [dict(row._mapping) for row in bind.execute(sa.select(t))]  # noqa: SLF001 -- Row._mapping is SQLAlchemy's public API
 
 
-def _write(bind, table: str, key: str, rows: list[dict], type_: sa.types.TypeEngine) -> None:
+def _write(bind: sa.Connection, table: str, key: str, rows: list[dict], type_: sa.types.TypeEngine) -> None:
     if not rows:
         return
     columns = [c for c in rows[0] if c != key]
@@ -60,13 +63,16 @@ def _write(bind, table: str, key: str, rows: list[dict], type_: sa.types.TypeEng
         bind.execute(t.update().where(t.c[key] == row[key]).values({c: row[c] for c in columns}))
 
 
-def _alter(table: str, columns: list[tuple[str, bool]], from_type, to_type) -> None:
+def _alter(
+    table: str, columns: list[tuple[str, bool]], from_type: sa.types.TypeEngine, to_type: sa.types.TypeEngine
+) -> None:
     with op.batch_alter_table(table) as batch:
         for column, nullable in columns:
             batch.alter_column(column, existing_type=from_type, type_=to_type, existing_nullable=nullable)
 
 
 def upgrade() -> None:
+    """Convert the timestamp strings to datetimes and the Spotify token expiry to a number."""
     bind = op.get_bind()
 
     for table, (key, columns) in TIMESTAMPS.items():
@@ -86,6 +92,7 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    """Turn the timestamps and the Spotify token expiry back into strings."""
     bind = op.get_bind()
 
     for table, (key, columns) in TIMESTAMPS.items():

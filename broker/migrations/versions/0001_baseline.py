@@ -10,10 +10,13 @@ Create Date: 2026-10-04 21:13:21.855676
 
 """
 
-from collections.abc import Sequence
+from typing import TYPE_CHECKING
 
 import sqlalchemy as sa
 from alembic import op
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 # revision identifiers, used by Alembic.
 revision: str = "0001"
@@ -22,7 +25,7 @@ branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
 # Alembic looks these up by name, so export them rather than leave them looking unused.
-__all__ = ["revision", "down_revision", "branch_labels", "depends_on", "upgrade", "downgrade"]
+__all__ = ["branch_labels", "depends_on", "down_revision", "downgrade", "revision", "upgrade"]
 
 metadata = sa.MetaData()
 
@@ -100,12 +103,12 @@ LEGACY_TABLES = [
 ]
 
 
-def _columns(bind, table: str) -> set[str]:
+def _columns(bind: sa.Connection, table: str) -> set[str]:
     return {column["name"] for column in sa.inspect(bind).get_columns(table)}
 
 
-def _apply_legacy_column_additions(bind) -> None:
-    """The hand-rolled column additions that predate Alembic."""
+def _apply_legacy_column_additions(bind: sa.Connection) -> None:
+    """Apply the hand-rolled column additions that predate Alembic."""
     columns = _columns(bind, "devices")
     if "paired_at" not in columns:
         op.add_column("devices", sa.Column("paired_at", sa.String(), nullable=True))
@@ -120,6 +123,7 @@ def _apply_legacy_column_additions(bind) -> None:
 
 
 def upgrade() -> None:
+    """Create the baseline schema, or adopt a database from before Alembic."""
     bind = op.get_bind()
     if "devices" not in sa.inspect(bind).get_table_names():
         metadata.create_all(bind)
@@ -134,4 +138,5 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    """Drop every table."""
     metadata.drop_all(op.get_bind())

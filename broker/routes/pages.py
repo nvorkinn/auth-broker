@@ -1,10 +1,11 @@
 """The recipient-facing site: pairing the signed-in user with a device, and the device's settings page."""
 
 import re
+from typing import TYPE_CHECKING
 
 from flask import Blueprint, current_app, g, jsonify, redirect, render_template, request, url_for
 
-from ..auth import (
+from broker.auth import (
     current_user,
     current_username,
     paired_device_id,
@@ -13,9 +14,9 @@ from ..auth import (
     screen_label,
     user_devices,
 )
-from ..clients import weather
-from ..db import db
-from ..models import (
+from broker.clients import weather
+from broker.db import db
+from broker.models import (
     CLOCK_FORMATS,
     DEFAULT_INTERVAL,
     LANGUAGES,
@@ -29,7 +30,10 @@ from ..models import (
     GlowmarktCredentials,
     SpotifyToken,
 )
-from ..services import assignments, geoip, pairing, stops
+from broker.services import assignments, geoip, pairing, stops
+
+if TYPE_CHECKING:
+    from flask.typing import ResponseReturnValue
 
 bp = Blueprint("pages", __name__)
 
@@ -42,8 +46,10 @@ NORWEGIAN_POSTCODE_RE = re.compile(r"^[0-9]{4}$")
 
 
 def normalize_postcode(value: str) -> str | None:
-    """Returns the postcode in canonical form ("SW1A 1AA", "0150"), "" if blank, or None if it is neither a UK nor
-    a Norwegian postcode."""
+    """Return the postcode in canonical form ("SW1A 1AA", "0150").
+
+    Return "" if it is blank, or None if it is neither a UK nor a Norwegian postcode.
+    """
     compact = re.sub(r"\s+", "", value).upper()
     if not compact:
         return ""
@@ -54,15 +60,15 @@ def normalize_postcode(value: str) -> str | None:
 
 
 def postcode_country(postcode: str) -> str | None:
-    """The country of a normalized postcode: "NO", "GB", or None for none."""
+    """Return the country of a normalized postcode: "NO", "GB", or None for none."""
     if not postcode:
         return None
     return "NO" if NORWEGIAN_POSTCODE_RE.match(postcode) else "GB"
 
 
 @bp.app_context_processor
-def screens():
-    """The signed-in user's screens, for the switcher at the top of every page: [{id, label, current}]."""
+def screens() -> dict[str, list[dict[str, str | bool]]]:
+    """List the signed-in user's screens, for the switcher at the top of every page: [{id, label, current}]."""
     devices = user_devices()
     if not devices:
         return {"screens": []}
@@ -73,17 +79,20 @@ def screens():
 
 
 @bp.get("/")
-def index():
+def index() -> ResponseReturnValue:
+    """Send the user to their screen's settings, or to pairing if they have none."""
     return redirect(url_for("pages.device_config") if paired_device_id() else url_for("pages.pair"))
 
 
 @bp.route("/pair", methods=["GET", "POST"])
 @require_user
-def pair():
-    """Pairs the signed-in user with a device. A device that has just finished WiFi setup sends its
-    owner's browser here with a pairing token in the URL fragment (or, if it can't set one, ?t=):
-    the page waits for the device to register, then goes to its settings. Without a token it asks for
-    the code the device shows."""
+def pair() -> ResponseReturnValue:
+    """Pair the signed-in user with a device.
+
+    A device that has just finished WiFi setup sends its owner's browser here with a pairing token in the URL
+    fragment (or, if it can't set one, ?t=): the page waits for the device to register, then goes to its settings.
+    Without a token it asks for the code the device shows.
+    """
     if request.method == "GET":
         return render_template("pair.html", error=None, token=request.args.get("t", ""))
 
@@ -107,7 +116,7 @@ def pair():
     return redirect(url_for("pages.device_config"))
 
 
-def _too_many_attempts(retry_after: int):
+def _too_many_attempts(retry_after: int) -> ResponseReturnValue:
     minutes = -(-retry_after // 60)
     wait = "a minute" if minutes == 1 else f"{minutes} minutes"
     error = f"Too many incorrect codes. Please wait {wait} and try again."
@@ -116,10 +125,12 @@ def _too_many_attempts(retry_after: int):
 
 @bp.post("/pair/token")
 @require_user
-def pair_by_token():
-    """Polled by the pairing page: 200 once the user is paired, 202 while the device hasn't
-    registered yet, 409 if someone else owns it. The token is 256 random-looking bits, so there's
-    nothing to throttle."""
+def pair_by_token() -> ResponseReturnValue:
+    """Pair the signed-in user with the device a pairing token is for.
+
+    The pairing page polls this: 200 once the user is paired, 202 while the device hasn't registered yet,
+    409 if someone else owns it. The token is 256 random-looking bits, so there's nothing to throttle.
+    """
     token = (request.get_json(silent=True) or {}).get("token", "")
     if not isinstance(token, str) or not PAIRING_TOKEN_RE.match(token):
         return jsonify(status="invalid"), 400
@@ -131,92 +142,109 @@ def pair_by_token():
 @bp.route("/device", methods=["GET", "POST"], defaults={"device_id": None})
 @bp.route("/device/<device_id>", methods=["GET", "POST"])
 @require_paired_user
-def device_config():
+def device_config() -> ResponseReturnValue:
+    """Show a screen's settings page, and save the settings posted from it."""
     device_id = g.device_id
     # A screen with no renderer yet is named first: nothing else on this page works until it has one.
     if assignments.needs_renderer(db.session.get(Device, device_id)):
         return redirect(url_for("pages.name_screen", device_id=device_id))
 
     if request.method == "POST":
-        raw_stops = request.form.get("stops_order", "")
-        stop_ids = [s.strip() for s in raw_stops.split(",") if s.strip()]
+        return _save_device_config(device_id)
+    return _render_device_config(device_id)
 
-        interval_val = request.form.get("interval", "").strip()
-        # Kept in range rather than refused: a screen never refreshes more often or more seldom than that.
-        interval = DEFAULT_INTERVAL
-        if interval_val.isdigit():
-            interval = min(max(int(interval_val), MIN_INTERVAL), MAX_INTERVAL)
 
-        weather_location = request.form.get("weather_location", "").strip()
-        spotify_enabled = request.form.get("spotify_enabled") == "on"
+# The settings picked from a fixed list, each by its form field (also its DeviceConfig attribute): the values
+# allowed, and what an error message calls it. Errors are listed in this order.
+CHOICES = {
+    "language": (LANGUAGES, "The language"),
+    "clock_format": (CLOCK_FORMATS, "The clock format"),
+    "orientation": (ORIENTATIONS, "Orientation"),
+    "tfl_style": (TFL_STYLES, "The TfL style"),
+    "spotify_style": (SPOTIFY_STYLES, "The Spotify style"),
+}
 
-        raw_postcode = request.form.get("postcode", "")
-        postcode = normalize_postcode(raw_postcode)
 
-        config = db.session.get(DeviceConfig, device_id)
-        clock_format = request.form.get("clock_format", config.clock_format)
-        language = request.form.get("language", config.language)
-        orientation = request.form.get("orientation", config.orientation)
-        tfl_style = request.form.get("tfl_style", config.tfl_style)
-        spotify_style = request.form.get("spotify_style", config.spotify_style)
+def _save_device_config(device_id: str) -> ResponseReturnValue:
+    """Save the settings posted from the page, or show it again with what's wrong and nothing saved."""
+    raw_stops = request.form.get("stops_order", "")
+    stop_ids = [s.strip() for s in raw_stops.split(",") if s.strip()]
 
-        errors = []
-        # Only a location Open-Meteo resolves is ever stored, so a stored one is one the device can use;
-        # if it can't be checked right now, that's refused too rather than saved unverified.
-        found = weather.location_found(weather_location) if weather_location else True
-        if found is False:
-            errors.append(
+    interval_val = request.form.get("interval", "").strip()
+    # Kept in range rather than refused: a screen never refreshes more often or more seldom than that.
+    interval = DEFAULT_INTERVAL
+    if interval_val.isdigit():
+        interval = min(max(int(interval_val), MIN_INTERVAL), MAX_INTERVAL)
+
+    weather_location = request.form.get("weather_location", "").strip()
+    spotify_enabled = request.form.get("spotify_enabled") == "on"
+
+    raw_postcode = request.form.get("postcode", "")
+    postcode = normalize_postcode(raw_postcode)
+
+    config = db.session.get(DeviceConfig, device_id)
+    choices = {field: request.form.get(field, getattr(config, field)) for field in CHOICES}
+
+    errors = _weather_location_errors(weather_location)
+    if postcode is None:
+        errors.append(f'"{raw_postcode.strip()}" isn\'t a valid UK or Norwegian postcode.')
+    errors += [
+        f"{label} must be one of {', '.join(allowed)}."
+        for field, (allowed, label) in CHOICES.items()
+        if choices[field] not in allowed
+    ]
+    if errors:
+        return _render_device_config(device_id, errors=[*errors, "Nothing was saved."]), 400
+
+    config.interval = interval
+    config.weather_location = weather_location
+    config.postcode = postcode
+    config.spotify_enabled = spotify_enabled
+    config.tfl_stop_ids = stop_ids
+    for field, value in choices.items():
+        setattr(config, field, value)
+    _save_glowmarkt_credentials(device_id)
+
+    db.session.commit()
+    return redirect(url_for("pages.device_config", device_id=device_id))
+
+
+def _weather_location_errors(weather_location: str) -> list[str]:
+    """Return what's wrong with a weather location, as a list of at most one error."""
+    # Only a location Open-Meteo resolves is ever stored, so a stored one is one the device can use;
+    # if it can't be checked right now, that's refused too rather than saved unverified.
+    found = weather.location_found(weather_location) if weather_location else True
+    if found is False:
+        return [
+            (
                 f'We couldn\'t find "{weather_location}" for the weather: try just the town or city name, '
                 'not a postcode (e.g. "Kennington" or "Oslo").'
             )
-        elif found is None:
-            errors.append("We couldn't check the weather location just now. Please try again in a minute.")
-        if postcode is None:
-            errors.append(f'"{raw_postcode.strip()}" isn\'t a valid UK or Norwegian postcode.')
-        if language not in LANGUAGES:
-            errors.append(f"The language must be one of {', '.join(LANGUAGES)}.")
-        if clock_format not in CLOCK_FORMATS:
-            errors.append(f"The clock format must be one of {', '.join(CLOCK_FORMATS)}.")
-        if orientation not in ORIENTATIONS:
-            errors.append(f"Orientation must be one of {', '.join(ORIENTATIONS)}.")
-        if tfl_style not in TFL_STYLES:
-            errors.append(f"The TfL style must be one of {', '.join(TFL_STYLES)}.")
-        if spotify_style not in SPOTIFY_STYLES:
-            errors.append(f"The Spotify style must be one of {', '.join(SPOTIFY_STYLES)}.")
-        if errors:
-            return _render_device_config(device_id, errors=[*errors, "Nothing was saved."]), 400
+        ]
+    if found is None:
+        return ["We couldn't check the weather location just now. Please try again in a minute."]
+    return []
 
-        config.interval = interval
-        config.clock_format = clock_format
-        config.language = language
-        config.weather_location = weather_location
-        config.postcode = postcode
-        config.spotify_enabled = spotify_enabled
-        config.tfl_stop_ids = stop_ids
-        config.orientation = orientation
-        config.tfl_style = tfl_style
-        config.spotify_style = spotify_style
 
-        # A blank password field keeps the stored password.
-        glowmarkt_password = request.form.get("glowmarkt_password", "")
-        creds = db.session.get(GlowmarktCredentials, device_id) or GlowmarktCredentials(device_id=device_id)
-        creds.username = request.form.get("glowmarkt_username", "").strip()
-        if glowmarkt_password:
-            creds.password = glowmarkt_password
-        db.session.add(creds)
-
-        db.session.commit()
-        return redirect(url_for("pages.device_config", device_id=device_id))
-
-    return _render_device_config(device_id)
+def _save_glowmarkt_credentials(device_id: str) -> None:
+    """Stage the posted Glowmarkt username, and password unless its field was left blank."""
+    # A blank password field keeps the stored password.
+    glowmarkt_password = request.form.get("glowmarkt_password", "")
+    creds = db.session.get(GlowmarktCredentials, device_id) or GlowmarktCredentials(device_id=device_id)
+    creds.username = request.form.get("glowmarkt_username", "").strip()
+    if glowmarkt_password:
+        creds.password = glowmarkt_password
+    db.session.add(creds)
 
 
 @bp.route("/device/name", methods=["GET", "POST"], defaults={"device_id": None})
 @bp.route("/device/<device_id>/name", methods=["GET", "POST"])
 @require_paired_user
-def name_screen():
-    """Where a new screen is named, which asks for its renderer to be started (see
-    services/assignments.py). The user is sent here right after pairing, and never again once it's done."""
+def name_screen() -> ResponseReturnValue:
+    """Name a new screen, which asks for its renderer to be started (see services/assignments.py).
+
+    The user is sent here right after pairing, and never again once it's done.
+    """
     device = db.session.get(Device, g.device_id)
     if not assignments.needs_renderer(device):
         return redirect(url_for("pages.device_config", device_id=g.device_id))
@@ -227,14 +255,14 @@ def name_screen():
         try:
             assignments.create(device, slug, current_username())
             return redirect(url_for("pages.device_config", device_id=g.device_id))
-        except assignments.InvalidSlug:
+        except assignments.InvalidSlugError:
             error = (
                 f"Use up to {assignments.max_suffix_length(current_username())} lowercase letters, numbers, "
                 "dashes or underscores, starting with a letter or number."
             )
-        except assignments.SlugTaken:
+        except assignments.SlugTakenError:
             error = "That name is taken. Try another."
-        except assignments.NotNeeded:
+        except assignments.NotNeededError:
             return redirect(url_for("pages.device_config", device_id=g.device_id))
     return render_template(
         "name_screen.html",
@@ -248,20 +276,24 @@ def name_screen():
 
 @bp.post("/api/displays/<device_id>/renderer")
 @require_user
-def request_renderer(device_id):
-    """{"slug": "lisa"}: names the signed-in user's screen, which asks for its renderer (the same as
-    the form above). 201 {id, slug, status}; 400 for a bad slug, 404 for a device that isn't the
-    user's, 409 for a slug that's taken or a screen that already has its renderer."""
+def request_renderer(device_id: str) -> ResponseReturnValue:
+    """Name the signed-in user's screen, which asks for its renderer (the same as the form above).
+
+    {"slug": "lisa"} gives 201 {id, slug, status}; 400 for a bad slug, 404 for a device that isn't the
+    user's, 409 for a slug that's taken or a screen that already has its renderer.
+    """
     device = db.session.get(Device, device_id)
     if device is None or device.owner != current_user() or device.paired_at is None:
         return jsonify(error="not found"), 404
     slug = (request.get_json(silent=True) or {}).get("slug", "")
     try:
         assignment = assignments.create(device, slug if isinstance(slug, str) else "", current_username())
-    except assignments.InvalidSlug:
+    except assignments.InvalidSlugError:
         return jsonify(error="slug must match [a-z0-9][a-z0-9_-]* and fit in 32 characters with the prefix"), 400
-    except (assignments.SlugTaken, assignments.NotNeeded) as e:
-        return jsonify(error="slug is taken" if isinstance(e, assignments.SlugTaken) else "already has a renderer"), 409
+    except (assignments.SlugTakenError, assignments.NotNeededError) as e:
+        return jsonify(
+            error="slug is taken" if isinstance(e, assignments.SlugTakenError) else "already has a renderer"
+        ), 409
     return jsonify(id=assignment.id, slug=assignment.slug, status=assignment.status), 201
 
 
@@ -269,7 +301,8 @@ def request_renderer(device_id):
 PAGE_ORIENTATION = "vertical"
 
 
-def _render_device_config(device_id: str, errors: list[str] | None = None):
+def _render_device_config(device_id: str, errors: list[str] | None = None) -> str:
+    """Render a screen's settings page, with any errors from saving it."""
     config = db.session.get(DeviceConfig, device_id)
     creds = db.session.get(GlowmarktCredentials, device_id)
     glowmarkt = {
@@ -307,7 +340,8 @@ def _render_device_config(device_id: str, errors: list[str] | None = None):
 @bp.post("/device/spotify/disconnect", defaults={"device_id": None})
 @bp.post("/device/<device_id>/spotify/disconnect")
 @require_paired_user
-def spotify_disconnect():
+def spotify_disconnect() -> ResponseReturnValue:
+    """Forget the screen's Spotify tokens, unlinking its Spotify account."""
     token = db.session.get(SpotifyToken, g.device_id)
     if token is not None:
         db.session.delete(token)
@@ -318,9 +352,11 @@ def spotify_disconnect():
 @bp.post("/device/display/unlink", defaults={"device_id": None})
 @bp.post("/device/<device_id>/display/unlink")
 @require_paired_user
-def display_unlink():
-    """Forgets the screen's secret, so it gets a 401 from then on: for a screen that's lost, stolen or
-    retired. Registering again makes it a new device."""
+def display_unlink() -> ResponseReturnValue:
+    """Forget the screen's secret, so it gets a 401 from then on.
+
+    For a screen that's lost, stolen or retired. Registering again makes it a new device.
+    """
     db.session.get(Device, g.device_id).display_secret_hash = None
     db.session.commit()
     return redirect(url_for("pages.device_config", device_id=g.device_id))

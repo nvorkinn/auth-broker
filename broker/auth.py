@@ -1,13 +1,24 @@
+"""How the broker knows who is asking: devices by their bearer secrets, browsers by the login proxy's headers."""
+
 import functools
 import hashlib
 import hmac
+from collections.abc import Callable, Collection
 from datetime import UTC, datetime, timedelta
+from typing import TYPE_CHECKING
 
 from flask import current_app, g, jsonify, redirect, request, url_for
 from sqlalchemy import select
 
 from .db import db
 from .models import Device
+
+if TYPE_CHECKING:
+    from flask import Response
+    from flask.typing import ResponseReturnValue
+
+# A Flask view function, as the decorators here take and return it.
+type View = Callable[..., ResponseReturnValue]
 
 # How stale devices.last_seen_at may get before a request updates it. Some device endpoints are
 # polled every few seconds; this keeps that from being a database write each time.
@@ -20,32 +31,41 @@ ROLES = ("renderer", "display")
 
 
 def hash_secret(secret: str) -> str:
-    """The stored form of a device secret. A plain unsalted SHA-256 is enough because secrets are
-    long random strings, not passwords, and being deterministic lets a secret find its device."""
+    """Return the stored form of a device secret.
+
+    A plain unsalted SHA-256 is enough because secrets are long random strings, not passwords, and being
+    deterministic lets a secret find its device.
+    """
     return hashlib.sha256(secret.encode()).hexdigest()
 
 
-def with_retry_after(response, seconds):
-    """Sets Retry-After on a response, so a view can return (response, status) on every path."""
+def with_retry_after(response: Response, seconds: int) -> Response:
+    """Set Retry-After on a response, so a view can return (response, status) on every path."""
     response.headers["Retry-After"] = str(seconds)
     return response
 
 
 class DeviceAuthError(Exception):
-    """A request that device auth turns away: `status` is 401 for a missing, malformed or unknown secret and
-    403 for a valid one whose role isn't allowed here; `message` is the `error` it is answered with."""
+    """A request that device auth turns away.
+
+    `status` is 401 for a missing, malformed or unknown secret and 403 for a valid one whose role isn't allowed
+    here; `message` is the `error` it is answered with.
+    """
 
     def __init__(self, status: int, message: str) -> None:
+        """Turn the request away with `status`, answering `message`."""
         super().__init__(message)
         self.status = status
         self.message = message
 
 
-def authenticate_device(authorization: str, roles=frozenset(ROLES)) -> Device:
-    """Identifies the device behind an `Authorization: Bearer <secret>` header, whose secret alone finds it.
+def authenticate_device(authorization: str, roles: Collection[str] = frozenset(ROLES)) -> Device:
+    """Identify the device behind an `Authorization: Bearer <secret>` header, whose secret alone finds it.
+
     The secret that matches decides the caller's role: a valid secret for a role not in `roles` is a 403,
     anything else a 401 (DeviceAuthError). Sets g.device_id and g.role, logs the request and records the
-    device as seen. The prefix is matched exactly: `bearer x` is no more a secret than a bare one."""
+    device as seen. The prefix is matched exactly: `bearer x` is no more a secret than a bare one.
+    """
     secret = authorization.removeprefix("Bearer ")
     if not authorization.startswith("Bearer ") or not secret:
         raise DeviceAuthError(401, "unauthorized")
@@ -71,14 +91,16 @@ def authenticate_device(authorization: str, roles=frozenset(ROLES)) -> Device:
     return device
 
 
-def require_device_auth(roles=frozenset(ROLES)):
-    """Protects device-facing endpoints with one of the device's own bearer secrets (see
-    authenticate_device) and passes device_id to the view. For the routes of the countdown API contract
-    (vendor/countdown-api) the same check is its `deviceSecret` authenticator, in api.py."""
+def require_device_auth(roles: Collection[str] = frozenset(ROLES)) -> Callable[[View], View]:
+    """Protect device-facing endpoints with one of the device's own bearer secrets.
 
-    def decorator(view):
+    Checked as authenticate_device does, and passes device_id to the view. For the routes of the countdown API
+    contract (vendor/countdown-api) the same check is its `deviceSecret` authenticator, in api.py.
+    """
+
+    def decorator(view: View) -> View:
         @functools.wraps(view)
-        def wrapped(*args, **kwargs):
+        def wrapped(*args: object, **kwargs: object) -> ResponseReturnValue:
             try:
                 device = authenticate_device(request.headers.get("Authorization", ""), roles)
             except DeviceAuthError as error:
@@ -116,13 +138,15 @@ def _mark_seen(device: Device, role: str) -> None:
         db.session.commit()
 
 
-def _require_bearer_token(config_key: str):
-    """Protects an endpoint with the token in the broker's setting `config_key`. With none set the
-    endpoint is off and answers 404, as if it didn't exist."""
+def _require_bearer_token(config_key: str) -> Callable[[View], View]:
+    """Protect an endpoint with the token in the broker's setting `config_key`.
 
-    def decorator(view):
+    With none set the endpoint is off and answers 404, as if it didn't exist.
+    """
+
+    def decorator(view: View) -> View:
         @functools.wraps(view)
-        def wrapped(*args, **kwargs):
+        def wrapped(*args: object, **kwargs: object) -> ResponseReturnValue:
             expected = current_app.config[config_key]
             if not expected:
                 return jsonify(error="not found"), 404
@@ -144,20 +168,25 @@ require_orchestrator_token = _require_bearer_token("ORCHESTRATOR_TOKEN")
 
 
 def current_user() -> str | None:
-    """The signed-in user's id: the header the login proxy sets on every browser-facing request,
-    which the broker trusts because only the proxy can reach it (see caddy/Caddyfile)."""
+    """Return the signed-in user's id.
+
+    It is the header the login proxy sets on every browser-facing request, which the broker
+    trusts because only the proxy can reach it (see caddy/Caddyfile).
+    """
     return request.headers.get(current_app.config["USER_HEADER"], "").strip() or None
 
 
 def current_username() -> str | None:
-    """The signed-in user's username, from the header the login proxy sets next to the user id. It's only
-    for display and for naming their screens: it's not the user's identity (that's current_user) and it
-    can change."""
+    """Return the signed-in user's username, from the header the login proxy sets next to the user id.
+
+    It's only for display and for naming their screens: it's not the user's identity (that's current_user) and
+    it can change.
+    """
     return request.headers.get(current_app.config["USERNAME_HEADER"], "").strip() or None
 
 
 def user_devices() -> list[Device]:
-    """The devices the signed-in user is paired with, the one paired most recently first."""
+    """Return the devices the signed-in user is paired with, the one paired most recently first."""
     user = current_user()
     if user is None:
         return []
@@ -169,14 +198,17 @@ def user_devices() -> list[Device]:
 
 
 def paired_device_id() -> str | None:
-    """The device the signed-in user is paired with (the one paired most recently, if several)."""
+    """Return the device the signed-in user is paired with (the one paired most recently, if several)."""
     devices = user_devices()
     return devices[0].device_id if devices else None
 
 
 def screen_label(device: Device) -> str:
-    """What a screen is called on the pages: its name (the slug), "New screen" while it's waiting to be named,
-    or what it reports, or a piece of its id."""
+    """Return what a screen is called on the pages.
+
+    That is its name (the slug), "New screen" while it's waiting to be named, or what it reports, or a piece of
+    its id.
+    """
     if device.assignment:
         return device.assignment.slug
     if device.renderer_secret_hash is None:
@@ -184,12 +216,14 @@ def screen_label(device: Device) -> str:
     return device.device_name or device.device_id[:6]
 
 
-def require_user(view):
-    """Protects browser pages that only need someone signed in. Without the proxy's header the
-    request didn't come through the login, so it's a 401."""
+def require_user(view: View) -> View:
+    """Protect browser pages that only need someone signed in.
+
+    Without the proxy's header the request didn't come through the login, so it's a 401.
+    """
 
     @functools.wraps(view)
-    def wrapped(*args, **kwargs):
+    def wrapped(*args: object, **kwargs: object) -> ResponseReturnValue:
         if current_user() is None:
             return "Sign in required.", 401
         return view(*args, **kwargs)
@@ -197,15 +231,17 @@ def require_user(view):
     return wrapped
 
 
-def require_paired_user(view):
-    """Protects browser pages that act on one of 'the signed-in user's devices'. A page with a `device_id`
-    in its URL is for that device, and 404s unless it's the user's (never admits it exists); one without
-    is for the one paired most recently. A user with none goes to /pair. Sets g.device_id, and the
-    view doesn't get the URL's device_id. Looked up on every request, so unpairing and forgetting take
-    effect at once."""
+def require_paired_user(view: View) -> View:
+    """Protect browser pages that act on one of 'the signed-in user's devices'.
+
+    A page with a `device_id` in its URL is for that device, and 404s unless it's the user's (never admits it
+    exists); one without is for the one paired most recently. A user with none goes to /pair. Sets g.device_id,
+    and the view doesn't get the URL's device_id. Looked up on every request, so unpairing and forgetting take
+    effect at once.
+    """
 
     @functools.wraps(view)
-    def wrapped(*args, **kwargs):
+    def wrapped(*args: object, **kwargs: object) -> ResponseReturnValue:
         if current_user() is None:
             return "Sign in required.", 401
         requested = kwargs.pop("device_id", None)

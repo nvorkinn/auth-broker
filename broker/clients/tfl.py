@@ -1,16 +1,23 @@
-"""Looks up TfL stops (NaPTAN StopPoints) for the settings page: naming a device's saved stops,
-and searching for new ones."""
+"""Looks up TfL stops (NaPTAN StopPoints) for the settings page.
+
+Both for naming a device's saved stops, and for searching for new ones.
+"""
 
 import re
-from collections.abc import Iterator
-from typing import Any
+from http import HTTPStatus
+from typing import TYPE_CHECKING, Any
 from urllib.parse import quote
 
 import requests
 from flask import current_app
 
+if TYPE_CHECKING:
+    from collections.abc import Iterator
+
 API_BASE = "https://api.tfl.gov.uk"
 _STOP_ID = re.compile(r"[A-Za-z0-9_-]+")
+# How many of a bus stop's routes its subtitle names before "(+n more)".
+SUBTITLE_LINES = 6
 
 
 def _params() -> dict[str, str]:
@@ -23,11 +30,11 @@ def _get_stop_point(stop_id: str, http: requests.Session) -> dict[str, Any] | No
         current_app.logger.warning("Ignoring invalid TfL stop ID %r", stop_id)
         return None
     response = http.get(f"{API_BASE}/StopPoint/{quote(stop_id, safe='')}", params=_params(), timeout=5)
-    return response.json() if response.status_code == 200 else None
+    return response.json() if response.status_code == HTTPStatus.OK else None
 
 
 def _walk(node: dict[str, Any]) -> Iterator[dict[str, Any]]:
-    """A StopPoint and every stop nested under it (a station's platforms, a hub's bus stops)."""
+    """Yield a StopPoint and every stop nested under it (a station's platforms, a hub's bus stops)."""
     yield node
     for child in node.get("children", []):
         yield from _walk(child)
@@ -82,7 +89,7 @@ def resolve_stops(stop_ids: list[str]) -> list[dict[str, Any]]:
 
 
 def _search_result(node: dict[str, Any]) -> dict[str, Any] | None:
-    """A selectable Tube station or bus stop as a search result, or None for any other kind of stop."""
+    """Return a selectable Tube station or bus stop as a search result, or None for any other kind of stop."""
     lines = _lines(node)
     if node.get("stopType") == "NaptanMetroStation":
         return {
@@ -95,9 +102,10 @@ def _search_result(node: dict[str, Any]) -> dict[str, Any] | None:
         }
     if node.get("stopType") == "NaptanPublicBusCoachTram":
         letter = _letter(node)
-        subtitle = f"Stop {letter} • {', '.join(lines[:6])}" if letter else f"Bus • {', '.join(lines[:6])}"
-        if len(lines) > 6:
-            subtitle += f" (+{len(lines) - 6} more)"
+        shown = ", ".join(lines[:SUBTITLE_LINES])
+        subtitle = f"Stop {letter} • {shown}" if letter else f"Bus • {shown}"
+        if len(lines) > SUBTITLE_LINES:
+            subtitle += f" (+{len(lines) - SUBTITLE_LINES} more)"
         return {
             "id": _node_id(node),
             "name": _display_name(node),
@@ -110,8 +118,10 @@ def _search_result(node: dict[str, Any]) -> dict[str, Any] | None:
 
 
 def search_stops(query: str) -> list[dict[str, Any]]:
-    """Tube stations and bus stops matching the query. Raises if TfL's search itself fails;
-    a match whose details can't be fetched is skipped."""
+    """Tube stations and bus stops matching the query.
+
+    Raises if TfL's search itself fails; a match whose details can't be fetched is skipped.
+    """
     http = requests.Session()
     params = {"query": query, "modes": "tube,bus", "maxResults": "15", **_params()}
     response = http.get(f"{API_BASE}/StopPoint/Search", params=params, timeout=6)

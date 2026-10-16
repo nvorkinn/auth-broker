@@ -1,5 +1,4 @@
-"""Give a device two independent secrets, one per role, and a pool where renderers and screens wait
-to be matched.
+"""Give a device two independent secrets, one per role, and a pool where renderers and screens wait to be matched.
 
 devices.device_secret_hash becomes renderer_secret_hash, so every existing device keeps its secret
 as its renderer. display_secret_hash is new and NULL for standalone Pis. Both are unique: a secret
@@ -15,10 +14,13 @@ Create Date: 2026-10-05 20:00:00.000000
 
 """
 
-from collections.abc import Sequence
+from typing import TYPE_CHECKING
 
 import sqlalchemy as sa
 from alembic import op
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 # revision identifiers, used by Alembic.
 revision: str = "0004"
@@ -27,10 +29,11 @@ branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
 # Alembic looks these up by name, so export them rather than leave them looking unused.
-__all__ = ["revision", "down_revision", "branch_labels", "depends_on", "upgrade", "downgrade"]
+__all__ = ["branch_labels", "depends_on", "down_revision", "downgrade", "revision", "upgrade"]
 
 
 def upgrade() -> None:
+    """Split the device secret into one per role and add the pool of pending registrations."""
     with op.batch_alter_table("devices") as batch:
         batch.alter_column("device_secret_hash", new_column_name="renderer_secret_hash", existing_type=sa.String())
         batch.add_column(sa.Column("display_secret_hash", sa.String(), nullable=True))
@@ -47,6 +50,7 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    """Go back to one device secret and drop the pool."""
     op.drop_table("pending_registrations")
     op.drop_index("ix_devices_display_secret_hash", "devices")
     op.drop_index("ix_devices_renderer_secret_hash", "devices")

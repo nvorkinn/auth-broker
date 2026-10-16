@@ -1,8 +1,17 @@
+"""Alembic's environment: runs the broker's migrations against the app's database."""
+
 import logging
 from logging.config import fileConfig
+from typing import TYPE_CHECKING
 
 from alembic import context
 from flask import current_app
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable
+
+    from alembic.operations.ops import MigrationScript
+    from alembic.runtime.migration import MigrationContext
 
 config = context.config
 
@@ -17,6 +26,7 @@ config.set_main_option("sqlalchemy.url", target_db.engine.url.render_as_string(h
 
 
 def run_migrations_offline() -> None:
+    """Emit the migrations as SQL, without a database connection."""
     context.configure(
         url=config.get_main_option("sqlalchemy.url"), target_metadata=target_db.metadata, literal_binds=True
     )
@@ -25,8 +35,13 @@ def run_migrations_offline() -> None:
 
 
 def run_migrations_online() -> None:
+    """Run the migrations against the app's database."""
+
     # Don't write an empty revision when autogenerate finds no schema changes.
-    def process_revision_directives(context, revision, directives):
+    # Alembic passes all three positionally; only the scripts it is about to write matter here.
+    def process_revision_directives(
+        _context: MigrationContext, _revision: str | Iterable[str | None], directives: list[MigrationScript]
+    ) -> None:
         if getattr(config.cmd_opts, "autogenerate", False):
             script = directives[0]
             if script.upgrade_ops.is_empty():

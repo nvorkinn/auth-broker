@@ -1,5 +1,8 @@
-# Read by gunicorn from the working directory (/app in the image). Logs go to stdout as JSON, whatever
-# the command line says about --access-logfile / --error-logfile.
+"""Gunicorn's settings, read from the working directory (/app in the image).
+
+Logs go to stdout as JSON, whatever the command line says about --access-logfile / --error-logfile.
+"""
+
 logger_class = "broker.log_format.GunicornLogger"
 logconfig_dict = {
     "version": 1,

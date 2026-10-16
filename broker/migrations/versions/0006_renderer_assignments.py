@@ -11,10 +11,13 @@ Create Date: 2026-10-13 12:00:00.000000
 
 """
 
-from collections.abc import Sequence
+from typing import TYPE_CHECKING
 
 import sqlalchemy as sa
 from alembic import op
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 # revision identifiers, used by Alembic.
 revision: str = "0006"
@@ -23,10 +26,11 @@ branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
 # Alembic looks these up by name, so export them rather than leave them looking unused.
-__all__ = ["revision", "down_revision", "branch_labels", "depends_on", "upgrade", "downgrade"]
+__all__ = ["branch_labels", "depends_on", "down_revision", "downgrade", "revision", "upgrade"]
 
 
 def upgrade() -> None:
+    """Let a device exist without a renderer, and add renderer_assignments."""
     # Screens no longer wait in the pool; any that were do the usual: get a 401 and register again.
     op.execute("DELETE FROM pending_registrations WHERE role = 'display'")
     with op.batch_alter_table("devices") as batch:
@@ -46,6 +50,7 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    """Drop renderer_assignments and require a renderer again."""
     op.drop_table("renderer_assignments")
     with op.batch_alter_table("devices") as batch:
         batch.drop_column("display_last_seen_at")

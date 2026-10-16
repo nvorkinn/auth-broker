@@ -27,8 +27,10 @@ def test_list_shows_each_device_and_whether_it_is_paired(client, register_device
 
     assert result.exit_code == 0
     out = result.output
-    assert f"{paired_id}" in out and "NOT paired" in out
-    assert f"{unpaired_id}" in out and code in out
+    assert f"{paired_id}" in out
+    assert "NOT paired" in out
+    assert f"{unpaired_id}" in out
+    assert code in out
 
 
 def test_list_with_no_devices(cli):
