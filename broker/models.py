@@ -70,7 +70,6 @@ MIN_INTERVAL, MAX_INTERVAL = 20, 300
 # config page shows beside each one's picture (broker/static/tfl-styles/<style>.png, cut from the renderer's own
 # snapshot of it).
 TFL_STYLES = {
-    "classic": ("Classic", "A row per departure"),
     "hero": ("Hero", "The next departure big"),
     "grouped": ("Grouped", "A row per route, with its next few times"),
     "card": ("Card", "Each stop in a rounded card"),
@@ -78,7 +77,6 @@ TFL_STYLES = {
 # How the screen draws Spotify, now playing and top tracks alike: the API contract's spotify.style, shown the same
 # way (broker/static/spotify-styles/<style>.png, both pages cut from the renderer's snapshots of it).
 SPOTIFY_STYLES = {
-    "classic": ("Classic", "The original look"),
     "airy": ("Airy", "Light labels, like the weather"),
     "hero": ("Hero", "Bold, with your #1 big"),
     "card": ("Card", "In a rounded card"),
@@ -110,12 +108,12 @@ class DeviceConfig(db.Model):
     notices_style: Mapped[str] = mapped_column(String, default="hero", server_default=text("'hero'"))
     spotify_enabled: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("0"))
     # How Spotify is drawn, one of SPOTIFY_STYLES.
-    spotify_style: Mapped[str] = mapped_column(String, default="classic", server_default=text("'classic'"))
+    spotify_style: Mapped[str] = mapped_column(String, default="hero", server_default=text("'hero'"))
     # Every departure stop, in the owner's order: TfL NaPTAN ids and Entur NSR ids (NSR:...) mixed; the id says
     # which (services/stops.py). Named for when they were all TfL's.
     tfl_stop_ids: Mapped[list[str]] = mapped_column(JSON, default=list, server_default=text("'[]'"))
     # How each stop's departures are drawn, one of TFL_STYLES.
-    tfl_style: Mapped[str] = mapped_column(String, default="classic", server_default=text("'classic'"))
+    tfl_style: Mapped[str] = mapped_column(String, default="hero", server_default=text("'hero'"))
     # How the screen is mounted, one of ORIENTATIONS.
     orientation: Mapped[str] = mapped_column(String, default="vertical", server_default=text("'vertical'"))
     # The screen's size in pixels as it reported at registration; 480x800 for screens registered before it did.

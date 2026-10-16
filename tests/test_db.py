@@ -474,7 +474,31 @@ def test_0013_backfills_english_and_keeps_existing_settings(app, register_device
         assert (config.clock_format, config.tfl_stop_ids) == ("12h", ["940GZZLUKNG", "NSR:Quay:7333"])
 
 
-def test_0015_starts_every_device_on_the_hero_notices_style(app, register_device):
+# --- 0015: classic retired --------------------------------------------------------------------------
+
+
+def test_0015_moves_classic_devices_to_hero_and_keeps_the_others(app):
+    with app.app_context():
+        downgrade(revision="0014")
+        with db.engine.begin() as conn:
+            for device_id, tfl_style, spotify_style in [("old", "classic", "classic"), ("picked", "card", "airy")]:
+                conn.exec_driver_sql(
+                    "INSERT INTO devices (device_id, created_at) VALUES (?, '2026-10-01 12:00:00')", (device_id,)
+                )
+                conn.exec_driver_sql(
+                    "INSERT INTO device_config (device_id, tfl_style, spotify_style) VALUES (?, ?, ?)",
+                    (device_id, tfl_style, spotify_style),
+                )
+        upgrade()
+
+        styles = {c.device_id: (c.tfl_style, c.spotify_style) for c in db.session.scalars(select(DeviceConfig))}
+        assert styles == {"old": ("hero", "hero"), "picked": ("card", "airy")}
+
+
+# --- 0016: the notice board style ------------------------------------------------------------------
+
+
+def test_0016_starts_every_device_on_the_hero_notices_style(app, register_device):
     device_id, _ = register_device()
     with app.app_context():
         config = db.session.get(DeviceConfig, device_id)
@@ -482,7 +506,7 @@ def test_0015_starts_every_device_on_the_hero_notices_style(app, register_device
         db.session.commit()
         db.session.remove()
 
-        downgrade(revision="0014")
+        downgrade(revision="0015")
         assert "notices_style" not in {column["name"] for column in inspect(db.engine).get_columns("device_config")}
         upgrade()
 
