@@ -62,6 +62,19 @@
                 <p id="clock_format_hint" class="form-hint">Used for all clock times on this screen.</p>
             </fieldset>
 
+            <fieldset class="form-group" aria-describedby="language_hint">
+                <legend class="form-legend">Language</legend>
+                <div class="checkbox-group" style="gap: 20px; flex-wrap: wrap;">
+                    {% for value, label in languages.items() %}
+                        <span class="checkbox-group">
+                            <input type="radio" id="language_{{ value }}" name="language" value="{{ value }}" {% if config.language == value %}checked{% endif %} required>
+                            <label for="language_{{ value }}" style="margin: 0; font-size: 14px; font-weight: normal;">{{ label }}</label>
+                        </span>
+                    {% endfor %}
+                </div>
+                <p id="language_hint" class="form-hint">The language of your screen's text.</p>
+            </fieldset>
+
             <!-- Read-only for now: the page always submits its own orientation, shown below but not editable.
                  A disabled fieldset isn't submitted, so the value goes in this hidden input instead. -->
             <input type="hidden" name="orientation" value="{{ page_orientation }}">
@@ -106,27 +119,27 @@
                     id="postcode"
                     name="postcode"
                     value="{{ config.postcode }}"
-                    placeholder="e.g. SW1A 1AA"
-                    pattern="\s*[A-Za-z]{1,2}[0-9][A-Za-z0-9]?\s*[0-9][A-Za-z]{2}\s*"
-                    title="A UK postcode, e.g. SW1A 1AA"
+                    placeholder="e.g. SW1A 1AA or 0150"
+                    pattern="\s*([A-Za-z]{1,2}[0-9][A-Za-z0-9]?\s*[0-9][A-Za-z]{2}|[0-9]{4})\s*"
+                    title="A UK or Norwegian postcode, e.g. SW1A 1AA or 0150"
                     autocapitalize="characters"
                     autocomplete="postal-code"
                     maxlength="10"
                     aria-describedby="postcode_hint"
                 >
-                <p id="postcode_hint" class="form-hint">Used for local information on your screen's notice board.</p>
+                <p id="postcode_hint" class="form-hint">Used for local information on your screen's notice board, in the UK or Norway.</p>
             </div>
         </div>
     </div>
 
-    <!-- TfL -->
+    <!-- Departures: London's stops (TfL) and Norway's (Entur), in any mix -->
     <div class="card">
         <div class="card-header">
-            <h2 class="card-title">TfL</h2>
+            <h2 class="card-title">Departures</h2>
         </div>
         {{ style_picker("tfl_style", "How your screen draws each stop's departures.", tfl_styles, config.tfl_style, "tfl-styles", 267, 195) }}
         <div class="search-container">
-            <input type="text" id="searchInput" class="search-input" placeholder="Search for a station or stop" autocomplete="off">
+            <input type="text" id="searchInput" class="search-input" placeholder="Search for a station or stop in London or Norway" autocomplete="off">
             <span id="searchSpinner" class="search-spinner">Searching…</span>
             <div id="searchResults" class="search-results"></div>
         </div>
@@ -139,13 +152,14 @@
                     <div class="stop-card" data-id="{{ stop.id }}">
                         <div class="stop-order">
                             <span class="order-badge">{{ loop.index }}</span>
-                            <div class="mode-icon {% if stop.mode == 'tube' %}mode-tube{% else %}mode-bus{% endif %}">
-                                {% if stop.mode == 'tube' %}🚇{% else %}{{ stop.letter or '🚌' }}{% endif %}
+                            {% set icon = MODE_ICONS.get(stop.mode) %}
+                            <div class="mode-icon mode-{{ icon[0] if icon else 'bus' }}">
+                                {% if icon %}{{ icon[1] }}{% else %}{{ stop.letter or '🚌' }}{% endif %}
                             </div>
                             <div class="item-text">
                                 <h4>{{ stop.name }}</h4>
                                 <p>
-                                    NaPTAN: <code>{{ stop.id }}</code>
+                                    {% if stop.source == 'entur' %}{% if stop.indent %}{{ stop.subtitle.split(' • ')[0] }} • {% endif %}<code>{{ stop.id }}</code>{% else %}NaPTAN: <code>{{ stop.id }}</code>{% endif %}
                                     {% if stop.lines %} • {{ stop.lines | join(', ') }}{% endif %}
                                     <span class="page-badge">Page {{ ((loop.index0 // 2) + 1) }}</span>
                                 </p>
@@ -258,6 +272,31 @@
         show(chosen(), false);
     });
 
+    // A stop's icon by mode: the modes with a fixed icon; buses (and coaches) show their stop letter.
+    const MODE_ICONS = {{ MODE_ICONS | tojson }};
+
+    function escapeHtml(text) {
+        const div = document.createElement('div');
+        div.textContent = text == null ? '' : String(text);
+        return div.innerHTML;
+    }
+
+    function modeIcon(stop) {
+        const icon = MODE_ICONS[stop.mode];
+        const cls = icon ? icon[0] : 'bus';
+        const label = icon ? icon[1] : (stop.letter || '🚌');
+        return `<div class="mode-icon mode-${cls}">${escapeHtml(label)}</div>`;
+    }
+
+    // What a saved stop's card says under its name: the platform, if it's one, and the id.
+    function stopDetail(stop) {
+        if (stop.source !== 'entur') return `NaPTAN: <code>${escapeHtml(stop.id)}</code>`;
+        const platform = stop.indent ? `${escapeHtml(stop.subtitle.split(' • ')[0])} • ` : '';
+        return `${platform}<code>${escapeHtml(stop.id)}</code>`;
+    }
+
+    let lastResults = [];
+
     const searchInput = document.getElementById('searchInput');
     const searchSpinner = document.getElementById('searchSpinner');
     const searchResults = document.getElementById('searchResults');
@@ -282,7 +321,7 @@
 
         searchSpinner.style.display = 'block';
         debounceTimeout = setTimeout(() => {
-            fetch(`/api/tfl/search?q=${encodeURIComponent(query)}`)
+            fetch(`/api/stops/search?q=${encodeURIComponent(query)}`)
                 .then(r => r.json())
                 .then(data => {
                     searchSpinner.style.display = 'none';
@@ -302,22 +341,32 @@
             return;
         }
 
-        searchResults.innerHTML = items.map(item => `
-            <div class="search-item">
+        lastResults = items;
+        // A station's platforms are indented under it, and named by their platform rather than the station again.
+        searchResults.innerHTML = items.map((item, index) => `
+            <div class="search-item${item.indent ? ' indent' : ''}">
                 <div class="item-info">
-                    <div class="mode-icon ${item.mode === 'tube' ? 'mode-tube' : 'mode-bus'}">
-                        ${item.mode === 'tube' ? '🚇' : (item.letter || '🚌')}
-                    </div>
+                    ${modeIcon(item)}
                     <div class="item-text">
-                        <h4>${item.name}</h4>
-                        <p>${item.subtitle} • <code>${item.id}</code></p>
+                        ${item.indent ? `
+                            <h4>${escapeHtml(item.subtitle.split(' • ')[0])}</h4>
+                            <p>${escapeHtml(item.subtitle.split(' • ').slice(1).join(' • '))}</p>
+                        ` : `
+                            <h4>${escapeHtml(item.name)}${item.area ? ` <span class="stop-area">${escapeHtml(item.area)}</span>` : ''}</h4>
+                            <p>${escapeHtml(item.subtitle)}</p>
+                        `}
                     </div>
                 </div>
-                <button type="button" class="btn-add" onclick='addStop(${JSON.stringify(item)})'>+ Add</button>
+                <button type="button" class="btn-add" data-index="${index}">+ Add</button>
             </div>
         `).join('');
         searchResults.style.display = 'block';
     }
+
+    searchResults.addEventListener('click', (e) => {
+        const button = e.target.closest('.btn-add');
+        if (button) addStop(lastResults[Number(button.dataset.index)]);
+    });
 
     function updateOrderBadges() {
         const cards = stopsList.querySelectorAll('.stop-card');
@@ -339,7 +388,7 @@
         }
     }
 
-    window.addStop = function(stop) {
+    function addStop(stop) {
         const currentIds = stopsOrderInput.value ? stopsOrderInput.value.split(',') : [];
         if (currentIds.includes(stop.id)) {
             alert('This stop is already in your display list.');
@@ -355,12 +404,10 @@
         card.innerHTML = `
             <div class="stop-order">
                 <span class="order-badge">1</span>
-                <div class="mode-icon ${stop.mode === 'tube' ? 'mode-tube' : 'mode-bus'}">
-                    ${stop.mode === 'tube' ? '🚇' : (stop.letter || '🚌')}
-                </div>
+                ${modeIcon(stop)}
                 <div class="item-text">
-                    <h4>${stop.name}</h4>
-                    <p>NaPTAN: <code>${stop.id}</code> • ${stop.lines.join(', ')} <span class="page-badge"></span></p>
+                    <h4>${escapeHtml(stop.name)}</h4>
+                    <p>${stopDetail(stop)}${stop.lines.length ? ` • ${escapeHtml(stop.lines.join(', '))}` : ''} <span class="page-badge"></span></p>
                 </div>
             </div>
             <div class="stop-actions">
@@ -375,7 +422,7 @@
 
         searchInput.value = '';
         searchResults.style.display = 'none';
-    };
+    }
 
     function attachCardEvents(card) {
         card.querySelector('.btn-move-up').addEventListener('click', () => {

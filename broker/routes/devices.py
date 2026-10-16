@@ -2,7 +2,17 @@
 checks in with. Everything but /register needs one of the device's secrets."""
 
 from countdown_api.blueprints import ApiHTTPError
-from countdown_api.models import ConfigResponse, Glowmarkt, NoticeBoard, Screen, Spotify, Tfl, Weather
+from countdown_api.models import (
+    ConfigResponse,
+    Departures,
+    DepartureStop,
+    Glowmarkt,
+    NoticeBoard,
+    Screen,
+    Spotify,
+    Tfl,
+    Weather,
+)
 from flask import Blueprint, current_app, jsonify, request
 from sqlalchemy.exc import IntegrityError
 
@@ -10,7 +20,8 @@ from ..api import api
 from ..auth import hash_secret, require_device_auth, with_retry_after
 from ..db import db
 from ..models import Device, DeviceConfig, GlowmarktCredentials
-from ..services import pairing, registration
+from ..services import pairing, registration, stops
+from .pages import postcode_country
 
 bp = Blueprint("devices", __name__, url_prefix="/api/devices")
 
@@ -91,15 +102,34 @@ def get_config(*, device_id: str, x_device_name: str | None = None) -> ConfigRes
         raise ApiHTTPError(404, message="not found")
 
     creds = db.session.get(GlowmarktCredentials, device_id)
+    country = postcode_country(config.postcode)
+    stop_ids = config.tfl_stop_ids
     return ConfigResponse(
         device_id=device_id,
         interval=config.interval,
         clock_format=config.clock_format,
+        language=config.language,
+        timezone=_timezone(country, stop_ids),
         screen=Screen(orientation=config.orientation, width=config.width, height=config.height),
         weather=Weather(api_key=current_app.config["WEATHER_API_KEY"], location=config.weather_location),
-        notice_board=NoticeBoard(postcode=config.postcode or None),
-        tfl=Tfl(app_key=current_app.config["TFL_APP_KEY"], stop_ids=config.tfl_stop_ids, style=config.tfl_style),
+        notice_board=NoticeBoard(postcode=config.postcode or None, country=country),
+        # For renderers that predate `departures`: only the stops they can show.
+        tfl=Tfl(
+            app_key=current_app.config["TFL_APP_KEY"],
+            stop_ids=[s for s in stop_ids if stops.source_of(s) == "tfl"],
+            style=config.tfl_style,
+        ),
+        departures=Departures(
+            stops=[DepartureStop(source=stops.source_of(s), id=s) for s in stop_ids], style=config.tfl_style
+        ),
         spotify=Spotify(enabled=config.spotify_enabled, style=config.spotify_style),
         glowmarkt=Glowmarkt(username=(creds and creds.username) or None, password=creds.password if creds else None),
         pairing_code=pairing.current_code_for(device_id),
     )
+
+
+def _timezone(country: str | None, stop_ids: list[str]) -> str:
+    """The screen's time zone: its postcode's country's, or, without a postcode, its first stop's."""
+    if country is None and stop_ids:
+        country = "NO" if stops.source_of(stop_ids[0]) == "entur" else "GB"
+    return "Europe/Oslo" if country == "NO" else "Europe/London"

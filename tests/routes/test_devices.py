@@ -75,14 +75,62 @@ def test_get_config_returns_defaults_and_shared_keys(client, register_device):
         "device_id": device_id,
         "interval": 15,
         "clock_format": "24h",
+        "language": "en",
+        "timezone": "Europe/London",
         "screen": {"orientation": "vertical", "width": 480, "height": 800},
         "weather": {"api_key": "test-weather-key", "location": ""},
-        "notice_board": {"postcode": None},
+        "notice_board": {"postcode": None, "country": None},
         "tfl": {"app_key": "test-tfl-key", "stop_ids": [], "style": "classic"},
+        "departures": {"stops": [], "style": "classic"},
         "spotify": {"enabled": False, "style": "classic"},
         "glowmarkt": {"username": None, "password": None},
         "pairing_code": body["pairing_code"],
     }
+
+
+def _set_config(app, device_id, **values):
+    with app.app_context():
+        config = db.session.get(DeviceConfig, device_id)
+        for key, value in values.items():
+            setattr(config, key, value)
+        db.session.commit()
+
+
+def test_get_config_gives_each_stop_its_source(app, client, register_device):
+    device_id, secret = register_device()
+    _set_config(app, device_id, tfl_stop_ids=["490000254W", "NSR:StopPlace:58366", "NSR:Quay:11145"], language="nb")
+    body = client.get("/api/config", headers={"Authorization": f"Bearer {secret}"}).get_json()
+
+    assert body["departures"]["stops"] == [
+        {"source": "tfl", "id": "490000254W"},
+        {"source": "entur", "id": "NSR:StopPlace:58366"},
+        {"source": "entur", "id": "NSR:Quay:11145"},
+    ]
+    # A renderer that only knows `tfl` gets only the stops it can show.
+    assert body["tfl"]["stop_ids"] == ["490000254W"]
+    assert body["language"] == "nb"
+    # No postcode: the first stop says where the screen is.
+    assert body["timezone"] == "Europe/London"
+
+
+@pytest.mark.parametrize(
+    ("postcode", "stop_ids", "country", "timezone"),
+    [
+        ("0150", [], "NO", "Europe/Oslo"),
+        ("0150", ["490000254W"], "NO", "Europe/Oslo"),
+        ("SW1A 1AA", ["NSR:StopPlace:58366"], "GB", "Europe/London"),
+        ("", ["NSR:StopPlace:58366", "490000254W"], None, "Europe/Oslo"),
+    ],
+)
+def test_get_config_time_zone_follows_postcode_then_first_stop(
+    app, client, register_device, postcode, stop_ids, country, timezone
+):
+    device_id, secret = register_device()
+    _set_config(app, device_id, postcode=postcode, tfl_stop_ids=stop_ids)
+    body = client.get("/api/config", headers={"Authorization": f"Bearer {secret}"}).get_json()
+
+    assert body["notice_board"] == {"postcode": postcode or None, "country": country}
+    assert body["timezone"] == timezone
 
 
 def _get_pairing_code(client, device_id, secret):
@@ -305,7 +353,7 @@ def test_get_config_is_valid_with_no_location_postcode_or_stops(app, client, reg
     ConfigResponse.model_validate(body)
     assert "setup_missing" not in body
     assert body["weather"]["location"] == ""
-    assert body["notice_board"] == {"postcode": None}
+    assert body["notice_board"] == {"postcode": None, "country": None}
     assert body["tfl"]["stop_ids"] == []
 
 
@@ -316,7 +364,7 @@ def test_get_config_returns_the_saved_postcode(app, client, register_device):
         db.session.commit()
 
     response = client.get("/api/config", headers={"Authorization": f"Bearer {secret}"})
-    assert response.get_json()["notice_board"] == {"postcode": "SW1A 1AA"}
+    assert response.get_json()["notice_board"] == {"postcode": "SW1A 1AA", "country": "GB"}
 
 
 def test_get_config_returns_the_saved_orientation(app, client, register_device):

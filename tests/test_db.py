@@ -454,3 +454,20 @@ def test_clock_format_defaults_to_24_hour_for_orm_and_raw_inserts(app):
             column for column in inspect(db.engine).get_columns("device_config") if column["name"] == "clock_format"
         )
         assert column["nullable"] is False
+
+
+def test_0013_backfills_english_and_keeps_existing_settings(app, register_device):
+    device_id, _ = register_device()
+    with app.app_context():
+        config = db.session.get(DeviceConfig, device_id)
+        config.clock_format, config.tfl_stop_ids = "12h", ["940GZZLUKNG", "NSR:Quay:7333"]
+        db.session.commit()
+        db.session.remove()
+
+        downgrade(revision="0012")
+        assert "language" not in {column["name"] for column in inspect(db.engine).get_columns("device_config")}
+        upgrade()
+
+        config = db.session.get(DeviceConfig, device_id)
+        assert config.language == "en"
+        assert (config.clock_format, config.tfl_stop_ids) == ("12h", ["940GZZLUKNG", "NSR:Quay:7333"])

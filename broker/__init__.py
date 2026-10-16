@@ -43,7 +43,7 @@ def create_app() -> Flask:
         spotify_oauth,
         spotify_proxy,
         status,
-        tfl_search,
+        stop_search,
     )
 
     app.register_blueprint(devices.bp)
@@ -51,7 +51,7 @@ def create_app() -> Flask:
     app.register_blueprint(spotify_proxy.bp)
     app.register_blueprint(spotify_oauth.bp)
     app.register_blueprint(pages.bp)
-    app.register_blueprint(tfl_search.bp)
+    app.register_blueprint(stop_search.bp)
     app.register_blueprint(frames.bp)
     app.register_blueprint(status.bp)
     app.register_blueprint(orchestrator.bp)

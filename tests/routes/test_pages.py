@@ -5,7 +5,7 @@ import pytest
 
 from broker.db import db
 from broker.models import Device, DeviceConfig, GlowmarktCredentials, SpotifyToken
-from broker.routes.pages import normalize_postcode
+from broker.routes.pages import normalize_postcode, postcode_country
 
 
 @pytest.fixture(autouse=True)
@@ -426,10 +426,45 @@ def test_a_code_hands_a_device_to_the_user_who_enters_it(app, paired_client):
         ("SW1A", None),
         ("12345", None),
         ("SW1A 1AAA", None),
+        ("0150", "0150"),
+        (" 9 0 1 0 ", "9010"),
+        ("150", None),
     ],
 )
 def test_normalize_postcode(raw, expected):
     assert normalize_postcode(raw) == expected
+
+
+@pytest.mark.parametrize(("postcode", "country"), [("SW1A 1AA", "GB"), ("0150", "NO"), ("", None)])
+def test_postcode_country(postcode, country):
+    assert postcode_country(postcode) == country
+
+
+def test_device_config_post_saves_a_norwegian_postcode_and_language(app, paired_client):
+    client, device_id, _ = paired_client
+    response = client.post("/device", data={"interval": "15", "postcode": " 0150 ", "language": "nb"})
+    assert response.status_code == 302
+
+    with app.app_context():
+        config = db.session.get(DeviceConfig, device_id)
+        assert (config.postcode, config.language) == ("0150", "nb")
+
+
+def test_device_config_post_rejects_an_unknown_language(app, paired_client):
+    client, device_id, _ = paired_client
+    response = client.post("/device", data={"interval": "15", "language": "sv"})
+    assert response.status_code == 400
+    assert b"language must be one of en, nb" in response.data
+
+    with app.app_context():
+        assert db.session.get(DeviceConfig, device_id).language == "en"
+
+
+def test_device_page_offers_the_languages(paired_client):
+    client, _, _ = paired_client
+    page = client.get("/device").get_data(as_text=True)
+    assert 'id="language_nb" name="language" value="nb"' in page
+    assert "Departures" in page
 
 
 def test_device_config_post_saves_normalized_postcode(app, paired_client):
@@ -449,7 +484,7 @@ def test_device_config_post_rejects_invalid_postcode_and_saves_nothing(app, pair
         "/device", data={"interval": "30", "postcode": "not a postcode", "weather_location": "Leeds"}
     )
     assert response.status_code == 400
-    assert b"valid UK postcode" in response.data
+    assert b"valid UK or Norwegian postcode" in response.data
 
     with app.app_context():
         config = db.session.get(DeviceConfig, device_id)
@@ -500,7 +535,7 @@ def test_device_config_post_reports_every_invalid_field_at_once(paired_client, w
 
     assert response.status_code == 400
     assert b"find &#34;Nowhere&#34;" in response.data
-    assert b"valid UK postcode" in response.data
+    assert b"valid UK or Norwegian postcode" in response.data
 
 
 def _wrong_codes(client, times, ip="203.0.113.7"):
