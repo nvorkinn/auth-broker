@@ -87,7 +87,7 @@ class DeviceConfig(db.Model):
     # The screen's language, one of LANGUAGES.
     language: Mapped[str] = mapped_column(String, default="en", server_default=text("'en'"))
     # How every panel is drawn, one of STYLES.
-    style: Mapped[str] = mapped_column(String, default="hero", server_default=text("'hero'"))
+    style: Mapped[str] = mapped_column(String, default="airy", server_default=text("'airy'"))
     weather_location: Mapped[str] = mapped_column(String, default="", server_default=text("''"))
     # A UK postcode ("SW1A 1AA") or a Norwegian one ("0150"); see pages.normalize_postcode.
     postcode: Mapped[str] = mapped_column(String, default="", server_default=text("''"))

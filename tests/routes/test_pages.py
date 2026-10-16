@@ -235,7 +235,7 @@ def test_device_config_post_rejects_invalid_clock_formats_without_saving_anythin
             "",
             False,
         )
-        assert config.style == "hero"
+        assert config.style == "airy"
         assert db.session.get(GlowmarktCredentials, device_id) is None
 
 
@@ -648,14 +648,14 @@ def test_device_config_shows_one_style_picker_with_the_stored_style_selected(app
     client, device_id, _ = paired_client
     html = client.get("/device").get_data(as_text=True)
     assert re.findall(r'name="style" value="(\w+)"', html) == ["airy", "hero", "card"]
-    assert re.findall(r'name="style" value="(\w+)" checked', html) == ["hero"]  # the default
+    assert re.findall(r'name="style" value="(\w+)" checked', html) == ["airy"]  # the default
     # The panels' own pickers are gone: the one style is for all of them.
     assert not re.search(r'name="(tfl|spotify|notices)_style"', html)
     with app.app_context():
-        db.session.get(DeviceConfig, device_id).style = "airy"
+        db.session.get(DeviceConfig, device_id).style = "card"
         db.session.commit()
     html = client.get("/device").get_data(as_text=True)
-    assert re.findall(r'name="style" value="(\w+)" checked', html) == ["airy"]
+    assert re.findall(r'name="style" value="(\w+)" checked', html) == ["card"]
 
 
 def test_device_config_shows_a_picture_of_every_style(app, paired_client):
@@ -680,11 +680,11 @@ def test_device_config_post_persists_the_style(app, paired_client):
 def test_device_config_post_without_a_style_keeps_the_stored_one(app, paired_client):
     client, device_id, _ = paired_client
     with app.app_context():
-        db.session.get(DeviceConfig, device_id).style = "airy"
+        db.session.get(DeviceConfig, device_id).style = "card"
         db.session.commit()
     client.post("/device", data={"interval": "15"})
     with app.app_context():
-        assert db.session.get(DeviceConfig, device_id).style == "airy"
+        assert db.session.get(DeviceConfig, device_id).style == "card"
 
 
 @pytest.mark.parametrize("style", ["fancy", "grouped", "classic", "boxed"])
@@ -694,4 +694,4 @@ def test_device_config_post_rejects_an_unknown_or_old_style(app, paired_client, 
     assert response.status_code == 400
     assert b"The style must be one of airy, hero, card." in response.data
     with app.app_context():
-        assert db.session.get(DeviceConfig, device_id).style == "hero"
+        assert db.session.get(DeviceConfig, device_id).style == "airy"
