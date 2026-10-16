@@ -132,7 +132,7 @@ def get_config(*, device_id: str, x_device_name: str | None = None) -> ConfigRes
         timezone=_timezone(country, stop_ids),
         screen=Screen(orientation=config.orientation, width=config.width, height=config.height),
         weather=Weather(api_key=current_app.config["WEATHER_API_KEY"], location=config.weather_location),
-        notice_board=NoticeBoard(postcode=config.postcode or None, country=country),
+        notice_board=NoticeBoard(postcode=config.postcode or None, country=country, style=config.notices_style),
         # For renderers that predate `departures`: only the stops they can show.
         tfl=Tfl(
             app_key=current_app.config["TFL_APP_KEY"],

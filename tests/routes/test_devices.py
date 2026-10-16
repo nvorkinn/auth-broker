@@ -79,7 +79,7 @@ def test_get_config_returns_defaults_and_shared_keys(client, register_device):
         "timezone": "Europe/London",
         "screen": {"orientation": "vertical", "width": 480, "height": 800},
         "weather": {"api_key": "test-weather-key", "location": ""},
-        "notice_board": {"postcode": None, "country": None},
+        "notice_board": {"postcode": None, "country": None, "style": "hero"},
         "tfl": {"app_key": "test-tfl-key", "stop_ids": [], "style": "classic"},
         "departures": {"stops": [], "style": "classic"},
         "spotify": {"enabled": False, "style": "classic"},
@@ -129,7 +129,7 @@ def test_get_config_time_zone_follows_postcode_then_first_stop(
     _set_config(app, device_id, postcode=postcode, tfl_stop_ids=stop_ids)
     body = client.get("/api/config", headers={"Authorization": f"Bearer {secret}"}).get_json()
 
-    assert body["notice_board"] == {"postcode": postcode or None, "country": country}
+    assert body["notice_board"] == {"postcode": postcode or None, "country": country, "style": "hero"}
     assert body["timezone"] == timezone
 
 
@@ -353,7 +353,7 @@ def test_get_config_is_valid_with_no_location_postcode_or_stops(app, client, reg
     ConfigResponse.model_validate(body)
     assert "setup_missing" not in body
     assert body["weather"]["location"] == ""
-    assert body["notice_board"] == {"postcode": None, "country": None}
+    assert body["notice_board"] == {"postcode": None, "country": None, "style": "hero"}
     assert body["tfl"]["stop_ids"] == []
 
 
@@ -364,7 +364,7 @@ def test_get_config_returns_the_saved_postcode(app, client, register_device):
         db.session.commit()
 
     response = client.get("/api/config", headers={"Authorization": f"Bearer {secret}"})
-    assert response.get_json()["notice_board"] == {"postcode": "SW1A 1AA", "country": "GB"}
+    assert response.get_json()["notice_board"] == {"postcode": "SW1A 1AA", "country": "GB", "style": "hero"}
 
 
 def test_get_config_returns_the_saved_orientation(app, client, register_device):
@@ -412,6 +412,17 @@ def test_get_config_returns_the_saved_spotify_style(app, client, register_device
         db.session.commit()
 
     assert client.get("/api/config", headers=headers).get_json()["spotify"]["style"] == "card"
+
+
+def test_get_config_returns_the_saved_notices_style(app, client, register_device):
+    device_id, secret = register_device()
+    headers = {"Authorization": f"Bearer {secret}"}
+    assert client.get("/api/config", headers=headers).get_json()["notice_board"]["style"] == "hero"
+    with app.app_context():
+        db.session.get(DeviceConfig, device_id).notices_style = "boxed"
+        db.session.commit()
+
+    assert client.get("/api/config", headers=headers).get_json()["notice_board"]["style"] == "boxed"
 
 
 def test_get_config_returns_the_saved_tfl_style(app, client, register_device):
