@@ -215,6 +215,14 @@ frame's ETag so an unchanged frame is a 304.
 replacement screen back to an existing device isn't built yet: registering
 it creates a new device.
 
+## The page about the display
+
+`GET /about` is a public page about the display, for showing people what it does. It needs no login: Caddy leaves
+`/about` and its pictures (`/static/display/*`) out of forward auth, and the view reads nothing about the visitor. It's
+`broker/templates/about.html`, with its pictures in `broker/static/display/`: frames from pi-dashboard's renderer, drawn
+with its snapshot-test helpers (`tests/test_display_snapshots.py`) from sample data in English and Norwegian, and
+screenshots of the settings page. The page's EN / NO switch swaps the pictures; its own text is English.
+
 ## Email (Resend)
 
 Authentik sends two kinds of email: the confirmation link a new user has to follow to finish

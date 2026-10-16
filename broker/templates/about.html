@@ -1,0 +1,324 @@
+<!doctype html>
+{# The public page about the display: no login (Caddy lets /about and /static/display/ through). #}
+{% set img = url_for('static', filename='display/') %}
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="Countdown is a 7.5-inch e-paper display for the hallway: departures in London and Oslo, the weather, local notices, Spotify and energy use.">
+<title>Countdown Display</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Josefin+Sans:wght@400;600;700&family=Ubuntu:wght@400;500;700&family=Ubuntu+Mono:wght@400;700&display=swap">
+<style>
+/* Layout: one narrow reading column; each feature is a band with a real e-paper frame sat in a picture-frame bezel. */
+:root {
+  --paper: #f3f4f1;      /* page ground: e-paper white, slightly cool */
+  --sheet: #ffffff;      /* the panel itself */
+  --ink: #141517;        /* text */
+  --muted: #5d6268;
+  --rule: #d9dbd6;
+  --bezel: #1d1e20;      /* the frame around the screen */
+  --red: #e1251b;        /* countdown-sign red, from the config site's wordmark */
+  --navy: #0f1f9e;       /* the config site's save button blue */
+  --chip: #e7e9e4;
+  --display: "Josefin Sans", "Futura", "Century Gothic", system-ui, sans-serif;
+  --body: "Ubuntu", "Segoe UI", system-ui, sans-serif;
+  --mono: "Ubuntu Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --paper: #151618; --sheet: #ffffff; --ink: #ecedea; --muted: #a2a6aa; --rule: #2e3033;
+    --bezel: #050506; --red: #ff5146; --navy: #8f9bff; --chip: #25272a; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --paper: #151618; --sheet: #ffffff; --ink: #ecedea; --muted: #a2a6aa; --rule: #2e3033;
+  --bezel: #050506; --red: #ff5146; --navy: #8f9bff; --chip: #25272a; color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+img { max-width: 100%; }
+body {
+  margin: 0;
+  background: var(--paper); color: var(--ink); font-family: var(--body);
+  font-size: 17px; line-height: 1.6;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+}
+.wrap { max-width: 1040px; margin: 0 auto; }
+h1, h2, h3 { font-family: var(--display); line-height: 1.08; text-wrap: balance; margin: 0; letter-spacing: -0.01em; }
+h1 { font-size: clamp(2.3rem, 6.4vw, 4.1rem); font-weight: 700; }
+h2 { font-size: clamp(1.75rem, 4vw, 2.5rem); font-weight: 700; }
+h3 { font-size: 1.25rem; font-weight: 600; }
+p { margin: 0; max-width: 62ch; }
+a { color: var(--navy); }
+
+/* top bar */
+.bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-block: 18px; }
+.mark { font-family: var(--display); font-weight: 700; letter-spacing: 0.06em; color: #fff; background: var(--red); border-radius: 999px; padding: 6px 16px 3px; font-size: 1.05rem; }
+.lang { display: inline-flex; border: 1.5px solid var(--ink); border-radius: 999px; overflow: hidden; }
+.lang button { font: 600 0.85rem/1 var(--display); letter-spacing: 0.06em; padding: 8px 14px 6px; border: 0; background: transparent; color: var(--ink); cursor: pointer; }
+.lang button[aria-pressed="true"] { background: var(--ink); color: var(--paper); }
+.lang button:focus-visible, .tabs button:focus-visible { outline: 3px solid var(--red); outline-offset: 2px; }
+
+/* hero */
+.hero { display: grid; gap: 28px; padding-block: 28px 56px; }
+.eyebrow { font-family: var(--mono); font-size: 0.9rem; color: var(--muted); letter-spacing: 0.02em; }
+.lede { font-size: 1.2rem; color: var(--muted); }
+.lede strong { color: var(--ink); font-weight: 500; }
+.specs { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px; }
+.specs span { font-family: var(--mono); font-size: 0.85rem; background: var(--chip); border-radius: 6px; padding: 3px 9px; }
+
+/* the screen */
+.frame { background: var(--bezel); padding: clamp(10px, 2.6vw, 26px); border-radius: 6px; box-shadow: 0 1px 0 rgba(255,255,255,0.06) inset, 0 24px 48px -24px rgba(0,0,0,0.45); max-width: 100%; }
+.frame img { display: block; width: 100%; height: auto; background: var(--sheet); image-rendering: auto; }
+.frame.portrait { max-width: 380px; margin-inline: auto; }
+.caption { font-size: 0.88rem; color: var(--muted); margin-top: 10px; }
+
+/* sections */
+section { padding-block: 56px; border-top: 1px solid var(--rule); }
+.split { display: grid; gap: 32px; align-items: center; }
+.copy { display: grid; gap: 14px; min-width: 0; }
+.copy ul { margin: 0; padding-left: 1.1em; display: grid; gap: 6px; max-width: 60ch; }
+.copy li::marker { color: var(--red); }
+.kicker { font-family: var(--mono); font-size: 0.85rem; color: var(--red); letter-spacing: 0.04em; text-transform: uppercase; }
+
+/* weather tabs */
+.tabs { display: flex; flex-wrap: wrap; gap: 6px; }
+.tabs button { font: 600 0.85rem/1 var(--display); letter-spacing: 0.08em; text-transform: uppercase; padding: 9px 14px 7px; border-radius: 999px; border: 1.5px solid var(--ink); background: transparent; color: var(--ink); cursor: pointer; }
+.tabs button[aria-selected="true"] { background: var(--ink); color: var(--paper); }
+
+/* style trio */
+.trio { display: grid; gap: 20px; grid-template-columns: 1fr; }
+.trio figure { margin: 0; display: grid; gap: 8px; min-width: 0; }
+.trio figcaption { font-size: 0.92rem; color: var(--muted); }
+.trio figcaption b { color: var(--ink); font-family: var(--display); font-size: 1.05rem; }
+.trio .frame { padding: 8px; }
+
+/* setup steps: a real sequence, so numbered */
+.steps { list-style: none; margin: 0; padding: 0; display: grid; gap: 18px; counter-reset: step; }
+.steps li { display: grid; grid-template-columns: 2.2rem 1fr; gap: 12px; counter-increment: step; }
+.steps li::before { content: counter(step); font: 700 1.2rem/2.2rem var(--display); text-align: center; height: 2.2rem; border-radius: 50%; background: var(--ink); color: var(--paper); padding-top: 2px; }
+.steps b { display: block; font-family: var(--display); font-size: 1.08rem; }
+.steps span { color: var(--muted); }
+
+.phone { border-radius: 18px; border: 1px solid var(--rule); max-width: 340px; width: 100%; display: block; margin-inline: auto; box-shadow: 0 18px 40px -26px rgba(0,0,0,0.5); }
+.phones { display: grid; gap: 18px; grid-template-columns: 1fr; justify-items: center; }
+
+/* quiet facts */
+.facts { display: grid; gap: 14px; grid-template-columns: 1fr; margin-top: 8px; }
+.fact { border-top: 2px solid var(--ink); padding-top: 12px; display: grid; gap: 4px; }
+.fact .n { font: 700 1.9rem/1 var(--display); font-variant-numeric: tabular-nums; }
+.fact .n small { font-size: 1rem; font-weight: 600; margin-left: 2px; }
+.fact p { color: var(--muted); font-size: 0.95rem; }
+
+footer { border-top: 1px solid var(--rule); padding-block: 36px 48px; color: var(--muted); font-size: 0.9rem; display: grid; gap: 8px; }
+
+@media (min-width: 760px) {
+  .hero { grid-template-columns: 1fr; padding-top: 40px; }
+  .split { grid-template-columns: 1fr 1.15fr; gap: 48px; }
+  .split.flip > :first-child { order: 2; }
+  .split.tallimg { grid-template-columns: 1.2fr 0.8fr; }
+  .trio { grid-template-columns: repeat(3, 1fr); }
+  .phones { grid-template-columns: repeat(3, 1fr); align-items: start; }
+  .facts { grid-template-columns: repeat(3, 1fr); gap: 28px; }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .frame img { transition: opacity .25s ease; }
+  .swap { opacity: .25; }
+}
+</style>
+</head>
+<body>
+
+<div class="wrap">
+  <header class="bar">
+    <span class="mark">COUNTDOWN</span>
+    <div class="lang" role="group" aria-label="Screen language">
+      <button type="button" id="lang-en" data-lang="en" aria-pressed="true">EN</button>
+      <button type="button" id="lang-nb" data-lang="nb" aria-pressed="false">NO</button>
+    </div>
+  </header>
+
+  <div class="hero">
+    <div class="copy">
+      <span class="eyebrow">A paper screen for the hallway</span>
+      <h1>Know when to leave before you've found your keys.</h1>
+      <p class="lede">Countdown is a 7.5-inch e-paper display that shows <strong>your next departures</strong>, <strong>the weather</strong>, <strong>anything disrupting your day</strong>, <strong>what's playing on Spotify</strong> and <strong>your energy use</strong>. It reads like a printed page, has no backlight, and you set it up from your phone.</p>
+      <div class="specs"><span>7.5″ e-paper</span><span>800 × 480</span><span>black &amp; white</span><span>London + Oslo</span><span>English / norsk</span></div>
+    </div>
+    <div>
+      <div class="frame"><img data-en="{{ img }}oslo_landscape_en.png" data-nb="{{ img }}oslo_landscape_nb.png" src="{{ img }}oslo_landscape_en.png" width="800" height="480" alt="The Countdown screen showing Oslo metro and tram departures, the weather, Spotify now playing, an energy chart and three notices"></div>
+      <p class="caption">A real frame from the renderer, with sample data. Switch <b>EN / NO</b> at the top to see the same screen in Norwegian.</p>
+    </div>
+  </div>
+
+  <section id="departures">
+    <div class="split">
+      <div class="copy">
+        <span class="kicker">Departures</span>
+        <h2>London buses and the Tube. Oslo's metro and trams. On one screen.</h2>
+        <p>Pick your stops and they're shown in the order you choose, live and counting down in minutes, with the next departure first and the ones after it lined up underneath.</p>
+        <ul>
+          <li>London stops come from TfL: buses with their stop letter, Tube stations by line.</li>
+          <li>Norwegian stops come from Entur, so Ruter and every other Norwegian operator is covered. Add a whole station or a single platform.</li>
+          <li>Mix London and Norway in the same list if your life spans both.</li>
+          <li>More stops than fit? The screen pages through them, and small squares show which ones are on now.</li>
+        </ul>
+      </div>
+      <div>
+        <div class="frame"><img src="{{ img }}london.png" width="800" height="480" alt="Countdown screen with Elephant & Castle bus stop W and Kennington Northern line departures, Spotify playing and two notices"></div>
+        <p class="caption">Elephant &amp; Castle and Kennington, in London.</p>
+      </div>
+    </div>
+  </section>
+
+  <section id="weather">
+    <div class="split flip">
+      <div class="copy">
+        <span class="kicker">Weather</span>
+        <h2>Now, tonight, tomorrow and the weekend.</h2>
+        <p>The weather panel turns through four pages: what it's like now, tonight's low, tomorrow's high, and both days of the coming weekend. Sunrise, sunset, humidity and wind are there when the screen has room.</p>
+        <p>Forecasts come from Open-Meteo for the town or postcode you type. On first setup the site suggests your nearest town, worked out on the server without sending your IP address to anyone.</p>
+        <div class="tabs" role="tablist" aria-label="Weather page">
+          <button type="button" role="tab" id="wx-now" data-wx="now" aria-selected="true">Now</button>
+          <button type="button" role="tab" id="wx-tonight" data-wx="tonight" aria-selected="false">Tonight</button>
+          <button type="button" role="tab" id="wx-tomorrow" data-wx="tomorrow" aria-selected="false">Tomorrow</button>
+          <button type="button" role="tab" id="wx-weekend" data-wx="weekend" aria-selected="false">Weekend</button>
+        </div>
+      </div>
+      <div>
+        <div class="frame"><img id="wx-img" src="{{ img }}weather_now_en.png" width="470" height="210" alt="Weather panel, Now page"></div>
+        <p class="caption">The weather panel as a portrait screen draws it.</p>
+      </div>
+    </div>
+  </section>
+
+  <section id="notices">
+    <div class="split">
+      <div class="copy">
+        <span class="kicker">Notice board</span>
+        <h2>The things that change your plans, ranked by how much they matter.</h2>
+        <p>Give it your postcode and the notice board gathers what's relevant near you. The most serious notices go first; planned works only fill the rows left over.</p>
+        <ul>
+          <li><b>UK:</b> TfL line status and station problems for your stops, Met Office weather warnings, Environment Agency flood alerts, TfL road incidents nearby, bank holidays and the clocks changing.</li>
+          <li><b>Norway:</b> MET Norway weather warnings in your screen's language, public holidays, the clocks changing, and disruptions on your Entur stops.</li>
+        </ul>
+      </div>
+      <div>
+        <div class="frame"><img data-en="{{ img }}oslo_top_en.png" data-nb="{{ img }}oslo_top_nb.png" src="{{ img }}oslo_top_en.png" width="800" height="480" alt="Countdown screen in the card style with Oslo departures, Spotify top tracks and artists, and two notices"></div>
+        <p class="caption">An orange wind warning and a tram disruption, in the card style.</p>
+      </div>
+    </div>
+  </section>
+
+  <section id="spotify-energy">
+    <div class="split flip">
+      <div class="copy">
+        <span class="kicker">Spotify and energy</span>
+        <h2>What's playing, what's next, and what the house is using.</h2>
+        <p><b>Spotify.</b> Connect your account once and the screen shows the track that's playing, with its album art and what's up next. It takes turns with your top five tracks and artists of the last four weeks and the last twelve months. Your Spotify login stays on the server; the screen never holds it.</p>
+        <p><b>Energy.</b> With a Glowmarkt smart-meter account, the screen charts your electricity use over the last 24 hours, and pages on to this month and this year.</p>
+      </div>
+      <div class="frame portrait"><img data-en="{{ img }}oslo_portrait_en.png" data-nb="{{ img }}oslo_portrait_nb.png" src="{{ img }}oslo_portrait_en.png" width="480" height="800" alt="Countdown screen hung vertically: weather on top, two Oslo stops, Spotify now playing and notices"></div>
+    </div>
+  </section>
+
+  <section id="yours">
+    <div class="copy" style="margin-bottom: 28px;">
+      <span class="kicker">Make it yours</span>
+      <h2>Three looks, two languages, either way up.</h2>
+      <p>One style dresses the whole screen. New screens start on <b>Airy</b>, with light labels like the weather panel. <b>Hero</b> has bold headers and makes the first item big, and <b>Card</b> puts each panel in a rounded card. The settings page shows a preview of each before you save. Choose a 24-hour or 12-hour clock, English or Norwegian text, and hang the screen landscape or portrait.</p>
+    </div>
+    <div class="trio">
+      <figure><div class="frame"><img src="{{ img }}style_airy.png" width="800" height="480" alt="The whole screen in the Airy style"></div><figcaption><b>Airy</b> Light labels, like the weather. The default.</figcaption></figure>
+      <figure><div class="frame"><img src="{{ img }}style_hero.png" width="800" height="480" alt="The whole screen in the Hero style"></div><figcaption><b>Hero</b> Bold headers, with the first item big</figcaption></figure>
+      <figure><div class="frame"><img src="{{ img }}style_card.png" width="800" height="480" alt="The whole screen in the Card style"></div><figcaption><b>Card</b> Each panel in a rounded card</figcaption></figure>
+    </div>
+  </section>
+
+  <section id="setup">
+    <div class="split">
+      <div class="copy">
+        <span class="kicker">Setup</span>
+        <h2>Plug it in. Everything else happens on your phone.</h2>
+        <ol class="steps">
+          <li><div><b>Join it to your Wi-Fi</b><span>The screen opens its own Wi-Fi setup page on first boot.</span></div></li>
+          <li><div><b>Sign in on the page it opens</b><span>Your browser lands on the pairing page and the screen becomes yours. A short code on the screen works as a fallback.</span></div></li>
+          <li><div><b>Give it a name</b><span>One screen or several, each with its own settings.</span></div></li>
+          <li><div><b>Choose your stops and weather</b><span>Search stations in London or Norway, set your postcode, and save. Changes reach the screen on its next refresh, and the settings page can show you what the screen is showing right now.</span></div></li>
+        </ol>
+      </div>
+      <div>
+        <div class="frame"><img data-en="{{ img }}pairing_en.png" data-nb="{{ img }}pairing_nb.png" src="{{ img }}pairing_en.png" width="800" height="480" alt="Pairing screen: Set up this display, with a six-letter code"></div>
+        <p class="caption">The fallback pairing screen.</p>
+      </div>
+    </div>
+    <div class="phones" style="margin-top: 36px;">
+      <img class="phone" src="{{ img }}config_general.jpg" width="700" height="708" alt="Settings page, General: refresh interval, clock format, language English or Norsk">
+      <img class="phone" src="{{ img }}config_style.jpg" width="700" height="928" alt="Settings page, Style: a preview of the Airy style">
+      <img class="phone" src="{{ img }}config_departures.jpg" width="700" height="996" alt="Settings page, Departures: a stop list mixing Majorstuen, Frogner plass and Kennington">
+    </div>
+    <p class="caption" style="text-align:center;">The settings page on a phone, with Oslo and London stops in one list.</p>
+  </section>
+
+  <section id="quiet">
+    <div class="copy">
+      <span class="kicker">Calm by design</span>
+      <h2>A screen that stays out of the way.</h2>
+      <p>E-paper holds its picture without power to the pixels, so there's no glow in a dark hallway. A new picture is only made when something on it actually changes.</p>
+    </div>
+    <div class="facts">
+      <div class="fact"><span class="n">20<small>s</small></span><p>Default refresh, adjustable from 20 seconds to 5 minutes.</p></div>
+      <div class="fact"><span class="n">4</span><p>Weather pages it turns through: now, tonight, tomorrow and the weekend.</p></div>
+      <div class="fact"><span class="n">0</span><p>Spotify or energy-account logins stored on the screen. It only holds its own key.</p></div>
+    </div>
+  </section>
+
+  <footer>
+    <p>Every screen on this page is a real frame from the Countdown renderer, drawn from sample departures, weather and notices.</p>
+    <p>Departures from TfL and Entur. Weather from Open-Meteo. Warnings from the Met Office and MET Norway.</p>
+  </footer>
+</div>
+
+<script>
+(function () {
+  let lang = "en";
+  let wx = "now";
+  const wxImg = document.getElementById("wx-img");
+  const wxNames = { now: "Now", tonight: "Tonight", tomorrow: "Tomorrow", weekend: "Weekend" };
+  const wxNb = { now: "Nå", tonight: "I kveld", tomorrow: "I morgen", weekend: "Helg" };
+
+  function setSrc(img, src) {
+    if (img.getAttribute("src") === src) return;
+    img.classList.add("swap");
+    const done = () => img.classList.remove("swap");
+    img.addEventListener("load", done, { once: true });
+    img.setAttribute("src", src);
+    setTimeout(done, 400);
+  }
+  function render() {
+    document.querySelectorAll("img[data-en]").forEach(img => setSrc(img, img.dataset[lang]));
+    setSrc(wxImg, `{{ img }}weather_${wx}_${lang}.png`);
+    wxImg.alt = `Weather panel, ${wxNames[wx]} page`;
+    document.querySelectorAll(".lang button").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.lang === lang)));
+    document.querySelectorAll(".tabs button").forEach(b => {
+      b.setAttribute("aria-selected", String(b.dataset.wx === wx));
+      b.textContent = lang === "nb" ? wxNb[b.dataset.wx] : wxNames[b.dataset.wx];
+    });
+  }
+  document.querySelectorAll(".lang button").forEach(b => b.addEventListener("click", () => {
+    lang = b.dataset.lang;
+    try { localStorage.setItem("countdown-lang", lang); } catch (e) {}
+    render();
+  }));
+  document.querySelectorAll(".tabs button").forEach(b => b.addEventListener("click", () => { wx = b.dataset.wx; render(); }));
+  try { const saved = localStorage.getItem("countdown-lang"); if (saved === "nb" || saved === "en") lang = saved; } catch (e) {}
+  // Preload the other language so switching is instant.
+  ["en", "nb"].forEach(l => ["now", "tonight", "tomorrow", "weekend"].forEach(p => { const i = new Image(); i.src = `{{ img }}weather_${p}_${l}.png`; }));
+  render();
+})();
+</script>
+</body>
+</html>
