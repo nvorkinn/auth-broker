@@ -838,8 +838,10 @@ encrypted with the broker's `CREDENTIAL_ENCRYPTION_KEY`: it reads the devices
 with an account straight from the database (opened read-only, `./data` mounted
 `:ro`; the same accounts as the broker's `v1:sub:glow`, less any without a
 username), so the passwords never leave the broker and it needs no token of its
-own. Renderers on standalone Pis can't reach Redis, so `GET /api/config` still
-carries the credentials for them.
+own. `GET /api/config` carries only `glowmarkt.enabled`, true when the device
+has an account the provider signs in with (`GlowmarktCredentials.sign_in`, the
+rule both use); its `username` and `password` are always null, now that every
+renderer reads the store.
 
 Every 15 minutes (on the epoch-aligned tick, or at once for an account that's
 new or changed when the broker publishes on `v1:sub:changed`) it asks Glowmarkt,
