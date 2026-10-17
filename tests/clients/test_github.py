@@ -239,3 +239,64 @@ def test_a_release_that_cant_be_read_is_left_out_and_the_rest_still_shows(caplog
     assert summary["releases"] == []
     assert summary["failing"] == ["auth-broker"]
     assert "Couldn't read nvorkinn/auth-broker's release" in caplog.text
+
+
+def _http_error(status, headers=None, text=""):
+    response = requests.Response()
+    response.status_code = status
+    response.headers.update(headers or {})
+    response._content = text.encode()
+    return requests.HTTPError(f"{status}", response=response)
+
+
+@pytest.mark.parametrize(
+    ("error", "wait"),
+    [
+        (_http_error(429, {"Retry-After": "30"}), 30),
+        (_http_error(403, {"Retry-After": "0"}), 1),
+        (_http_error(403, {"X-RateLimit-Remaining": "0", "X-RateLimit-Reset": "1000600"}), 600),
+        (_http_error(429), github.DEFAULT_BACKOFF_S),
+        (_http_error(403, text='{"message": "You have exceeded a secondary rate limit."}'), github.DEFAULT_BACKOFF_S),
+        (_http_error(403, text='{"message": "Resource not accessible by personal access token"}'), None),
+        (_http_error(403, {"X-RateLimit-Remaining": "4999", "X-RateLimit-Reset": "1000600"}), None),
+        (_http_error(401), None),
+        (_http_error(502, {"Retry-After": "30"}), None),
+        (requests.ConnectionError("down"), None),
+        (requests.HTTPError("no response"), None),
+    ],
+)
+def test_rate_limit_wait(error, wait):
+    assert github.rate_limit_wait(error, now=1_000_000) == wait
+
+
+def _limited(*_args, **_kwargs):
+    response = Mock()
+    response.ok = False
+    response.raise_for_status = Mock(side_effect=_http_error(429, {"Retry-After": "30"}))
+    return response
+
+
+def test_copilot_premium_requests_raises_a_rate_limit():
+    with patch("requests.Session.get", side_effect=_limited), pytest.raises(requests.HTTPError):
+        github.copilot_premium_requests("github_pat_abc", "nvorkinn")
+
+
+def test_a_rate_limit_reading_a_release_is_raised_not_left_out():
+    """Every call after it would fail too: the panel would lose its releases (and the screen its pace) for nothing."""
+
+    def answer(url, params=None, timeout=None, headers=None):
+        if url.endswith("/actions/runs") and "created" in (params or {}):
+            return _limited()
+        return _github(url, params, timeout, headers)
+
+    with patch("requests.Session.get", side_effect=answer), pytest.raises(requests.HTTPError):
+        github.summary("github_pat_abc")
+
+
+def test_a_rate_limit_reading_the_workflow_file_is_raised():
+    session = Mock()
+    session.get.side_effect = _limited
+    run = {"path": ".github/workflows/release.yml", "head_sha": "abc"}
+
+    with pytest.raises(requests.HTTPError):
+        github._workflow_jobs(session, REPOS[0], run)

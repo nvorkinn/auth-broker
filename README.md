@@ -906,6 +906,13 @@ keeps it for three minutes and answers the screen's polls with it as `Retry-Afte
 "Pace" in [docs/architecture.md](docs/architecture.md#pace)). A burst costs about 750 calls over a ten-minute release,
 against the 5,000 an hour a token gets.
 
+If GitHub rate-limits a device's token anyway (a 429, or a 403 that is a rate limit rather than a missing permission), the
+provider leaves that device alone for as long as GitHub says (`Retry-After`, or until `X-RateLimit-Reset` when
+`X-RateLimit-Remaining` is 0; a minute if it says neither), and polls the other devices as usual. The device's keys are
+left as they were meanwhile, so a long wait lets them lapse and the panel says it has no data rather than showing it
+stale. A rate limit part-way through a poll fails the whole poll (`GET /api/developer` answers 502) instead of leaving
+out the releases or the Copilot usage it couldn't read.
+
 `tests/fixtures/developer.json` is the stored shape, copied into pi-dashboard's tests too, so a change to either side
 that breaks the other shows up in both. To see it on the host: `docker logs -f developer-provider`. Locally,
 `python -m broker.developer_provider`. `deploy.sh` recreates it with the broker.
