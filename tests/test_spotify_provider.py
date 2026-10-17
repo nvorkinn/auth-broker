@@ -38,22 +38,25 @@ SPOTIFY_API = "https://api.spotify.com/v1"
 APPLE_SONGS = [apple_song("1", name="Efecto"), apple_song("2", name="Tití Me Preguntó")]
 
 
-def _response(body=None, status_code=200):
+def _response(body=None, status_code=200, headers=None):
     response = Mock()
     response.status_code = status_code
+    response.headers = headers or {}
     response.content = b"" if body is None else json.dumps(body).encode()
     response.json.return_value = body
     if status_code >= 400:
-        response.raise_for_status.side_effect = requests.HTTPError(f"{status_code}")
+        response.raise_for_status.side_effect = requests.HTTPError(f"{status_code}", response=response)
     return response
 
 
 class FakeSpotify:
     """Spotify's Web API and token endpoint, as far as the provider calls them, answering from the fixture."""
 
-    def __init__(self, queue=None, *, revoked=frozenset()):
+    def __init__(self, queue=None, *, revoked=frozenset(), top_429=None):
         self.queue = PLAYER["spotify"] if queue is None else queue
         self.revoked = revoked
+        # A 429 for the top lists, with these headers (e.g. {"Retry-After": "120"}), while set.
+        self.top_429 = top_429
         self.gets: list[tuple[str, dict | None]] = []
         self.refreshes: list[str] = []
 
@@ -61,6 +64,8 @@ class FakeSpotify:
         self.gets.append((url, params))
         if url == f"{SPOTIFY_API}/me/player/queue":
             return _response(None, 204) if self.queue == "204" else _response(self.queue)
+        if self.top_429 is not None:
+            return _response({"error": {"status": 429}}, 429, self.top_429)
         type_ = url.removeprefix(f"{SPOTIFY_API}/me/top/")
         return _response(TOP["spotify"][params["time_range"]][type_])
 
@@ -292,6 +297,7 @@ def test_switching_a_service_on_fetches_its_top_lists_at_once(app, provider, sto
 
 
 def test_a_failed_top_fetch_is_tried_again_next_cycle(app, store, device):
+    """Any failure but a 429 (which waits for Retry-After, see below) is tried again on the next cycle."""
     device_id = device()
     provider = MusicProvider(app, store, clock=lambda: FETCHED_AT)
     failing = FakeSpotify()
@@ -299,7 +305,7 @@ def test_a_failed_top_fetch_is_tried_again_next_cycle(app, store, device):
 
     def get(url, **kwargs):
         if "/me/top/" in url:
-            return _response({"error": "rate limited"}, 429)
+            return _response({"error": "server error"}, 500)
         return original(url, **kwargs)
 
     failing.get = get
@@ -356,3 +362,39 @@ def test_ticks_are_epoch_aligned():
     assert next_tick(120.0, 60) == 180.0
     assert next_tick(179.9, 60) == 180.0
     assert datetime.fromtimestamp(next_tick(FETCHED_AT + 1, 60), UTC).second == 0
+
+
+@pytest.mark.parametrize(("headers", "wait"), [({"Retry-After": "120"}, 120), ({}, spotify_provider.DEFAULT_BACKOFF_S)])
+def test_a_429_stops_all_spotify_calls_until_retry_after(app, store, device, headers, wait):
+    """Spotify's limit is the app's: once it says 429, no device's Spotify is asked again until it said to."""
+    device()
+    now = [FETCHED_AT]
+    provider = MusicProvider(app, store, clock=lambda: now[0])
+    throttled = FakeSpotify(top_429=headers)
+
+    # Patched rather than caplog: other tests (alembic's logging set-up) can leave loggers disabled.
+    with patch.object(spotify_provider, "logger") as logger:
+        _run(provider, throttled)
+    logger.warning.assert_called_once_with(
+        "Music: %s is rate-limiting the app (429); calling it again in %ds", "spotify", wait
+    )
+    logger.exception.assert_not_called()  # a warning, not a stack trace each time
+    assert sum("/me/top/" in url for url, _ in throttled.gets) == 1  # it stopped at the first 429
+
+    now[0] += wait - 1
+    waiting = FakeSpotify()
+    _run(provider, waiting)
+    assert waiting.gets == []  # neither the player nor the top lists
+
+    now[0] += 1
+    recovered = FakeSpotify()
+    _run(provider, recovered)
+    assert any("/me/top/" in url for url, _ in recovered.gets)
+
+
+def test_other_errors_are_not_treated_as_rate_limits():
+    retry_after = spotify_provider.retry_after
+    assert retry_after(requests.HTTPError("500", response=_response(None, 500))) is None
+    assert retry_after(ValueError("boom")) is None
+    unreadable = requests.HTTPError("429", response=_response(None, 429, {"Retry-After": "soon"}))
+    assert retry_after(unreadable) == spotify_provider.DEFAULT_BACKOFF_S

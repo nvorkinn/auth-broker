@@ -24,9 +24,11 @@ import time
 from contextlib import suppress
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from http import HTTPStatus
 from typing import TYPE_CHECKING
 
 import redis
+import requests
 from redis.exceptions import RedisError
 from sqlalchemy import or_, select
 
@@ -58,6 +60,10 @@ TOP_TYPES = ("tracks", "artists")
 
 SPOTIFY = "spotify"
 APPLE_MUSIC = "apple_music"
+
+# A 429 (Too Many Requests) is the service's limit for the whole app, not one device's: none of its calls are made
+# again until it says (Retry-After, in seconds), or until this long when it doesn't say.
+DEFAULT_BACKOFF_S = 60
 
 SUB_CHANGED = "v1:sub:changed"
 # How long each wait for a `v1:sub:changed` message lasts, so a stop is noticed within it.
@@ -160,6 +166,15 @@ class TopFetched:
     services: tuple[str, ...] = field(default=())
 
 
+def retry_after(error: Exception) -> int | None:
+    """Return how many seconds to wait if `error` is a 429 (its Retry-After, else DEFAULT_BACKOFF_S); None otherwise."""
+    response = getattr(error, "response", None) if isinstance(error, requests.HTTPError) else None
+    if response is None or response.status_code != HTTPStatus.TOO_MANY_REQUESTS:
+        return None
+    header = (response.headers or {}).get("Retry-After", "")
+    return max(int(header), 1) if str(header).isdigit() else DEFAULT_BACKOFF_S
+
+
 class MusicProvider:
     """Runs the cycles against `store` (made with decode_responses=True), in `app`'s context, until stop()."""
 
@@ -170,6 +185,8 @@ class MusicProvider:
         self.clock = clock
         self._stopping = threading.Event()
         self._top_fetched: dict[str, TopFetched] = {}
+        # Service -> when it may be called again, after it answered 429.
+        self._backoff_until: dict[str, float] = {}
         self._pubsub: redis.client.PubSub | None = None
         # Set while Redis is unreachable: when to try subscribing again.
         self._resubscribe_at: float | None = None
@@ -223,12 +240,12 @@ class MusicProvider:
         top: dict[str, dict] = {}
         try:
             for service in want.services:
-                player_part = self._fetch(PLAYER_FETCHERS[service], want.device_id, service, "player")
+                player_part = self._fetch(PLAYER_FETCHERS[service], want.device_id, service, "player", now)
                 if player_part is None:
                     # The same failure would only repeat (a revoked token is refreshed once per call).
                     continue
                 player[service] = player_part
-                if top_due and (top_part := self._fetch(TOP_FETCHERS[service], want.device_id, service, "top")):
+                if top_due and (top_part := self._fetch(TOP_FETCHERS[service], want.device_id, service, "top", now)):
                     top[service] = top_part
         finally:
             # Short transactions: the web app writes to the same SQLite file.
@@ -248,14 +265,22 @@ class MusicProvider:
             self._top_fetched[want.device_id] = TopFetched(now, want.services)
         return bool(player) + bool(top)
 
-    @staticmethod
-    def _fetch(fetcher: Callable[[str], dict], device_id: str, service: str, part: str) -> dict | None:
-        """Return what `fetcher` gets for the device, or None (logged) if it raises."""
+    def _fetch(
+        self, fetcher: Callable[[str], dict], device_id: str, service: str, part: str, now: float
+    ) -> dict | None:
+        """Return what `fetcher` gets for the device, or None (logged) if it raises or `service` is backing off."""
+        if now < self._backoff_until.get(service, 0):
+            logger.debug("Music: skipping device %s's %s %s, rate-limited", device_id, service, part)
+            return None
         try:
             return fetcher(device_id)
-        except Exception:
+        except Exception as e:
             db.session.rollback()
-            logger.exception("Music: couldn't fetch device %s's %s %s", device_id, service, part)
+            if (wait := retry_after(e)) is not None:
+                self._backoff_until[service] = now + wait
+                logger.warning("Music: %s is rate-limiting the app (429); calling it again in %ds", service, wait)
+            else:
+                logger.exception("Music: couldn't fetch device %s's %s %s", device_id, service, part)
             return None
 
     def _try_cycle(self) -> None:
