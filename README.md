@@ -542,6 +542,9 @@ users alone: no users, tokens, TOTP or passkey devices, or group members are
 in it, so manage those in Authentik's UI. It holds only what this repo owns
 (the recovery flow, the sign-up flow, passkey login, the brands, the Logs and Metrics proxy
 providers and apps, the embedded outpost's providers, the Google source).
+Google login and sign-up use their own flows (`broker-source-authentication`, `broker-source-enrollment`)
+that run the same mandatory second-factor stage as the sign-up before logging the user in, so a Google
+sign-in no longer skips the passkey or authenticator app; a user with neither sets one up first.
 The sign-up flow (`broker-enrollment`) takes a username, email and password, then
 **requires a second factor**, a passkey or an authenticator app, before logging the new user in
 (no email verification yet). A passkey also lets that user sign in later without typing a username.

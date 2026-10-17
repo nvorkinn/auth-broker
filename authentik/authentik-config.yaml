@@ -572,6 +572,120 @@ entries:
         - !KeyOf metrics-proxy-provider
         - !KeyOf broker-proxy-provider
 
+  # Google login and sign-up: the stock source flows, plus the same second factor the sign-up asks
+  # for (broker-enrollment-mfa), before the user is logged in. Without it a Google login is the whole
+  # login, and skips the passkey or authenticator app. A user with neither has to set one up first.
+  - model: authentik_flows.flow
+    id: source-authentication-flow
+    state: present
+    identifiers:
+      slug: broker-source-authentication
+    attrs:
+      name: Broker Google login
+      title: Sign in
+      designation: authentication
+      authentication: require_unauthenticated
+      layout: stacked
+      policy_engine_mode: any
+  - model: authentik_policies.policybinding
+    state: present
+    identifiers:
+      policy: !Find [authentik_policies_expression.expressionpolicy, [name, default-source-authentication-if-sso]]
+      target: !KeyOf source-authentication-flow
+      order: 0
+    attrs:
+      enabled: true
+      negate: false
+      timeout: 30
+  - model: authentik_flows.flowstagebinding
+    state: present
+    identifiers:
+      target: !KeyOf source-authentication-flow
+      stage: !KeyOf enrollment-mfa
+      order: 10
+    attrs:
+      evaluate_on_plan: true
+      re_evaluate_policies: false
+  - model: authentik_flows.flowstagebinding
+    state: present
+    identifiers:
+      target: !KeyOf source-authentication-flow
+      stage: !Find [authentik_stages_user_login.userloginstage, [name, default-source-authentication-login]]
+      order: 100
+    attrs:
+      evaluate_on_plan: true
+      re_evaluate_policies: false
+  - model: authentik_flows.flow
+    id: source-enrollment-flow
+    state: present
+    identifiers:
+      slug: broker-source-enrollment
+    attrs:
+      name: Broker Google sign-up
+      title: Choose a username
+      designation: enrollment
+      authentication: none
+      layout: stacked
+      policy_engine_mode: any
+  - model: authentik_policies.policybinding
+    state: present
+    identifiers:
+      policy: !Find [authentik_policies_expression.expressionpolicy, [name, default-source-enrollment-if-sso]]
+      target: !KeyOf source-enrollment-flow
+      order: 0
+    attrs:
+      enabled: true
+      negate: false
+      timeout: 30
+  # Asks for a username only when Google didn't give one.
+  - model: authentik_flows.flowstagebinding
+    id: source-enrollment-binding-prompt
+    state: present
+    identifiers:
+      target: !KeyOf source-enrollment-flow
+      stage: !Find [authentik_stages_prompt.promptstage, [name, default-source-enrollment-prompt]]
+      order: 10
+    attrs:
+      evaluate_on_plan: true
+      re_evaluate_policies: true
+  - model: authentik_policies.policybinding
+    state: present
+    identifiers:
+      policy: !Find [authentik_policies_expression.expressionpolicy, [name, default-source-enrollment-if-username]]
+      target: !KeyOf source-enrollment-binding-prompt
+      order: 0
+    attrs:
+      enabled: true
+      negate: false
+      timeout: 30
+  - model: authentik_flows.flowstagebinding
+    state: present
+    identifiers:
+      target: !KeyOf source-enrollment-flow
+      stage: !Find [authentik_stages_user_write.userwritestage, [name, default-source-enrollment-write]]
+      order: 20
+    attrs:
+      evaluate_on_plan: true
+      re_evaluate_policies: false
+  - model: authentik_flows.flowstagebinding
+    state: present
+    identifiers:
+      target: !KeyOf source-enrollment-flow
+      stage: !KeyOf enrollment-mfa
+      order: 30
+    attrs:
+      evaluate_on_plan: true
+      re_evaluate_policies: false
+  - model: authentik_flows.flowstagebinding
+    state: present
+    identifiers:
+      target: !KeyOf source-enrollment-flow
+      stage: !Find [authentik_stages_user_login.userloginstage, [name, default-source-enrollment-login]]
+      order: 100
+    attrs:
+      evaluate_on_plan: true
+      re_evaluate_policies: false
+
   # Google as a federated login source.
   - model: authentik_sources_oauth.oauthsource
     id: google-source
@@ -584,10 +698,20 @@ entries:
       provider_type: google
       consumer_key: !Env BLUEPRINT_GOOGLE_CLIENT_ID
       consumer_secret: !Env BLUEPRINT_GOOGLE_CLIENT_SECRET
-      authentication_flow: !Find [authentik_flows.flow, [slug, default-source-authentication]]
-      enrollment_flow: !Find [authentik_flows.flow, [slug, default-source-enrollment]]
+      authentication_flow: !KeyOf source-authentication-flow
+      enrollment_flow: !KeyOf source-enrollment-flow
       user_matching_mode: email_link
       user_path_template: goauthentik.io/sources/%(slug)s
+
+  # The login screen, headed "Sign in" rather than the stock "Welcome to authentik!" (a flow needs a
+  # title, it can't be blank). Authentik's own blueprint sets
+  # it back if a later Authentik release changes that blueprint; deploy-authentik-config undoes that.
+  - model: authentik_flows.flow
+    state: present
+    identifiers:
+      slug: default-authentication-flow
+    attrs:
+      title: Sign in
 
   # Show Google on the login screen: the source alone only exists, the
   # identification stage decides which sources it lists.
