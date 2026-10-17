@@ -129,6 +129,46 @@ services:
     volumes:
       - victoria_metrics_data:/victoria-metrics-data
 
+  # The shared store between the API providers (they write the latest data per stop, location, ...) and the
+  # renderers (they read it), with the broker writing what to fetch. A cache only: everything in it is either
+  # refetched within minutes or rebuilt from the broker's database, so it keeps nothing on disk. Upstream's
+  # image, pinned here and bumped by hand. It listens on 127.0.0.1:6379 (host networking, like the Victoria
+  # services, so the broker and the renderers reach it on loopback) and wants REDIS_PASSWORD, from redis.env.
+  redis:
+    image: docker.io/library/redis:8.10-alpine
+    container_name: redis
+    logging: *logging
+    restart: unless-stopped
+    network_mode: host
+    # Not root. The image's entrypoint only drops to this user when the command is redis-server itself.
+    user: redis
+    env_file: redis.env
+    # The config arrives on stdin (`redis-server -`), so the password never shows in the process list.
+    # volatile-lru: when full, evict only keys with a TTL (the providers' data, refetched anyway), never
+    # what has none (the subscriptions, which say what to fetch).
+    command:
+      - sh
+      - -c
+      - |
+        exec redis-server - <<EOF
+        bind 127.0.0.1
+        port 6379
+        protected-mode yes
+        requirepass $$REDIS_PASSWORD
+        save ""
+        appendonly no
+        maxmemory 128mb
+        maxmemory-policy volatile-lru
+        EOF
+    mem_limit: 256m
+    healthcheck:
+      # REDISCLI_AUTH rather than -a, to keep the password out of the process list here too.
+      test: ["CMD-SHELL", "REDISCLI_AUTH=\"$$REDIS_PASSWORD\" redis-cli -h 127.0.0.1 ping | grep -q PONG"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+
   # Authentik (SSO with passkeys). All three read their secrets from
   # authentik.env, decrypted from secrets/authentik.env by deploy.sh.
   # AUTHENTIK_VERSION in .env pins the upstream release; bump it by hand,

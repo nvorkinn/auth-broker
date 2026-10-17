@@ -463,7 +463,7 @@ Deploying needs Docker Compose v2 (the `docker compose` subcommand). Ubuntu's
 
 On the Oracle Cloud instance, `/opt/auth-broker/` holds `docker-compose.yml`,
 the `.env` file and the `data/` directory. Each service's secrets are in its
-own env file next to them (`broker.env`, `caddy.env`, `authentik.env`), which
+own env file next to them (`broker.env`, `caddy.env`, `authentik.env`, `redis.env`), which
 the deploy jobs decrypt from the repo (see [Secrets](#secrets)); don't edit
 them on the host. Pin all five
 versions in that `.env` (compose reads it from there) rather than tracking
@@ -519,7 +519,8 @@ there) and runs the bundle's own `deploy.sh`, which:
 
 Deploying the config server then lists the devices, as a check that the
 database came through. `deploy-config` goes on to deploy Fluent Bit,
-VictoriaLogs and VictoriaMetrics the same way. The Authentik jobs skip steps
+VictoriaLogs and VictoriaMetrics the same way, then Redis, which is brought up
+like Authentik (see [Redis](#redis)). The Authentik jobs skip steps
 4–5: they bring the three Authentik services up on the pinned
 `AUTHENTIK_VERSION` (recreating only what changed). `deploy-authentik-config`
 then installs the bundle's `authentik/authentik-config.yaml` into
@@ -635,7 +636,7 @@ back that directory up.
 
 Every secret the host needs is in `secrets/`, encrypted with
 [SOPS](https://github.com/getsops/sops) and age, one file per service:
-`broker.env`, `caddy.env` and `authentik.env`. The `.example` files next to
+`broker.env`, `caddy.env`, `authentik.env` and `redis.env`. The `.example` files next to
 them list what each one holds. `.sops.yaml` lists who can decrypt them: your
 laptop's age key, to edit them, and the host's, to deploy them. Each release
 ships the encrypted files in its deploy bundle, and `deploy.sh` decrypts all of
@@ -786,6 +787,26 @@ the logs site: the push endpoints (`/api/v1/write`, `/api/v1/import/*`,
 token as logs, and everything else (the UI at `/vmui` and the query API)
 needs the Authentik admin login. The `deploy-config` job deploys it, pinning
 `VICTORIA_METRICS_VERSION` in `.env`.
+
+### Redis
+
+The `redis` compose service is upstream's `redis:8.10-alpine`, pinned in
+`docker-compose.yml` (bump it there). It is the store in the middle of the
+renderers: the broker records which stops and locations screens want, one
+provider per API fetches them and writes the latest data under a key per stop
+or location, and the renderers read it. Nothing uses it yet.
+
+It is a cache only, so it keeps nothing on disk: provider data comes back
+within minutes and the subscriptions are rebuilt from the broker's database.
+It listens on `127.0.0.1:6379` only (host networking, like the Victoria
+services), needs `REDIS_PASSWORD` from `secrets/redis.env`, and is capped at
+128 MB; when full it evicts only keys with a TTL. The `deploy-config` job
+brings it up with `docker compose up -d --wait`, so a release that doesn't
+change its service leaves it running. To look inside, on the host:
+
+```bash
+docker exec -it redis sh -c 'REDISCLI_AUTH="$REDIS_PASSWORD" redis-cli'
+```
 
 ## Not built yet
 

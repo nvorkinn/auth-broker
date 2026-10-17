@@ -4,6 +4,7 @@
 /broker.env
 /caddy.env
 /authentik.env
+/redis.env
 data/
 __pycache__/
 *.pyc
