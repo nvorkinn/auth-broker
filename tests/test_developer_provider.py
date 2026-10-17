@@ -268,3 +268,81 @@ def test_ticks_are_epoch_aligned_at_the_current_interval(app, store):
     assert next_tick(FETCHED_AT + 1, BURST_INTERVAL_S) % BURST_INTERVAL_S == 0
     assert developer_provider.IDLE_INTERVAL_S > developer_provider.BURST_INTERVAL_S
     assert datetime.fromtimestamp(next_tick(FETCHED_AT + 1, 60), UTC).second == 0
+
+
+def _rate_limited(status=429, headers=None, text=""):
+    response = requests.Response()
+    response.status_code = status
+    response.headers.update(headers or {})
+    response._content = text.encode()
+    return requests.HTTPError(f"{status}", response=response)
+
+
+class Clock:
+    def __init__(self, now=FETCHED_AT):
+        self.now = now
+
+    def __call__(self):
+        return self.now
+
+
+@pytest.mark.parametrize(
+    ("error", "wait"),
+    [
+        (_rate_limited(429, {"Retry-After": "90"}), 90),
+        (_rate_limited(403, {"X-RateLimit-Remaining": "0", "X-RateLimit-Reset": str(int(FETCHED_AT) + 600)}), 600),
+        (_rate_limited(403, text='{"message": "You have exceeded a secondary rate limit"}'), 60),
+    ],
+)
+def test_a_rate_limited_token_is_left_alone_until_github_says(app, store, device, error, wait):
+    device_id = device()
+    clock = Clock()
+    provider = DeveloperProvider(app, store, clock=clock)
+    _run(provider)
+    before = store.get(stored_key(device_id))
+
+    with patch("broker.clients.github.summary", side_effect=error), patch.object(provider, "logger") as logger:
+        provider.run_cycle()
+    assert "rate-limiting" in logger.warning.call_args.args[0]
+    assert store.get(stored_key(device_id)) == before
+
+    clock.now += wait - 1
+    assert _run(provider).call_count == 0  # still backing off: GitHub isn't asked
+
+    clock.now += 1
+    assert _run(provider).call_count == 1
+    assert _stored(store, stored_key(device_id))["fetched_at"] == datetime.fromtimestamp(clock.now, UTC).isoformat()
+
+
+def test_a_rate_limited_device_does_not_hold_up_the_others(app, store, device):
+    limited = device(secret="a-very-long-device-secret-1", token="limited")
+    fine = device(secret="a-very-long-device-secret-2", token="fine")
+    provider = DeveloperProvider(app, store, clock=Clock())
+
+    def summary(token):
+        if token == "limited":
+            raise _rate_limited(429, {"Retry-After": "300"})
+        return GITHUB
+
+    for _ in range(2):
+        with (
+            patch("broker.clients.github.summary", side_effect=summary) as called,
+            patch("broker.clients.github.copilot_premium_requests", return_value=280),
+            patch("broker.services.developer.ai_plans.plans", return_value=FIXTURE["plans"]),
+        ):
+            provider.run_cycle()
+
+    # The limited token was tried once, then left alone; the other was polled both times.
+    assert [call.args[0] for call in called.call_args_list] == ["fine"]
+    assert store.get(stored_key(limited)) is None
+    assert _stored(store, stored_key(fine)) == FIXTURE
+
+
+def test_a_403_that_isnt_a_rate_limit_does_not_back_off(app, store, device):
+    device()
+    provider = DeveloperProvider(app, store, clock=Clock())
+
+    with patch("broker.clients.github.summary", side_effect=_rate_limited(403, text='{"message": "Bad credentials"}')):
+        provider.run_cycle()
+
+    assert _run(provider).call_count == 1

@@ -11,6 +11,9 @@ It also sets the pace. While any of a device's releases is running, the panel's 
 provider polls every BURST_INTERVAL_S and asks for the screen to refresh as fast, with `v1:pace:developer:<device id>`
 (a TTL of PACE_TTL_S, renewed each cycle it still holds). Nothing says a release has ended: the key lapses, and the
 screen goes back to its usual pace. See "The pace" in pi-dashboard's countdown README.
+
+A device whose GitHub rate-limits its token (403/429, see github.rate_limit_wait) isn't polled again until GitHub says
+it may be (Retry-After, or X-RateLimit-Reset), and its keys are left as they are meanwhile.
 """
 
 import json
@@ -23,6 +26,7 @@ import requests
 from sqlalchemy import select
 
 from broker import provider_loop
+from broker.clients import github
 from broker.db import db
 from broker.models import DeviceConfig, GitHubToken
 from broker.provider_loop import ProviderLoop
@@ -100,6 +104,9 @@ class DeveloperProvider(ProviderLoop):
         # The devices whose last poll saw a release running. A device whose poll fails stays as it was, so one
         # hiccup from GitHub doesn't slow the screen in the middle of a release.
         self._running: set[str] = set()
+        # Device -> when its token may be used again, after GitHub rate-limited it. Per device rather than for the whole
+        # provider: GitHub's limits are a token's (an owner's), not the app's as Spotify's are.
+        self._backoff_until: dict[str, float] = {}
 
     def interval_s(self) -> float:
         """Return BURST_INTERVAL_S while any device has a release running, else IDLE_INTERVAL_S."""
@@ -114,6 +121,8 @@ class DeveloperProvider(ProviderLoop):
                 # Short transactions: the web app writes to the same SQLite file, and the polls take a while.
                 db.session.remove()
         self._running &= {w.device_id for w in wanted}
+        now = self.clock()
+        self._backoff_until = {d: until for d, until in self._backoff_until.items() if until > now}
         written = 0
         for want in wanted:
             if self._stopping.is_set():
@@ -123,12 +132,24 @@ class DeveloperProvider(ProviderLoop):
         return written
 
     def _poll_device(self, want: Wanted) -> int:
-        fetched_at = datetime.fromtimestamp(self.clock(), UTC)
+        now = self.clock()
+        if now < self._backoff_until.get(want.device_id, 0):
+            self.logger.debug("Developer: skipping device %s, rate-limited by GitHub", want.device_id)
+            return 0
+        fetched_at = datetime.fromtimestamp(now, UTC)
         try:
             snapshot = developer.snapshot(want.token, fetched_at.date())
         except requests.RequestException as e:
             # Its keys aren't refreshed, so they expire (and the panel says it can't connect) if this keeps up.
-            self.logger.warning("Developer: GitHub for device %s: %s", want.device_id, e)
+            if (wait := github.rate_limit_wait(e, now)) is not None:
+                self._backoff_until[want.device_id] = now + wait
+                self.logger.warning(
+                    "Developer: GitHub is rate-limiting device %s's token; polling it again in %ds",
+                    want.device_id,
+                    wait,
+                )
+            else:
+                self.logger.warning("Developer: GitHub for device %s: %s", want.device_id, e)
             return 0
         running = release_running(snapshot)
         if running:

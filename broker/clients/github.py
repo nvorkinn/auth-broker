@@ -7,7 +7,9 @@ graph, and their Copilot premium requests this month.
 
 import logging
 import re
+import time
 from datetime import UTC, datetime, timedelta
+from http import HTTPStatus
 
 import requests
 
@@ -29,6 +31,8 @@ RELEASE = re.compile(r"release|deploy", re.IGNORECASE)
 RECENT_RUNS = timedelta(hours=6)
 # A finished release stays on the screen this long, so its result is seen.
 SHOWN_AFTER = timedelta(minutes=10)
+# How long to leave GitHub alone after a rate limit that doesn't say how long: GitHub asks for at least a minute.
+DEFAULT_BACKOFF_S = 60
 
 
 def summary(token: str) -> dict:
@@ -53,7 +57,8 @@ def summary(token: str) -> dict:
 def copilot_premium_requests(token: str, login: str) -> int | None:
     """Return the Copilot premium requests used this month, or None if GitHub won't say.
 
-    It only says for a plan the owner pays for themselves, and only to a token with the Plan permission.
+    It only says for a plan the owner pays for themselves, and only to a token with the Plan permission. Raises
+    requests.HTTPError if GitHub is rate-limiting the token (which isn't GitHub not saying).
     """
     response = _session(token).get(
         f"{API_URL}/users/{login}/settings/billing/premium_request/usage",
@@ -61,8 +66,39 @@ def copilot_premium_requests(token: str, login: str) -> int | None:
         timeout=TIMEOUT,
     )
     if not response.ok:
+        _raise_if_rate_limited(response)
         return None
     return round(sum(item.get("grossQuantity", 0) for item in response.json().get("usageItems", [])))
+
+
+def rate_limit_wait(error: Exception, now: float | None = None) -> float | None:
+    """Return how many seconds GitHub asks to be left alone if `error` is its rate limit; None if it's anything else.
+
+    GitHub answers a rate-limited call with 429 or 403 (a 403 is also a token without the permission, which isn't
+    one): with Retry-After (seconds) for a secondary limit, or X-RateLimit-Remaining 0 and X-RateLimit-Reset (epoch
+    seconds) for the 5,000 an hour. Without either, at least a minute. `now` is the epoch time (for the tests).
+    """
+    response = error.response if isinstance(error, requests.HTTPError) else None
+    if response is None or response.status_code not in {HTTPStatus.FORBIDDEN, HTTPStatus.TOO_MANY_REQUESTS}:
+        return None
+    headers = response.headers or {}
+    if (retry := str(headers.get("Retry-After", ""))).isdigit():
+        return max(int(retry), 1)
+    reset = str(headers.get("X-RateLimit-Reset", ""))
+    if headers.get("X-RateLimit-Remaining") == "0" and reset.isdigit():
+        return max(int(reset) - (time.time() if now is None else now), 1)
+    if response.status_code == HTTPStatus.TOO_MANY_REQUESTS or "rate limit" in (response.text or "").lower():
+        return DEFAULT_BACKOFF_S
+    return None
+
+
+def _raise_if_rate_limited(response: requests.Response) -> None:
+    """Raise requests.HTTPError if `response` is GitHub's rate limit, which the callers that skip a failure mustn't."""
+    try:
+        response.raise_for_status()
+    except requests.HTTPError as e:
+        if rate_limit_wait(e) is not None:
+            raise
 
 
 def _session(token: str) -> requests.Session:
@@ -130,7 +166,8 @@ def _failing(session: requests.Session, repo: dict) -> bool:
 def _releases(session: requests.Session, repos: list[dict]) -> list[dict]:
     """Return each repo's release that's running or finished in the last few minutes, the latest started first.
 
-    A repo whose release can't be read is left out, so the rest of the panel still shows.
+    A repo whose release can't be read is left out, so the rest of the panel still shows; but a rate limit is raised
+    (requests.HTTPError), as every call after it would fail too and the panel would lose its releases for nothing.
     """
     now = datetime.now(UTC)
     found = []
@@ -138,6 +175,8 @@ def _releases(session: requests.Session, repos: list[dict]) -> list[dict]:
         try:
             release = _release(session, repo, now)
         except requests.RequestException as e:
+            if rate_limit_wait(e) is not None:
+                raise
             logger.warning("Couldn't read %s's release: %s", repo["full_name"], e)
             continue
         if release is not None:
@@ -180,7 +219,8 @@ def _title(run: dict, repo: dict) -> str:
 def _workflow_jobs(session: requests.Session, repo: dict, run: dict) -> list[workflow_graph.WorkflowJob]:
     """Return the jobs of the run's workflow file, as at the run's commit; none if it can't be read.
 
-    Without them the graph still shows the run's jobs, but not the lines between them.
+    Without them the graph still shows the run's jobs, but not the lines between them. A rate limit is raised
+    (requests.HTTPError), as in _releases.
     """
     path = run["path"].split("@")[0]
     try:
@@ -193,5 +233,7 @@ def _workflow_jobs(session: requests.Session, repo: dict, run: dict) -> list[wor
         response.raise_for_status()
         return workflow_graph.workflow_jobs(response.text)
     except (requests.RequestException, ValueError) as e:
+        if rate_limit_wait(e) is not None:
+            raise
         logger.warning("Couldn't read %s's %s: %s", repo["full_name"], path, e)
         return []
