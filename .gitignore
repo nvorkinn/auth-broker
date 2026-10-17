@@ -15,3 +15,14 @@ coverage.xml
 htmlcov/
 # IP location data, fetched into the image at build time (scripts/fetch_geodata.py).
 /geodata/
+# Terraform: provider downloads, local state and saved plans. .terraform.lock.hcl is committed.
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+crash.log
+crash.*.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json

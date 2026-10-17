@@ -1,0 +1,191 @@
+name: Terraform
+
+# Checks and plans terraform/ on pull requests that change it; all-checks treats a workflow that never started as
+# fine. The "Run workflow" button (Actions > Terraform) plans main and, with "apply" ticked, applies that exact plan
+# once it is approved in the terraform environment. See terraform/README.md.
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - terraform/**
+      - .github/workflows/terraform.yml
+  workflow_dispatch:
+    inputs:
+      apply:
+        description: Apply the plan after approval
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+# A new push to a PR replaces its running checks.
+concurrency:
+  group: terraform-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  # Keep in step with required_version in terraform/versions.tf.
+  TF_VERSION: 1.16.6
+  TF_IN_AUTOMATION: "1"
+  TF_INPUT: "0"
+  TF_PLUGIN_CACHE_DIR: ${{ github.workspace }}/.terraform-plugins
+
+defaults:
+  run:
+    working-directory: terraform
+
+# The checks and the plan don't depend on each other, so they all run side by side.
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+
+      - &setup-terraform
+        uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          terraform_wrapper: false
+
+      # Provider downloads, reused until the lock file changes.
+      - &provider-cache
+        uses: actions/cache@v6
+        with:
+          path: ${{ env.TF_PLUGIN_CACHE_DIR }}
+          key: terraform-providers-${{ runner.os }}-${{ hashFiles('terraform/**/.terraform.lock.hcl') }}
+
+      - name: Check formatting
+        run: terraform fmt -check -recursive -diff
+
+      - name: Validate
+        run: |
+          mkdir -p "$TF_PLUGIN_CACHE_DIR"
+          terraform init -backend=false -lockfile=readonly
+          terraform validate
+
+  tflint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: terraform-linters/setup-tflint@6ffdbaa3be476b3431f7275c26966ef32ff60337 # v6.3.2
+        with:
+          tflint_version: v0.63.1
+          tflint_config_path: terraform/.tflint.hcl
+          cache: true
+
+      - name: Lint
+        run: |
+          tflint --init
+          tflint --recursive --format compact
+
+  # Misconfigurations (open security groups, unencrypted storage and the like). A finding that is wrong for this
+  # setup is silenced with a `#trivy:ignore:<ID>` comment above the resource, saying why.
+  trivy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Scan for misconfigurations
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          version: v0.75.0
+          scan-type: config
+          scan-ref: terraform
+          severity: MEDIUM,HIGH,CRITICAL
+          exit-code: "1"
+
+  plan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v7
+
+      - *setup-terraform
+      - *provider-cache
+
+      # PR plans don't take the state lock, so they never hold up each other or an apply.
+      - name: Plan
+        env:
+          LOCK: ${{ github.event_name == 'workflow_dispatch' }}
+        run: |
+          mkdir -p "$TF_PLUGIN_CACHE_DIR"
+          terraform init -lockfile=readonly
+          terraform plan -lock="$LOCK" -out=tfplan
+          terraform show -no-color tfplan > plan.txt
+          { echo '### Terraform plan'; echo '```'; cat plan.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+
+      # One comment per PR, updated on each push. Fork and Dependabot PRs get a read-only token, so they only
+      # have the job summary.
+      - name: Comment the plan on the PR
+        if: >-
+          github.event_name == 'pull_request'
+          && github.event.pull_request.head.repo.full_name == github.repository
+          && github.actor != 'dependabot[bot]'
+        uses: actions/github-script@v9
+        with:
+          script: |
+            const fs = require('fs');
+            const marker = '<!-- terraform-plan -->';
+            let plan = fs.readFileSync('terraform/plan.txt', 'utf8');
+            if (plan.length > 60000) plan = plan.slice(0, 60000) + '\n... (truncated, full plan in the job summary)';
+            const run = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            const body = `${marker}\n### Terraform plan\nFor ${context.payload.pull_request.head.sha} ([run](${run}))\n\n\`\`\`\n${plan}\n\`\`\``;
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              ...context.repo, issue_number: context.issue.number,
+            });
+            const mine = comments.find((c) => c.user.type === 'Bot' && c.body.startsWith(marker));
+            if (mine) {
+              await github.rest.issues.updateComment({ ...context.repo, comment_id: mine.id, body });
+            } else {
+              await github.rest.issues.createComment({ ...context.repo, issue_number: context.issue.number, body });
+            }
+
+      - name: Keep the plan for apply
+        if: inputs.apply
+        uses: actions/upload-artifact@v7
+        with:
+          name: tfplan
+          path: terraform/tfplan
+          retention-days: 1
+
+  # Applies exactly the plan above, after approval through the terraform environment's protection rule. If the
+  # state changed in between, Terraform rejects the plan as stale and nothing is applied.
+  apply:
+    needs: [validate, tflint, trivy, plan]
+    if: github.event_name == 'workflow_dispatch' && inputs.apply && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: terraform
+    concurrency:
+      group: terraform-apply
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v7
+
+      # Local state would be thrown away with the runner, losing track of whatever was created.
+      - name: Check state is remote
+        run: |
+          grep -qE '^\s*(backend\s+"|cloud\s*\{)' ./*.tf \
+            || { echo "::error::No remote backend configured in terraform/backend.tf, so there is nowhere to keep state"; exit 1; }
+
+      - *setup-terraform
+      - *provider-cache
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: tfplan
+          path: terraform
+
+      - name: Apply
+        run: |
+          mkdir -p "$TF_PLUGIN_CACHE_DIR"
+          terraform init -lockfile=readonly
+          terraform apply tfplan
