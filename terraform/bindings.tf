@@ -1,6 +1,9 @@
 # Which stages each flow runs, in order. A flow's stages are found by where they sit (flow and order), because a
 # binding has no name of its own.
 locals {
+  # Created by the first apply, not imported (see google.tf), so their bindings are created too.
+  new_flows = ["broker-source-authentication", "broker-source-enrollment"]
+
   flows = {
     "default-recovery-flow"        = authentik_flow.recovery
     "broker-enrollment"            = authentik_flow.enrollment
@@ -67,7 +70,7 @@ resource "authentik_flow_stage_binding" "this" {
 }
 
 import {
-  for_each = local.flow_bindings
+  for_each = { for key, binding in local.flow_bindings : key => binding if !contains(local.new_flows, binding.flow) }
 
   to = authentik_flow_stage_binding.this[each.key]
   id = local.ids.flow_bindings["${local.ids.flows[each.value.flow]}/${each.value.order}"]
@@ -111,11 +114,6 @@ resource "authentik_policy_binding" "source_authentication_if_sso" {
   timeout = 30
 }
 
-import {
-  to = authentik_policy_binding.source_authentication_if_sso
-  id = local.ids.policy_bindings["${local.ids.flows["broker-source-authentication"]}/0/${local.ids.policies["default-source-authentication-if-sso"]}"]
-}
-
 resource "authentik_policy_binding" "source_enrollment_if_sso" {
   target  = authentik_flow.source_enrollment.uuid
   policy  = local.ids.policies["default-source-enrollment-if-sso"]
@@ -125,11 +123,6 @@ resource "authentik_policy_binding" "source_enrollment_if_sso" {
   timeout = 30
 }
 
-import {
-  to = authentik_policy_binding.source_enrollment_if_sso
-  id = local.ids.policy_bindings["${local.ids.flows["broker-source-enrollment"]}/0/${local.ids.policies["default-source-enrollment-if-sso"]}"]
-}
-
 resource "authentik_policy_binding" "source_enrollment_if_username" {
   target  = authentik_flow_stage_binding.this["source_enrollment_prompt"].id
   policy  = local.ids.policies["default-source-enrollment-if-username"]
@@ -137,9 +130,4 @@ resource "authentik_policy_binding" "source_enrollment_if_username" {
   enabled = true
   negate  = false
   timeout = 30
-}
-
-import {
-  to = authentik_policy_binding.source_enrollment_if_username
-  id = local.ids.policy_bindings["${local.ids.flow_bindings["${local.ids.flows["broker-source-enrollment"]}/10"]}/0/${local.ids.policies["default-source-enrollment-if-username"]}"]
 }

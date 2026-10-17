@@ -82,6 +82,9 @@ resource "authentik_provider_oauth2" "this" {
     ] : { matching_mode = "strict", redirect_uri_type = "authorization", url = url }
   ]
 
+  # Updating a proxy provider resets its grants to the defaults, so this must be applied after the proxy resource.
+  depends_on = [authentik_provider_proxy.this]
+
   # The proxy resource sets the scope mappings; the token validity isn't pinned.
   lifecycle {
     ignore_changes = [property_mappings, access_token_validity]
