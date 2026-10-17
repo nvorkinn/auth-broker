@@ -23,6 +23,13 @@ updates:
     directory: "/"
     schedule:
       interval: "daily"
+  # Terraform providers and modules.
+  - package-ecosystem: "terraform"
+    directories:
+      - "/terraform"
+      - "/terraform/modules/*"
+    schedule:
+      interval: "weekly"
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
