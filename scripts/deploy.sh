@@ -4,7 +4,7 @@
 # /opt/auth-broker/releases/<tag>/ and runs this copy, which installs the
 # bundled docker-compose.yml, pins one compose service to the tag in .env, then
 # pulls and restarts just that service.
-# Usage: deploy.sh <auth-broker|caddy|fluent-bit|victoria-logs|victoria-metrics|authentik|authentik-config> <tag>
+# Usage: deploy.sh <auth-broker|caddy|fluent-bit|victoria-logs|victoria-metrics|redis|authentik|authentik-config> <tag>
 #
 # Secrets come from the bundle's SOPS-encrypted secrets/<name>.env, all of
 # them decrypted on every deploy with the host's age key into <name>.env next
@@ -20,6 +20,10 @@
 # blueprint (authentik/authentik-config.yaml) into authentik/, which the
 # worker mounts, and applies it with `ak apply_blueprint`. The blueprint reads
 # its secrets with !Env from authentik.env.
+#
+# redis is upstream's image too, pinned in docker-compose.yml itself. Like
+# authentik, it's brought up rather than force-recreated, so a release that
+# doesn't change its service leaves it running with its cache.
 set -euo pipefail
 
 service="$1"
@@ -46,6 +50,7 @@ case "$service" in
     var="${var//-/_}_VERSION"
     ;;
   authentik | authentik-config) services=(authentik-postgresql authentik-server authentik-worker) ;;
+  redis) ;;
   *) echo "unknown service: $service" >&2; exit 1 ;;
 esac
 export SOPS_AGE_KEY_FILE="${SOPS_AGE_KEY_FILE:-$PWD/age.key}"
@@ -121,12 +126,12 @@ if [ -n "$var" ]; then
   docker compose up -d --no-deps --force-recreate "${services[@]}"
 else
   # Recreates only what changed, so a release that doesn't touch Authentik
-  # leaves its database running. The authentik and authentik-config jobs can
-  # run at once, so they take turns.
+  # (or Redis) leaves it running. The authentik, authentik-config and
+  # deploy-config (for redis) jobs can run at once, so they take turns.
   (
     flock 9
     docker compose up -d --wait --wait-timeout 600 "${services[@]}"
-  ) 9>authentik.lock
+  ) 9>up.lock
 fi
 docker compose ps "${services[@]}"
 

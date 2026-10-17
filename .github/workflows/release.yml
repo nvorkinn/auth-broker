@@ -124,9 +124,11 @@ jobs:
             services: caddy
           # Fluent Bit, VictoriaLogs and VictoriaMetrics only collect logs and
           # metrics, so they ride along with the config server rather than needing an
-          # approval of their own.
+          # approval of their own. So does Redis, last for now: nothing reads it
+          # yet, so a problem with it can't hold up a broker deploy. Move it
+          # before auth-broker once the broker uses it.
           - environment: deploy-config
-            services: auth-broker fluent-bit victoria-logs victoria-metrics
+            services: auth-broker fluent-bit victoria-logs victoria-metrics redis
     environment: ${{ matrix.environment }}
     concurrency:
       group: ${{ matrix.environment }}-${{ needs.tag.outputs.value }}

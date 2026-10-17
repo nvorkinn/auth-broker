@@ -21,6 +21,7 @@ this page is the map. [The database](database.md) has the tables.
 | **Caddy** | this repository (`caddy/`), the host's ports 80 and 443 | TLS, routing, the sign-in gate for browser pages, and the `X-Authentik-*` headers. |
 | **authentik** | this repository (`authentik/`), behind the `sso.` host | Sign-in, sign-up, passkeys and authenticator apps, Google login. Its embedded outpost answers Caddy's forward_auth. |
 | **Fluent Bit, VictoriaLogs, VictoriaMetrics** | this repository | Where the screens' and renderers' logs and metrics end up. |
+| **Redis** | this repository, `127.0.0.1:6379` | Not used yet. The planned store between one provider per API (writing the latest data per stop or location) and the renderers (reading it). A cache only: nothing on disk. |
 | **countdown-api** | [countdown-api](https://github.com/nvorkinn/countdown-api), the `vendor/countdown-api` submodule | The OpenAPI contract between renderer and broker (so far `GET /api/config`) and the code generated from it. |
 
 ## Who calls the broker, and how
@@ -82,7 +83,7 @@ flowchart TB
     AK --> TP
 ```
 
-Everything runs on one host. Caddy, the broker, Fluent Bit and the two Victoria services use host networking,
+Everything runs on one host. Caddy, the broker, Fluent Bit, the two Victoria services and Redis use host networking,
 authentik and its Postgres sit on the compose network with only `127.0.0.1:9000` published, and the orchestrator makes each renderer with
 `network_mode: host`, so a renderer reaches the host's Fluent Bit on `127.0.0.1:4318` but talks to the broker over its
 public URL (`BROKER_URL`).
