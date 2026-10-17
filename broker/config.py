@@ -26,6 +26,13 @@ def load(app: Flask) -> None:
     app.config["SPOTIFY_CLIENT_ID"] = os.environ["SPOTIFY_CLIENT_ID"]
     app.config["SPOTIFY_CLIENT_SECRET"] = os.environ["SPOTIFY_CLIENT_SECRET"]
     app.config["SPOTIFY_REDIRECT_URI"] = os.environ["SPOTIFY_REDIRECT_URI"]
+    # Apple Music, from a MusicKit key in the owner's Apple Developer account: its Team ID, Key ID and the key itself
+    # (the .p8 file's PEM text). Unset (the default) leaves Apple Music off the config page.
+    app.config["APPLE_MUSIC_TEAM_ID"] = os.environ.get("APPLE_MUSIC_TEAM_ID", "")
+    app.config["APPLE_MUSIC_KEY_ID"] = os.environ.get("APPLE_MUSIC_KEY_ID", "")
+    app.config["APPLE_MUSIC_PRIVATE_KEY"] = os.environ.get("APPLE_MUSIC_PRIVATE_KEY", "")
+    # The name Apple's sign-in shows the listener.
+    app.config["APPLE_MUSIC_APP_NAME"] = os.environ.get("APPLE_MUSIC_APP_NAME", "Countdown")
     app.config["TFL_APP_KEY"] = os.environ.get("TFL_APP_KEY", "")
     app.config["WEATHER_API_KEY"] = os.environ.get("WEATHER_API_KEY", "")
     # Where the IP location data for suggesting a weather location is (see services/geoip.py). The image

@@ -43,6 +43,10 @@
 
 <!-- Lives outside the settings form because forms can't nest; the Disconnect button points at it. -->
 <form id="spotifyDisconnectForm" method="POST" action="{{ url_for('pages.spotify_disconnect', device_id=device_id) }}"></form>
+<form id="appleMusicDisconnectForm" method="POST" action="{{ url_for('apple_music_link.disconnect', device_id=device_id) }}"></form>
+<form id="appleMusicConnectForm" method="POST" action="{{ url_for('apple_music_link.connect', device_id=device_id) }}">
+    <input type="hidden" name="music_user_token" id="music_user_token">
+</form>
 <form id="githubDisconnectForm" method="POST" action="{{ url_for('pages.github_disconnect', device_id=device_id) }}"></form>
 <form id="displayUnlinkForm" method="POST" action="{{ url_for('pages.display_unlink', device_id=device_id) }}"></form>
 
@@ -194,15 +198,15 @@
         </div>
     </div>
 
-    <!-- Spotify -->
+    <!-- Music: Spotify, Apple Music, or both -->
     <div class="card">
         <div class="card-header">
-            <h2 class="card-title">Spotify</h2>
+            <h2 class="card-title">Music</h2>
         </div>
         <div class="status-row">
             <div class="checkbox-group">
                 <input type="checkbox" id="spotify_enabled" name="spotify_enabled" {% if config.spotify_enabled %}checked{% endif %}>
-                <label for="spotify_enabled" style="margin: 0; cursor: pointer; font-size: 14px;">Enabled</label>
+                <label for="spotify_enabled" style="margin: 0; cursor: pointer; font-size: 14px;">Spotify</label>
             </div>
             <div class="status-row">
                 {% if spotify_linked %}
@@ -214,6 +218,27 @@
                 {% endif %}
             </div>
         </div>
+        {% if apple_music_available or config.apple_music_enabled %}
+            <div class="status-row" style="margin-top: 12px;">
+                <div class="checkbox-group">
+                    <input type="checkbox" id="apple_music_enabled" name="apple_music_enabled" {% if config.apple_music_enabled %}checked{% endif %}>
+                    <label for="apple_music_enabled" style="margin: 0; cursor: pointer; font-size: 14px;">Apple Music</label>
+                </div>
+                {% if apple_music_available %}
+                    <div class="status-row">
+                        {% if apple_music_linked %}
+                            <span class="status-pill status-linked">Connected</span>
+                            <button type="submit" form="appleMusicDisconnectForm" class="btn-action btn-delete">Disconnect</button>
+                        {% else %}
+                            <span class="status-pill status-unlinked">Not connected</span>
+                            <button type="button" id="appleMusicConnect" class="btn-action" data-token-url="{{ url_for('apple_music_link.developer_token', device_id=device_id) }}">Connect</button>
+                        {% endif %}
+                    </div>
+                {% endif %}
+            </div>
+            <p id="apple_music_error" class="form-hint" role="alert" hidden></p>
+            <p class="form-hint">Apple Music shows what you played last, since Apple doesn't share what's playing now. With both on, Spotify shows while it's playing, and the two take turns with their top lists.</p>
+        {% endif %}
     </div>
 
     <!-- Developer -->
@@ -297,6 +322,36 @@
 </form>
 
 <script>
+    // Apple Music: sign in to Apple with MusicKit JS, then hand the token Apple gives back to the broker.
+    const appleMusicConnect = document.getElementById('appleMusicConnect');
+    if (appleMusicConnect) {
+        appleMusicConnect.addEventListener('click', async () => {
+            const error = document.getElementById('apple_music_error');
+            error.hidden = true;
+            try {
+                const config = await (await fetch(appleMusicConnect.dataset.tokenUrl)).json();
+                if (!window.MusicKit) {
+                    await new Promise((resolve, reject) => {
+                        const script = document.createElement('script');
+                        script.src = 'https://js-cdn.music.apple.com/musickit/v3/musickit.js';
+                        script.onload = resolve;
+                        script.onerror = reject;
+                        document.head.appendChild(script);
+                    });
+                }
+                const music = await MusicKit.configure({
+                    developerToken: config.developer_token,
+                    app: { name: config.app_name, build: '1' },
+                });
+                document.getElementById('music_user_token').value = await music.authorize();
+                document.getElementById('appleMusicConnectForm').submit();
+            } catch (e) {
+                error.textContent = "Apple Music couldn't be connected. Please try again.";
+                error.hidden = false;
+            }
+        });
+    }
+
     // The style carousels: the arrows (or a swipe) move to the next style and choose it.
     document.querySelectorAll('.style-picker').forEach(picker => {
         const strip = picker.querySelector('.style-options');

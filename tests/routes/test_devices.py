@@ -86,6 +86,7 @@ def test_get_config_returns_defaults_and_shared_keys(client, register_device):
         "spotify": {"enabled": False, "style": "airy"},
         "glowmarkt": {"username": None, "password": None},
         "developer": {"enabled": False},
+        "apple_music": {"enabled": False},
         "pairing_code": body["pairing_code"],
     }
 

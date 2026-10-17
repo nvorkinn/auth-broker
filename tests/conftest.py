@@ -3,10 +3,13 @@ import shutil
 
 import pytest
 from cryptography.fernet import Fernet
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import ec
 from sqlalchemy import select
 
 from broker import create_app
 from broker.auth import hash_secret
+from broker.clients import apple_music
 from broker.db import db
 from broker.models import Device
 from broker.services import assignments
@@ -158,3 +161,28 @@ def paired_client(client, register_device):
     assert pair_response.status_code == 302
 
     return client, device_id, device_secret
+
+
+def apple_song(song_id, name="Efecto", artist="Bad Bunny", album="Un Verano Sin Ti"):
+    """Return an Apple Music song resource, as /me/recent/played/tracks hands it over."""
+    return {
+        "id": song_id,
+        "type": "songs",
+        "attributes": {
+            "name": name,
+            "artistName": artist,
+            "albumName": album,
+            "durationInMillis": 213061,
+            "artwork": {"width": 3000, "height": 3000, "url": "https://is5-ssl.mzstatic.com/x/{w}x{h}bb.jpg"},
+        },
+    }
+
+
+@pytest.fixture
+def musickit(app, monkeypatch):
+    """Give the app a MusicKit key, and return its public half."""
+    key = ec.generate_private_key(ec.SECP256R1())
+    pem = key.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8, serialization.NoEncryption())
+    app.config.update(APPLE_MUSIC_TEAM_ID="TEAM123", APPLE_MUSIC_KEY_ID="KEY456", APPLE_MUSIC_PRIVATE_KEY=pem.decode())
+    monkeypatch.setattr(apple_music, "_developer_token", None)
+    return key.public_key()
