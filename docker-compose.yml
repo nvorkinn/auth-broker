@@ -82,8 +82,11 @@ services:
     command: ["python", "-m", "broker.spotify_provider"]
     volumes:
       - ./data:/app/data
-    # The broker's secrets, and REDIS_PASSWORD from Redis's own.
-    env_file: [ broker.env, redis.env ]
+    # The broker's secrets, decrypted from secrets/broker.env by deploy.sh; and Redis's password (REDIS_PASSWORD,
+    # from secrets/redis.env), for writing to Redis.
+    env_file:
+      - broker.env
+      - redis.env
     environment:
       SPOTIFY_REDIRECT_URI: https://auth.nikolaivorkinn.com/auth/spotify/callback
     stop_grace_period: 30s
