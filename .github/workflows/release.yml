@@ -3,6 +3,16 @@ name: Release
 on:
   push:
     tags: ["v*"]
+  # The "Run workflow" button (Actions > Release): tags the head of main with the next version after the
+  # latest v* tag, then releases it in this same run. A tag pushed with the workflow's own token starts no
+  # second run.
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: Which part of the version to bump
+        type: choice
+        options: [patch, minor, major]
+        default: patch
 
 permissions:
   contents: read
@@ -10,13 +20,38 @@ permissions:
 jobs:
   tag:
     runs-on: ubuntu-latest
+    permissions:
+      # To create the tag on a button release.
+      contents: write
     outputs:
       value: ${{ steps.tag.outputs.value }}
     steps:
+      - name: Work out and create the next tag
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          BUMP: ${{ inputs.bump }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          [ "$GITHUB_REF" = refs/heads/main ] || { echo "Release from main, not $GITHUB_REF" >&2; exit 1; }
+          latest="$(git ls-remote --tags --refs "https://github.com/$GITHUB_REPOSITORY" 'v*' \
+            | sed 's#.*refs/tags/##' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -1)"
+          IFS=. read -r major minor patch <<< "${latest:-v0.0.0}"
+          major="${major#v}"
+          case "$BUMP" in
+            major) next="v$((major + 1)).0.0" ;;
+            minor) next="v$major.$((minor + 1)).0" ;;
+            *) next="v$major.$minor.$((patch + 1))" ;;
+          esac
+          # Fails if the tag already exists, e.g. two releases started at once.
+          gh api "repos/$GITHUB_REPOSITORY/git/refs" -f ref="refs/tags/$next" -f sha="$GITHUB_SHA" > /dev/null
+          echo "Tagged $GITHUB_SHA as $next (after ${latest:-no tag})"
+          echo "NEXT_TAG=$next" >> "$GITHUB_ENV"
+
       - name: Extract tag
         id: tag
         run: |
-          tag="${GITHUB_REF#refs/tags/}"
+          # The tag just made by the button, else the pushed tag.
+          tag="${NEXT_TAG:-${GITHUB_REF#refs/tags/}}"
           # The tag is passed to a shell on the deploy host, so keep it to safe characters.
           [[ "$tag" =~ ^v[0-9A-Za-z._-]+$ ]] || { echo "Unsupported tag: $tag" >&2; exit 1; }
           echo "value=$tag" >> "$GITHUB_OUTPUT"
