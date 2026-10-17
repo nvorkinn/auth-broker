@@ -107,6 +107,8 @@ def require_device_auth(roles: Collection[str] = frozenset(ROLES)) -> Callable[[
                 return jsonify(error=error.message), error.status
             return view(*args, device_id=device.device_id, **kwargs)
 
+        # For the test that keeps caddy/Caddyfile from putting a device route behind the browser login.
+        wrapped.device_auth = True  # type: ignore[attr-defined]
         return wrapped
 
     return decorator
