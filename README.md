@@ -82,8 +82,10 @@ and how to run and deploy it.
    upcoming Spotify queue as a JSON list of the same track shape.
    `GET /api/spotify/top/<artists|tracks>` is served the same way. With the
    developer panel on, `GET /api/developer` returns the owner's GitHub at a
-   glance (open PRs, reviews waiting, repos failing on their default branch)
-   and their AI plans, called with the GitHub token saved on `/device`. The
+   glance (open PRs, reviews waiting, repos failing on their default branch,
+   and a Release or Deploy workflow running or just finished, with its jobs as
+   GitHub's graph: `broker/clients/workflow_graph.py`) and their AI plans,
+   called with the GitHub token saved on `/device`. The
    Claude and Gemini plans are placeholders until there's an API to ask
    (`broker/clients/ai_plans.py`).
 
