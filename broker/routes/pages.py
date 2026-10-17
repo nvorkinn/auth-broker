@@ -15,7 +15,7 @@ from broker.auth import (
     screen_label,
     user_devices,
 )
-from broker.clients import weather
+from broker.clients import apple_music, weather
 from broker.db import db
 from broker.models import (
     CLOCK_FORMATS,
@@ -23,6 +23,7 @@ from broker.models import (
     LANGUAGES,
     MAX_INTERVAL,
     MIN_INTERVAL,
+    MUSIC_SOURCES,
     ORIENTATIONS,
     STYLES,
     Device,
@@ -169,6 +170,7 @@ CHOICES = {
     "clock_format": (CLOCK_FORMATS, "The clock format"),
     "orientation": (ORIENTATIONS, "Orientation"),
     "style": (STYLES, "The style"),
+    "music_source": (MUSIC_SOURCES, "The music service"),
 }
 
 
@@ -394,6 +396,9 @@ def _render_device_config(device_id: str, errors: list[str] | None = None) -> st
         stops=stops.resolve(config.tfl_stop_ids),
         MODE_ICONS=stops.MODE_ICONS,
         spotify_linked=db.session.get(SpotifyToken, device_id) is not None,
+        music_sources=MUSIC_SOURCES,
+        apple_music_available=apple_music.configured(),
+        apple_music_linked=apple_music.linked(device_id),
         glowmarkt=glowmarkt,
         github_linked=db.session.get(GitHubToken, device_id) is not None,
         errors=errors or [],

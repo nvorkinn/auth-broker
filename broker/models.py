@@ -44,6 +44,8 @@ class Device(db.Model):
     spotify_token: Mapped[SpotifyToken | None] = relationship(cascade="all, delete-orphan")
     glowmarkt_credentials: Mapped[GlowmarktCredentials | None] = relationship(cascade="all, delete-orphan")
     github_token: Mapped[GitHubToken | None] = relationship(cascade="all, delete-orphan")
+    apple_music_token: Mapped[AppleMusicToken | None] = relationship(cascade="all, delete-orphan")
+    apple_music_plays: Mapped[list[AppleMusicPlay]] = relationship(cascade="all, delete-orphan")
     frame: Mapped[Frame | None] = relationship(cascade="all, delete-orphan")
     assignment: Mapped[RendererAssignment | None] = relationship(back_populates="device")
 
@@ -77,6 +79,10 @@ STYLES = {
 }
 
 
+# Which service the music panel shows: the API contract's Spotify.source, with its name on the config page.
+MUSIC_SOURCES = {"spotify": "Spotify", "apple_music": "Apple Music"}
+
+
 class DeviceConfig(db.Model):
     """A device's settings, as its owner sets them on the config page."""
 
@@ -93,6 +99,8 @@ class DeviceConfig(db.Model):
     # A UK postcode ("SW1A 1AA") or a Norwegian one ("0150"); see pages.normalize_postcode.
     postcode: Mapped[str] = mapped_column(String, default="", server_default=text("''"))
     spotify_enabled: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("0"))
+    # Which service the music panel (spotify_enabled switches it on) shows, one of MUSIC_SOURCES.
+    music_source: Mapped[str] = mapped_column(String, default="spotify", server_default=text("'spotify'"))
     # The developer panel: GitHub pull requests and builds, and AI plans (see routes/developer.py).
     developer_enabled: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("0"))
     # Every departure stop, in the owner's order: TfL NaPTAN ids and Entur NSR ids (NSR:...) mixed; the id says
@@ -157,6 +165,46 @@ class GitHubToken(db.Model):
     @token.setter
     def token(self, plaintext: str) -> None:
         self.token_encrypted = encrypt(plaintext)
+
+
+class AppleMusicToken(db.Model):
+    """The Apple Music account linked to a device: its Music User Token, encrypted at rest.
+
+    MusicKit JS gets the token on the config page when the listener signs in to Apple; it lasts about six months and
+    can't be refreshed, so it is cleared when Apple refuses it and the page asks them to connect again. The row stays,
+    with how far the play log got (see clients/apple_music.record_plays).
+    """
+
+    __tablename__ = "apple_music_tokens"
+
+    device_id: Mapped[str] = mapped_column(ForeignKey("devices.device_id"), primary_key=True)
+    token_encrypted: Mapped[str | None] = mapped_column(String)
+    # The recently played songs' ids, newest first, as last read: new plays are the ones ahead of them.
+    seen_ids: Mapped[list[str]] = mapped_column(JSON, default=list, server_default=text("'[]'"))
+
+    @property
+    def token(self) -> str | None:
+        """The token, decrypted; None once Apple has refused it."""
+        return decrypt(self.token_encrypted) if self.token_encrypted else None
+
+    @token.setter
+    def token(self, plaintext: str | None) -> None:
+        self.token_encrypted = encrypt(plaintext) if plaintext else None
+
+
+class AppleMusicPlay(db.Model):
+    """One play of a song seen in a device's Apple Music history, which the top lists are counted from."""
+
+    __tablename__ = "apple_music_plays"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    device_id: Mapped[str] = mapped_column(ForeignKey("devices.device_id"), index=True)
+    # When the broker first saw it, which is within a poll of when it was played.
+    played_at: Mapped[datetime] = mapped_column(UTCDateTime, index=True)
+    song_id: Mapped[str] = mapped_column(String)
+    artist: Mapped[str] = mapped_column(String, default="", server_default=text("''"))
+    # The song as the screen reads a track (see clients/apple_music.as_track).
+    track: Mapped[dict] = mapped_column(JSON)
 
 
 class Frame(db.Model):

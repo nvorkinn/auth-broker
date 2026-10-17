@@ -146,7 +146,7 @@ def get_config(*, device_id: str, x_device_name: str | None = None) -> ConfigRes
             stops=[DepartureStop(source=stops.source_of(s), id=s) for s in stop_ids],
             style=_departures_style(config.style),
         ),
-        spotify=Spotify(enabled=config.spotify_enabled, style=config.style),
+        spotify=Spotify(enabled=config.spotify_enabled, style=config.style, source=config.music_source),
         glowmarkt=Glowmarkt(username=(creds and creds.username) or None, password=creds.password if creds else None),
         # Only the switch: the GitHub token stays here, and the screen gets the panel's data from /api/developer.
         developer=Developer(enabled=config.developer_enabled),
