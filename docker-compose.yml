@@ -203,7 +203,7 @@ services:
     volumes:
       - authentik_media:/media
       # Served unauthenticated at /static/dist/assets/countdown/, so this must
-      # hold brand assets only: never mount authentik/ (the blueprint) here.
+      # hold brand assets only.
       - ./authentik-assets:/web/dist/assets/countdown:ro
     # Loopback only: Caddy (host networking) is the one way in, at
     # sso.nikolaivorkinn.com.
@@ -217,9 +217,6 @@ services:
     command: worker
     volumes:
       - authentik_media:/media
-      # authentik/authentik-config.yaml, installed here by the
-      # deploy-authentik-config job, which applies it from this worker.
-      - ./authentik:/blueprints/custom:ro
 
 volumes:
   # Fixed names so the volumes don't depend on the compose project (directory) name.

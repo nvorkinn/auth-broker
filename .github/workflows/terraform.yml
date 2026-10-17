@@ -1,8 +1,9 @@
 name: Terraform
 
 # Checks and plans terraform/ on pull requests that change it; all-checks treats a workflow that never started as
-# fine. The "Run workflow" button (Actions > Terraform) plans main and, with "apply" ticked, applies that exact plan
-# once it is approved in the terraform environment. See terraform/README.md.
+# fine. The plan reads the live Authentik, so it needs the secrets below and is skipped without them (pull requests
+# from forks and Dependabot don't get them). The "Run workflow" button (Actions > Terraform) plans main and, with
+# "apply" ticked, applies that exact plan once it is approved in the terraform environment. See terraform/README.md.
 on:
   pull_request:
     branches: [main]
@@ -105,14 +106,27 @@ jobs:
     permissions:
       contents: read
       pull-requests: write
+    # AUTHENTIK_TOKEN is the Authentik provider's own variable, and what scripts/authentik_ids.py reads. The plan only
+    # needs to read, so the repository-level secret can be a read-only token; apply gets the terraform environment's.
+    env:
+      AUTHENTIK_TOKEN: ${{ secrets.AUTHENTIK_TOKEN }}
+      TF_VAR_google_client_id: ${{ secrets.TF_VAR_GOOGLE_CLIENT_ID }}
+      TF_VAR_google_client_secret: ${{ secrets.TF_VAR_GOOGLE_CLIENT_SECRET }}
+      TF_VAR_logs_client_secret: ${{ secrets.TF_VAR_LOGS_CLIENT_SECRET }}
+      TF_VAR_metrics_client_secret: ${{ secrets.TF_VAR_METRICS_CLIENT_SECRET }}
     steps:
       - uses: actions/checkout@v7
 
       - *setup-terraform
       - *provider-cache
 
+      - name: Skip the plan without secrets
+        if: env.AUTHENTIK_TOKEN == ''
+        run: echo "::notice::No AUTHENTIK_TOKEN secret here (a fork or Dependabot pull request, or not set up yet), so there is no plan."
+
       # PR plans don't take the state lock, so they never hold up each other or an apply.
       - name: Plan
+        if: env.AUTHENTIK_TOKEN != ''
         env:
           LOCK: ${{ github.event_name == 'workflow_dispatch' }}
         run: |
@@ -126,7 +140,8 @@ jobs:
       # have the job summary.
       - name: Comment the plan on the PR
         if: >-
-          github.event_name == 'pull_request'
+          env.AUTHENTIK_TOKEN != ''
+          && github.event_name == 'pull_request'
           && github.event.pull_request.head.repo.full_name == github.repository
           && github.actor != 'dependabot[bot]'
         uses: actions/github-script@v9
@@ -149,7 +164,7 @@ jobs:
             }
 
       - name: Keep the plan for apply
-        if: inputs.apply
+        if: inputs.apply && env.AUTHENTIK_TOKEN != ''
         uses: actions/upload-artifact@v7
         with:
           name: tfplan
@@ -167,6 +182,10 @@ jobs:
     concurrency:
       group: terraform-apply
       cancel-in-progress: false
+    # The environment's secret, which takes precedence over the repository's, so apply can use a token that
+    # may write while plans use one that can only read.
+    env:
+      AUTHENTIK_TOKEN: ${{ secrets.AUTHENTIK_TOKEN }}
     steps:
       - uses: actions/checkout@v7
 

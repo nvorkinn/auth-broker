@@ -19,7 +19,7 @@ this page is the map. [The database](database.md) has the tables.
 | **Orchestrator** | pi-dashboard (`countdown-orchestrator`), one container, mounts `docker.sock` | Polls the broker for *assignments* and starts, stops and removes the renderer containers to match. |
 | **auth-broker** | this repository, gunicorn on `127.0.0.1:5000` | The hub: device identities, pairing, each screen's settings, the latest frame, renderer assignments, the Spotify proxy. State is one SQLite file. |
 | **Caddy** | this repository (`caddy/`), the host's ports 80 and 443 | TLS, routing, the sign-in gate for browser pages, and the `X-Authentik-*` headers. |
-| **authentik** | this repository (`authentik/`), behind the `sso.` host | Sign-in, sign-up, passkeys and authenticator apps, Google login. Its embedded outpost answers Caddy's forward_auth. |
+| **authentik** | this repository (`terraform/`), behind the `sso.` host | Sign-in, sign-up, passkeys and authenticator apps, Google login. Its embedded outpost answers Caddy's forward_auth. |
 | **Fluent Bit, VictoriaLogs, VictoriaMetrics** | this repository | Where the screens' and renderers' logs and metrics end up. |
 | **Redis** | this repository, `127.0.0.1:6379` | Not used yet. The planned store between one provider per API (writing the latest data per stop or location) and the renderers (reading it). A cache only: nothing on disk. |
 | **countdown-api** | [countdown-api](https://github.com/nvorkinn/countdown-api), the `vendor/countdown-api` submodule | The OpenAPI contract between renderer and broker (so far `GET /api/config`) and the code generated from it. |
@@ -196,8 +196,8 @@ sequenceDiagram
 - Only browser paths do this. The broker never sees a password and checks no token or authentik cookie: it reads the two headers and ignores the rest.
 - New users sign up through authentik's `broker-enrollment` flow, which is offered only to a login that came from
   `/pair`, asks for an email confirmation, and requires a passkey or an authenticator app before the first login.
-- Source: `caddy/Caddyfile`, `authentik/authentik-config.yaml`. The outpost's redirects are authentik's standard
-  proxy-outpost behaviour; the repository holds only the configuration, and CI validates it without a browser sign-in.
+- Source: `caddy/Caddyfile`, `terraform/`. The outpost's redirects are authentik's standard
+  proxy-outpost behaviour; the repository holds only the configuration, and CI plans it against the live server without a browser sign-in.
 
 ### 3. Pairing
 
