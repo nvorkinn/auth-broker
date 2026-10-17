@@ -14,7 +14,8 @@ from sqlalchemy.dialects.sqlite import insert
 
 from broker.auth import require_device_auth
 from broker.db import db
-from broker.models import DeviceConfig, Frame
+from broker.models import Frame
+from broker.services import pace
 
 if TYPE_CHECKING:
     from flask.typing import ResponseReturnValue
@@ -55,10 +56,13 @@ def update_frame(device_id: str) -> ResponseReturnValue:
         abort(400)
     etag = blake2b(frame, digest_size=8).hexdigest()
     # rendered_at moves even when the frame is unchanged: it says the renderer is still alive.
-    stmt = insert(Frame).values(device_id=device_id, frame=frame, etag=etag, rendered_at=datetime.now(UTC))
+    values = {"device_id": device_id, "frame": frame, "etag": etag, "rendered_at": datetime.now(UTC)}
+    # Every upload restates whether a provider's data is bursty: no header means it isn't (any more).
+    pace.store_hint(values, pace.parse_hint(request.headers.get(pace.HINT_HEADER)))
+    stmt = insert(Frame).values(**values)
     stmt = stmt.on_conflict_do_update(
         index_elements=[Frame.device_id],
-        set_={"frame": stmt.excluded.frame, "etag": stmt.excluded.etag, "rendered_at": stmt.excluded.rendered_at},
+        set_={key: stmt.excluded[key] for key in values if key != "device_id"},
     )
     db.session.execute(stmt)
     db.session.commit()
@@ -71,8 +75,8 @@ def get_frame(device_id: str) -> ResponseReturnValue:
     """Serve the screen its current frame.
 
     The screen polls this. Every answer it should keep polling after carries Retry-After, so its loop is
-    just "handle the status, sleep Retry-After": the device's refresh interval once there's a frame
-    (the renderer redraws no more often than that), a few seconds before the first one.
+    just "handle the status, sleep Retry-After": the refresh interval once there's a frame (BASE_INTERVAL, or what the
+    renderer asked for while a provider's data is bursty; see services/pace.py), a few seconds before the first one.
     """
     return _frame_response(device_id)
 
@@ -158,7 +162,7 @@ def _frame_response(device_id: str) -> ResponseReturnValue:
         return jsonify(error="no frame yet"), 404, {"Retry-After": str(NO_FRAME_RETRY_AFTER)}
     resp = Response(row.frame, mimetype="application/octet-stream")
     resp.set_etag(row.etag)
-    resp.headers["Retry-After"] = str(db.session.get(DeviceConfig, device_id).interval)
+    resp.headers["Retry-After"] = str(pace.effective_interval(row))
     if request.method == "POST":
         # make_conditional only looks at GET and HEAD, so a POST has to answer 304 itself.
         if request.if_none_match.contains_weak(row.etag):

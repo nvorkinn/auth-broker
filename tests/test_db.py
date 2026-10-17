@@ -209,8 +209,7 @@ def test_a_legacy_db_keeps_its_data(adopt):
             "kitchen",
         )
         config = db.session.get(DeviceConfig, "d")
-        # Its old default of 15 seconds is raised to the 20 second minimum.
-        assert (config.tfl_stop_ids, config.spotify_enabled, config.interval) == (["S1"], True, 20)
+        assert (config.tfl_stop_ids, config.spotify_enabled) == (["S1"], True)
         assert config.clock_format == "24h"
         frame = db.session.get(Frame, "d")
         assert (frame.frame, frame.rendered_at) == (b"\xaa\x55", datetime(2026, 1, 3, tzinfo=UTC))
@@ -425,7 +424,7 @@ def test_0012_backfills_clock_format_and_keeps_existing_settings(app, register_d
     device_id, _ = register_device()
     with app.app_context():
         config = db.session.get(DeviceConfig, device_id)
-        config.interval, config.weather_location, config.style = 30, "London", "card"
+        config.weather_location, config.style = "London", "card"
         db.session.commit()
         db.session.remove()
 
@@ -435,7 +434,7 @@ def test_0012_backfills_clock_format_and_keeps_existing_settings(app, register_d
 
         config = db.session.get(DeviceConfig, device_id)
         assert config.clock_format == "24h"
-        assert (config.interval, config.weather_location, config.style) == (30, "London", "card")
+        assert (config.weather_location, config.style) == ("London", "card")
 
 
 def test_clock_format_defaults_to_24_hour_for_orm_and_raw_inserts(app):

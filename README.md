@@ -140,8 +140,8 @@ A screen therefore needs no logic beyond:
    (201 straight away; the screen has a device even before its renderer runs).
 2. Loop on `GET /api/frame` with `If-None-Match`, handling the status and then
    sleeping for the response's `Retry-After` seconds:
-   - 200: draw the frame. `Retry-After` is the device's refresh interval, 20 s to 5 min
-     (set on `/device`).
+   - 200: draw the frame. `Retry-After` is the refresh interval: 60 s, or 20-59 s while a provider's data is bursty
+     (a release is running). Nobody sets it; see [Pace](docs/architecture.md#pace).
    - 304: unchanged. Same `Retry-After`.
    - 404: no frame yet (its renderer is still being set up). `Retry-After: 20`.
    - 401: unknown secret (an unpaired screen is forgotten after 24 hours, or the

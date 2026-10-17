@@ -73,7 +73,7 @@ def test_get_config_returns_defaults_and_shared_keys(client, register_device):
     body = response.get_json()
     assert body == {
         "device_id": device_id,
-        "interval": 20,
+        "interval": 60,
         "clock_format": "24h",
         "language": "en",
         "timezone": "Europe/London",

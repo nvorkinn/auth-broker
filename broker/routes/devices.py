@@ -25,7 +25,7 @@ from sqlalchemy.exc import IntegrityError
 from broker.api import api
 from broker.auth import hash_secret, require_device_auth, with_retry_after
 from broker.db import db
-from broker.models import Device, DeviceConfig, GlowmarktCredentials
+from broker.models import BASE_INTERVAL, Device, DeviceConfig, GlowmarktCredentials
 from broker.services import pairing, registration, stops
 
 from .pages import postcode_country
@@ -128,7 +128,8 @@ def get_config(*, device_id: str, x_device_name: str | None = None) -> ConfigRes
     stop_ids = config.tfl_stop_ids
     return ConfigResponse(
         device_id=device_id,
-        interval=config.interval,
+        # Renderers that predate the pace still read it; they sleep this, and a faster refresh comes from the frames.
+        interval=BASE_INTERVAL,
         clock_format=config.clock_format,
         language=config.language,
         timezone=_timezone(country, stop_ids),

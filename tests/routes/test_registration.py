@@ -357,15 +357,12 @@ def test_no_frame_yet_is_a_json_404_with_a_short_retry(client, split_device):
     assert response.headers["Retry-After"] == str(NO_FRAME_RETRY_AFTER)
 
 
-def test_a_frame_says_to_poll_again_after_the_devices_refresh_interval(app, client, split_device):
-    device_id, renderer_secret, display_secret = split_device
-    with app.app_context():
-        db.session.get(DeviceConfig, device_id).interval = 42
-        db.session.commit()
+def test_a_frame_says_to_poll_again_after_the_base_interval(app, client, split_device):
+    _device_id, renderer_secret, display_secret = split_device
     client.put("/api/frame", data=bytes(FRAME_BYTES), headers=_auth(renderer_secret))
 
     first = client.get("/api/frame", headers=_auth(display_secret))
     unchanged = client.get("/api/frame", headers={**_auth(display_secret), "If-None-Match": first.headers["ETag"]})
 
-    assert (first.status_code, first.headers["Retry-After"]) == (200, "42")
-    assert (unchanged.status_code, unchanged.headers["Retry-After"]) == (304, "42")
+    assert (first.status_code, first.headers["Retry-After"]) == (200, "60")
+    assert (unchanged.status_code, unchanged.headers["Retry-After"]) == (304, "60")
