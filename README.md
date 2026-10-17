@@ -442,8 +442,11 @@ which posts a coverage comment and status check on each PR (config in
 
 ## Deploying
 
-Tagging a release (`git tag v0.1.0 && git push --tags`) triggers
-`.github/workflows/release.yml`, which builds five Docker images, side by
+To release, run the Release workflow from the Actions tab (Run workflow, on
+`main`) and pick `patch` (the default), `minor` or `major`: it tags the head
+of `main` with the next version after the latest `v*` tag. Pushing a tag by
+hand (`git tag v1.2.3 && git push --tags`) still works too. Either way
+`.github/workflows/release.yml` builds five Docker images, side by
 side, and pushes each with the release tag (and `:latest`):
 
 - `ghcr.io/nvorkinn/auth-broker:<tag>`: the broker itself (`Dockerfile`).
