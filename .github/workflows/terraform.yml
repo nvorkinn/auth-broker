@@ -2,8 +2,11 @@ name: Terraform
 
 # Checks and plans terraform/ on pull requests that change it; all-checks treats a workflow that never started as
 # fine. The plan reads the live Authentik, so it needs the secrets below and is skipped without them (pull requests
-# from forks and Dependabot don't get them). The "Run workflow" button (Actions > Terraform) plans main and, with
-# "apply" ticked, applies that exact plan once it is approved in the terraform environment. See terraform/README.md.
+# from forks and Dependabot don't get them). Applies only ever run from a release tag: the Release workflow calls this
+# one with apply on, after deploy-authentik, and applies that tag's plan once it is approved in the terraform
+# environment. The "Run workflow" button (Actions > Terraform) plans whatever ref is picked, which shows drift; with
+# "apply" ticked it applies too, but only on the latest release tag, which is how a failed apply is retried. See
+# terraform/README.md.
 on:
   pull_request:
     branches: [main]
@@ -16,6 +19,15 @@ on:
         description: Apply the plan after approval
         type: boolean
         default: false
+  workflow_call:
+    inputs:
+      apply:
+        type: boolean
+        default: false
+      # The release tag to plan and apply. A release started with the button runs on main, so github.ref isn't it.
+      tag:
+        type: string
+        required: true
 
 permissions:
   contents: read
@@ -26,6 +38,8 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
+  # The release tag being planned, empty for a pull request or a button run on a branch. Apply needs one.
+  TF_TAG: ${{ inputs.tag || (github.ref_type == 'tag' && github.ref_name) || '' }}
   # Keep in step with required_version in terraform/versions.tf.
   TF_VERSION: 1.16.6
   TF_IN_AUTOMATION: "1"
@@ -44,9 +58,11 @@ defaults:
   run:
     working-directory: terraform
 
-# The checks and the plan don't depend on each other, so they all run side by side.
+# The checks and the plan don't depend on each other, so they all run side by side. A release's commit already passed
+# the checks on its pull request, so they only run there.
 jobs:
   validate:
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -78,6 +94,7 @@ jobs:
           terraform validate
 
   tflint:
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -97,6 +114,7 @@ jobs:
   # Misconfigurations (open security groups, unencrypted storage and the like). A finding that is wrong for this
   # setup is silenced with a `#trivy:ignore:<ID>` comment above the resource, saying why.
   trivy:
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -117,6 +135,9 @@ jobs:
     permissions:
       contents: read
       pull-requests: write
+    outputs:
+      # Whether the plan changes anything, so a release that leaves Authentik as it is asks for no approval.
+      changes: ${{ steps.plan.outputs.changes }}
     # AUTHENTIK_TOKEN is the Authentik provider's own variable, and what scripts/authentik_ids.py reads. The plan only
     # needs to read, so the repository-level secret can be a read-only token; apply gets the terraform environment's.
     env:
@@ -131,26 +152,48 @@ jobs:
       TF_VAR_metrics_client_secret: ${{ secrets.TF_VAR_METRICS_CLIENT_SECRET }}
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ env.TF_TAG }}
+
+      # Applying an older tag would quietly put Authentik back to that release's config, so a retry has to be on the
+      # latest one. Checked before planning, so a wrong pick fails at once rather than after an approval.
+      - name: Check apply is on the latest release tag
+        if: inputs.apply
+        run: |
+          [ -n "$TF_TAG" ] || { echo "::error::Apply runs from a release tag: pick the latest v* tag under \"Use workflow from\""; exit 1; }
+          latest="$(git ls-remote --tags --refs "https://github.com/$GITHUB_REPOSITORY" 'v*' \
+            | sed 's#.*refs/tags/##' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -1)"
+          [ "$TF_TAG" = "$latest" ] || { echo "::error::$TF_TAG is not the latest release ($latest), so it isn't applied"; exit 1; }
 
       - *setup-terraform
       - *provider-cache
 
       - name: Skip the plan without secrets
         if: env.HAVE_SECRETS != 'true'
-        run: echo "::notice::No AUTHENTIK_TOKEN or state credentials here (a fork or Dependabot pull request, or not set up yet), so there is no plan."
+        env:
+          APPLY: ${{ inputs.apply == true }}
+        run: |
+          [ "$APPLY" != true ] || { echo "::error::No AUTHENTIK_TOKEN or state credentials, so nothing can be planned or applied"; exit 1; }
+          echo "::notice::No AUTHENTIK_TOKEN or state credentials here (a fork or Dependabot pull request, or not set up yet), so there is no plan."
 
-      # PR plans don't take the state lock, so they never hold up each other or an apply.
+      # Plans that won't be applied don't take the state lock, so they never hold up each other or an apply. Exit code
+      # 2 from -detailed-exitcode means the plan has changes, 0 none.
       - name: Plan
+        id: plan
         if: env.HAVE_SECRETS == 'true'
         env:
-          LOCK: ${{ github.event_name == 'workflow_dispatch' }}
+          LOCK: ${{ inputs.apply == true }}
         run: |
           mkdir -p "$TF_PLUGIN_CACHE_DIR"
           terraform init -lockfile=readonly -backend-config="bucket=$TF_STATE_BUCKET" -backend-config="region=$TF_STATE_REGION" \
             -backend-config="endpoints={s3=\"$TF_STATE_ENDPOINT\"}"
-          terraform plan -lock="$LOCK" -out=tfplan
+          status=0
+          terraform plan -lock="$LOCK" -detailed-exitcode -out=tfplan || status=$?
+          [ "$status" -ne 1 ] || exit 1
+          echo "changes=$([ "$status" -eq 2 ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
           terraform show -no-color tfplan > plan.txt
-          { echo '### Terraform plan'; echo '```'; cat plan.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          { echo "### Terraform plan${TF_TAG:+ for $TF_TAG}"; echo '```'; cat plan.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          [ "$status" -eq 2 ] || echo "::notice::No changes${TF_TAG:+ in $TF_TAG}, so there is nothing to apply."
 
       # One comment per PR, updated on each push. Fork and Dependabot PRs get a read-only token, so they only
       # have the job summary.
@@ -180,7 +223,7 @@ jobs:
             }
 
       - name: Keep the plan for apply
-        if: inputs.apply && env.HAVE_SECRETS == 'true'
+        if: inputs.apply && steps.plan.outputs.changes == 'true'
         uses: actions/upload-artifact@v7
         with:
           name: tfplan
@@ -188,10 +231,11 @@ jobs:
           retention-days: 1
 
   # Applies exactly the plan above, after approval through the terraform environment's protection rule. If the
-  # state changed in between, Terraform rejects the plan as stale and nothing is applied.
+  # state changed in between, Terraform rejects the plan as stale and nothing is applied. A plan with no changes
+  # skips this, approval included. The plan job has already checked TF_TAG is the latest release.
   apply:
-    needs: [validate, tflint, trivy, plan]
-    if: github.event_name == 'workflow_dispatch' && inputs.apply && github.ref == 'refs/heads/main'
+    needs: plan
+    if: inputs.apply && needs.plan.outputs.changes == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     environment: terraform
@@ -206,6 +250,8 @@ jobs:
       AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ env.TF_TAG }}
 
       # Local state would be thrown away with the runner, losing track of whatever was created.
       - name: Check state is remote

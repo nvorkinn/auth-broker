@@ -208,7 +208,7 @@ jobs:
         include:
           # Installs this release's compose file, then brings up the three
           # Authentik services on the AUTHENTIK_VERSION pinned in the host's .env.
-          # Authentik's own configuration is Terraform's, not part of a release.
+          # Authentik's own configuration is the terraform job's, below.
           - environment: deploy-authentik
             services: authentik
     environment: ${{ matrix.environment }}
@@ -217,3 +217,21 @@ jobs:
       cancel-in-progress: false
     env: *deploy-env
     steps: *deploy-steps
+
+  # Authentik's configuration, from this tag's terraform/. Runs once Authentik
+  # is up on this release's version, plans, and if the plan changes anything
+  # waits for approval in the terraform environment, then applies that plan.
+  # Nothing changed means no approval and no apply. This is the only place a
+  # normal apply runs; to retry a failed one, run the Terraform workflow on
+  # this tag with "apply" ticked (see terraform/README.md).
+  terraform:
+    needs: [tag, deploy-authentik]
+    permissions:
+      contents: read
+      # The plan job comments on pull requests, so its token asks for this even here.
+      pull-requests: write
+    uses: ./.github/workflows/terraform.yml
+    with:
+      apply: true
+      tag: ${{ needs.tag.outputs.value }}
+    secrets: inherit

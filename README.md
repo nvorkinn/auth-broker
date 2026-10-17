@@ -508,7 +508,10 @@ and attaches it to the GitHub Release. Then it has three deploy jobs, one per
 environment: `deploy-caddy`, `deploy-config` and `deploy-authentik`. Each one
 waits, paused, until someone approves it on the workflow run page, and each is
 approved on its own. The Authentik job runs upstream's image, so it only waits
-for the bundle, not this repo's images.
+for the bundle, not this repo's images. Once it has run, the `terraform` job
+applies this tag's Authentik configuration, asking for approval in the
+`terraform` environment only when its plan changes something (see
+[terraform/README.md](terraform/README.md#applying)).
 An approved job SSHes into the host and runs `scripts/fetch-release.sh`, which
 downloads the bundle from the release into `/opt/auth-broker/releases/<tag>/`
 (checking its SHA-256, and skipping the download when that release is already
@@ -537,9 +540,9 @@ like Authentik (see [Redis](#redis)). The Authentik job skips steps
 `/web/dist/assets/countdown`, so it is public at
 `/static/dist/assets/countdown/`. Only brand assets belong there.
 
-What Authentik is *configured* with is not part of a release: it lives in
-`terraform/` (see its [README](terraform/README.md)) and is planned on every PR and
-applied by hand from the Terraform workflow. It leaves users alone: no users, tokens, TOTP or
+What Authentik is *configured* with is not in the deploy bundle: it lives in
+`terraform/` (see its [README](terraform/README.md)), is planned on every PR and
+is applied by the release, from the release's tag, never from a branch. It leaves users alone: no users, tokens, TOTP or
 passkey devices, or group members are in it, so manage those in Authentik's UI. It holds only what
 this repo owns (the recovery flow, the sign-up flow, passkey login, the brands, the Broker, Logs and
 Metrics proxy providers and apps, the embedded outpost's providers, the Google source), and

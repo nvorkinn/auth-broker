@@ -98,7 +98,7 @@ Repository secrets (Settings > Secrets and variables > Actions), none of them in
 | `TF_VAR_LOGS_CLIENT_SECRET`, `TF_VAR_METRICS_CLIENT_SECRET` | The Logs and Metrics providers' client secrets (`BLUEPRINT_LOGS_CLIENT_SECRET`, `BLUEPRINT_METRICS_CLIENT_SECRET`). |
 | `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` | The state bucket's customer secret key (see [Remote state](#remote-state)). |
 
-Without `AUTHENTIK_TOKEN` and the bucket's key the plan is skipped (the other checks still run). A saved plan contains the
+Without `AUTHENTIK_TOKEN` and the bucket's key a pull request's plan is skipped (the other checks still run), and an apply fails. A saved plan contains the
 secret values, so the plan artifact `apply` uses is kept for a day only.
 
 ## Changing Authentik's configuration
@@ -122,13 +122,24 @@ terraform providers lock -platform=linux_amd64 -platform=darwin_arm64
 
 ## Applying
 
-After the PR is merged: Actions > Terraform > Run workflow on main, with "apply" ticked. It reruns the checks,
-plans main (the plan is in the run's summary), then waits for approval in the `terraform` environment. Approving
-applies exactly that plan; if anything changed the state in between, Terraform rejects it as stale and nothing is
-applied. Without "apply" ticked, the button just plans, which shows any drift.
+Terraform is applied only from release tags, as part of the release. After `deploy-authentik` has brought
+Authentik up on the release's version, the Release workflow's `terraform` job plans that tag's `terraform/` (the
+plan is in the run's summary). If the plan has no changes it stops there, with no approval to give. Otherwise it
+waits for approval in the `terraform` environment, and approving applies exactly that plan; if anything changed the
+state in between, Terraform rejects it as stale and nothing is applied. So a merged Terraform change goes live with
+the next release, not on merge.
+
+To retry a failed apply without a new release: Actions > Terraform > Run workflow, pick the release tag under "Use
+workflow from" and tick "apply". It plans afresh (a failed apply leaves the old plan stale) and asks for approval
+the same way. Only the latest `v*` tag is accepted, so an old tag can't put Authentik back to an earlier config by
+accident; to roll back, release a revert.
+
+Without "apply" ticked the button just plans, on any branch or tag, which shows drift.
 
 The `terraform` environment needs a required reviewer (Settings > Environments). Without the environment GitHub
-creates it on the first run with no protection, and apply would run unapproved.
+creates it on the first run with no protection, and apply would run unapproved. Under "Deployment branches and
+tags", allow `v*` tags and `main` only: a release started with the Release button runs on `main`, so a tags-only
+rule would block its apply. The workflow itself refuses to apply anything but the latest release tag.
 
 ## Upgrading
 
