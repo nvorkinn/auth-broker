@@ -91,7 +91,7 @@ public URL (`BROKER_URL`).
 | Caller | Calls | Authenticates with |
 |---|---|---|
 | **ESP32 screen** | `POST /api/devices/register` (5 a minute per IP, then 429), `POST /api/frame` (the same answer as `GET`, plus a metrics and logs report), `POST /api/devices/pairing-code` | nothing for register (the secret is in the body), otherwise the **display secret** |
-| **Renderer** | `POST /api/renderers/claim`, `GET /api/config`, `PUT /api/frame`, `GET /api/spotify/{now-playing,queue,top/artists,top/tracks}`, `POST /api/devices/pairing-code` | the **claim token** (claim only), otherwise the **renderer secret** |
+| **Renderer** | `POST /api/renderers/claim`, `GET /api/config`, `PUT /api/frame`, `GET /api/spotify/{now-playing,queue,top/artists,top/tracks}`, `GET /api/developer`, `POST /api/devices/pairing-code` | the **claim token** (claim only), otherwise the **renderer secret** |
 | **Orchestrator** | `GET /api/orchestrator/assignments`, `POST /api/orchestrator/assignments/{id}/status` | `ORCHESTRATOR_TOKEN` |
 | **Home Assistant** | `GET /api/status/devices` | `STATUS_TOKEN` |
 | **Signed-in user** | `/pair`, `POST /pair/token`, `/device[/{id}]` and `/name`, `POST /api/displays/{id}/renderer`, Spotify connect and disconnect, `POST /device[/{id}]/display/unlink`, `GET /api/stops/search` (and its old name, `/api/tfl/search`) | `X-Authentik-Uid` from Caddy |
@@ -119,6 +119,7 @@ Several different things get called a token or a secret here, and they are not i
 | **Spotify tokens, per device** | Spotify, via `/auth/spotify/callback` | `spotify_tokens`, **plaintext** | never leave the broker | refreshed lazily when they expire. Deleted by Disconnect, `unpair --config` and `forget` |
 | **Third-party keys** | The operator: `SPOTIFY_CLIENT_ID` and `_SECRET`, `TFL_APP_KEY`, `WEATHER_API_KEY` | environment | Spotify's as HTTP Basic to Spotify. `TFL_APP_KEY` and `WEATHER_API_KEY` are returned **in plaintext** in `GET /api/config`, so a key rotation reaches every screen without a re-flash | the operator rotates them |
 | **Glowmarkt credentials** | The owner, on `/device` | `glowmarkt_credentials`: the username as is, the password Fernet-encrypted with `CREDENTIAL_ENCRYPTION_KEY` | decrypted into `GET /api/config`, for that device's renderer only | cleared by `unpair --config` and `forget`. Changing the key makes stored passwords unreadable |
+| **GitHub token, per device** | The owner, on `/device`: a fine-grained, read-only personal access token | `github_tokens`, Fernet-encrypted with `CREDENTIAL_ENCRYPTION_KEY` | never leaves the broker: `GET /api/developer` makes the GitHub calls with it | deleted by "Remove token", `unpair --config` and `forget`. GitHub expires it as the owner chose |
 | **`LOGS_INGEST_TOKEN`** | The operator | Caddy's environment | Bearer on the `logs.` and `metrics.` ingest paths | Caddy only. The broker forwards on loopback without one |
 
 Not secrets, though they look like it: `device_id` and an assignment's `id` (both `token_hex(6)`), and the **slug**

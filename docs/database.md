@@ -11,6 +11,7 @@ erDiagram
     devices ||--o{ pairing_codes : "codes (one live at a time)"
     devices ||--o| spotify_tokens : "Spotify"
     devices ||--o| glowmarkt_credentials : "energy account"
+    devices ||--o| github_tokens : "developer panel"
     devices ||--o| frames : "latest frame"
     devices |o--o| renderer_assignments : "renderer"
 
@@ -55,6 +56,10 @@ erDiagram
         string username
         string password_encrypted "Fernet"
     }
+    github_tokens {
+        string device_id PK, FK
+        string token_encrypted "Fernet"
+    }
     frames {
         string device_id PK, FK
         blob frame "48,000 bytes"
@@ -76,7 +81,7 @@ Things the diagram can't say:
 
 - Every table hangs off `devices`, by `device_id`. There is **no `ON DELETE` clause**: deleting a device cascades in the
   ORM (`flask devices forget` deletes the row and the ORM removes its `device_config`, `pairing_codes`, `spotify_tokens`,
-  `glowmarkt_credentials` and `frames`), and SQLite enforces the foreign keys (`PRAGMA foreign_keys=ON`).
+  `glowmarkt_credentials`, `github_tokens` and `frames`), and SQLite enforces the foreign keys (`PRAGMA foreign_keys=ON`).
 - **`renderer_assignments` is the exception.** Its `device_id` is nullable and unique: a forgotten device leaves its
   assignment behind, with no device and status `deleting`, until the orchestrator confirms the container and volumes are
   gone. The assignment's `slug` is unique across the whole broker and is what names the container, so it never changes.
@@ -106,6 +111,7 @@ Things the diagram can't say:
 | `pairing_codes` | live code | `POST /api/devices/pairing-code`, `flask devices code`, `GET /api/config` while unpaired; deleted on use, on expiry (swept on each new code) and by `unpair` | `POST /pair`, `GET /api/config` |
 | `spotify_tokens` | device that connected Spotify | `/auth/spotify/callback`, lazy refresh in the proxy | the Spotify proxy; deleted by Disconnect, `unpair --config`, `forget` |
 | `glowmarkt_credentials` | device | `POST /device` | `GET /api/config`, `/device` |
+| `github_tokens` | device given a GitHub token | `POST /device`; deleted by "Remove token", `unpair --config`, `forget` | `GET /api/developer`, `/device` |
 | `frames` | device | `PUT /api/frame` | `GET` and `POST /api/frame` |
 | `renderer_assignments` | named screen | the naming page and `POST /api/displays/{id}/renderer` (insert), `POST /api/renderers/claim` (`claim_token` to NULL), the orchestrator's list (**suspension and un-suspension happen here**), its status reports, `forget` (`deleting`) | the orchestrator's list, the pages |
 

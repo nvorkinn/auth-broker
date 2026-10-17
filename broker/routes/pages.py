@@ -28,6 +28,7 @@ from broker.models import (
     Device,
     DeviceConfig,
     Frame,
+    GitHubToken,
     GlowmarktCredentials,
     SpotifyToken,
 )
@@ -184,6 +185,7 @@ def _save_device_config(device_id: str) -> ResponseReturnValue:
 
     weather_location = request.form.get("weather_location", "").strip()
     spotify_enabled = request.form.get("spotify_enabled") == "on"
+    developer_enabled = request.form.get("developer_enabled") == "on"
 
     raw_postcode = request.form.get("postcode", "")
     postcode = normalize_postcode(raw_postcode)
@@ -206,10 +208,12 @@ def _save_device_config(device_id: str) -> ResponseReturnValue:
     config.weather_location = weather_location
     config.postcode = postcode
     config.spotify_enabled = spotify_enabled
+    config.developer_enabled = developer_enabled
     config.tfl_stop_ids = stop_ids
     for field, value in choices.items():
         setattr(config, field, value)
     _save_glowmarkt_credentials(device_id)
+    _save_github_token(device_id)
 
     db.session.commit()
     return redirect(url_for("pages.device_config", device_id=device_id))
@@ -241,6 +245,15 @@ def _save_glowmarkt_credentials(device_id: str) -> None:
     if glowmarkt_password:
         creds.password = glowmarkt_password
     db.session.add(creds)
+
+
+def _save_github_token(device_id: str) -> None:
+    """Stage the posted GitHub token, unless its field was left blank (which keeps the stored one)."""
+    token = request.form.get("github_token", "").strip()
+    if token:
+        stored = db.session.get(GitHubToken, device_id) or GitHubToken(device_id=device_id)
+        stored.token = token
+        db.session.add(stored)
 
 
 @bp.route("/device/name", methods=["GET", "POST"], defaults={"device_id": None})
@@ -382,6 +395,7 @@ def _render_device_config(device_id: str, errors: list[str] | None = None) -> st
         MODE_ICONS=stops.MODE_ICONS,
         spotify_linked=db.session.get(SpotifyToken, device_id) is not None,
         glowmarkt=glowmarkt,
+        github_linked=db.session.get(GitHubToken, device_id) is not None,
         errors=errors or [],
     )
 
@@ -392,6 +406,18 @@ def _render_device_config(device_id: str, errors: list[str] | None = None) -> st
 def spotify_disconnect() -> ResponseReturnValue:
     """Forget the screen's Spotify tokens, unlinking its Spotify account."""
     token = db.session.get(SpotifyToken, g.device_id)
+    if token is not None:
+        db.session.delete(token)
+        db.session.commit()
+    return redirect(url_for("pages.device_config", device_id=g.device_id))
+
+
+@bp.post("/device/github/disconnect", defaults={"device_id": None})
+@bp.post("/device/<device_id>/github/disconnect")
+@require_paired_user
+def github_disconnect() -> ResponseReturnValue:
+    """Forget the screen's GitHub token."""
+    token = db.session.get(GitHubToken, g.device_id)
     if token is not None:
         db.session.delete(token)
         db.session.commit()

@@ -96,6 +96,7 @@ def unpair(device_id: str, *, wipe_config: bool) -> None:
         device.config = DeviceConfig()
         device.spotify_token = None
         device.glowmarkt_credentials = None
+        device.github_token = None
         device.frame = None
     db.session.commit()
     click.echo(f"{device_id} is unpaired; it will show a new pairing code on its next poll.")

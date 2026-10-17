@@ -43,6 +43,7 @@ class Device(db.Model):
     pairing_codes: Mapped[list[PairingCode]] = relationship(back_populates="device", cascade="all, delete-orphan")
     spotify_token: Mapped[SpotifyToken | None] = relationship(cascade="all, delete-orphan")
     glowmarkt_credentials: Mapped[GlowmarktCredentials | None] = relationship(cascade="all, delete-orphan")
+    github_token: Mapped[GitHubToken | None] = relationship(cascade="all, delete-orphan")
     frame: Mapped[Frame | None] = relationship(cascade="all, delete-orphan")
     assignment: Mapped[RendererAssignment | None] = relationship(back_populates="device")
 
@@ -92,6 +93,8 @@ class DeviceConfig(db.Model):
     # A UK postcode ("SW1A 1AA") or a Norwegian one ("0150"); see pages.normalize_postcode.
     postcode: Mapped[str] = mapped_column(String, default="", server_default=text("''"))
     spotify_enabled: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("0"))
+    # The developer panel: GitHub pull requests and builds, and AI plans (see routes/developer.py).
+    developer_enabled: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("0"))
     # Every departure stop, in the owner's order: TfL NaPTAN ids and Entur NSR ids (NSR:...) mixed; the id says
     # which (services/stops.py). Named for when they were all TfL's.
     tfl_stop_ids: Mapped[list[str]] = mapped_column(JSON, default=list, server_default=text("'[]'"))
@@ -133,6 +136,27 @@ class GlowmarktCredentials(db.Model):
     @password.setter
     def password(self, plaintext: str) -> None:
         self.password_encrypted = encrypt(plaintext)
+
+
+class GitHubToken(db.Model):
+    """The GitHub token the owner gave for a device's developer panel, encrypted at rest.
+
+    A fine-grained personal access token, read-only. The broker makes the GitHub calls with it, so it never leaves.
+    """
+
+    __tablename__ = "github_tokens"
+
+    device_id: Mapped[str] = mapped_column(ForeignKey("devices.device_id"), primary_key=True)
+    token_encrypted: Mapped[str] = mapped_column(String)
+
+    @property
+    def token(self) -> str:
+        """The token, decrypted."""
+        return decrypt(self.token_encrypted)
+
+    @token.setter
+    def token(self, plaintext: str) -> None:
+        self.token_encrypted = encrypt(plaintext)
 
 
 class Frame(db.Model):
