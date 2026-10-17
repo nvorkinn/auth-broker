@@ -32,7 +32,13 @@ erDiagram
         int interval "seconds, 20 to 300, default 20"
         string clock_format "12h or 24h, default 24h"
         string language "en or nb, default en"
-        string weather_location
+        string weather_location "the place's name, sent to renderers"
+        int weather_place_id "Open-Meteo id, NULL until picked"
+        string weather_place_name
+        string weather_place_label "e.g. London, England, United Kingdom"
+        string weather_country_code "ISO, e.g. GB"
+        float weather_lat
+        float weather_lon
         string postcode "UK or Norwegian"
         bool spotify_enabled
         json tfl_stop_ids "TfL and Entur stop ids, mixed"

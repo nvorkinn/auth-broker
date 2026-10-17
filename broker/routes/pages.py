@@ -2,7 +2,7 @@
 
 import re
 from http import HTTPStatus
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from flask import Blueprint, Response, current_app, g, jsonify, redirect, render_template, request, url_for
 from redis import Redis, RedisError
@@ -33,7 +33,7 @@ from broker.models import (
     GlowmarktCredentials,
     SpotifyToken,
 )
-from broker.services import assignments, frame_image, geoip, pairing, stops
+from broker.services import assignments, frame_image, geoip, pairing, stops, weather_place
 
 if TYPE_CHECKING:
     from flask.typing import ResponseReturnValue
@@ -220,7 +220,6 @@ def _save_device_config(device_id: str) -> ResponseReturnValue:
     if interval_val.isdigit():
         interval = min(max(int(interval_val), MIN_INTERVAL), MAX_INTERVAL)
 
-    weather_location = request.form.get("weather_location", "").strip()
     spotify_enabled = request.form.get("spotify_enabled") == "on"
     developer_enabled = request.form.get("developer_enabled") == "on"
     apple_music_enabled = request.form.get("apple_music_enabled") == "on"
@@ -231,7 +230,7 @@ def _save_device_config(device_id: str) -> ResponseReturnValue:
     config = db.session.get(DeviceConfig, device_id)
     choices = {field: request.form.get(field, getattr(config, field)) for field in CHOICES}
 
-    errors = _weather_location_errors(weather_location)
+    place, errors = _weather_place(config)
     if postcode is None:
         errors.append(f'"{raw_postcode.strip()}" isn\'t a valid UK or Norwegian postcode.')
     errors += [
@@ -243,7 +242,7 @@ def _save_device_config(device_id: str) -> ResponseReturnValue:
         return _render_device_config(device_id, errors=[*errors, "Nothing was saved."]), 400
 
     config.interval = interval
-    config.weather_location = weather_location
+    weather_place.store(config, place)
     config.postcode = postcode
     config.spotify_enabled = spotify_enabled
     config.developer_enabled = developer_enabled
@@ -259,21 +258,26 @@ def _save_device_config(device_id: str) -> ResponseReturnValue:
     return redirect(url_for("pages.device_config", device_id=device_id))
 
 
-def _weather_location_errors(weather_location: str) -> list[str]:
-    """Return what's wrong with a weather location, as a list of at most one error."""
-    # Only a location Open-Meteo resolves is ever stored, so a stored one is one the device can use;
-    # if it can't be checked right now, that's refused too rather than saved unverified.
-    found = weather.location_found(weather_location) if weather_location else True
-    if found is False:
-        return [
+def _weather_place(config: DeviceConfig) -> tuple[dict[str, Any] | None, list[str]]:
+    """Return the weather place posted (None for none) and what's wrong with it, as a list of at most one error.
+
+    The picker posts the id of the place picked (weather_place_id) beside the text in its box (weather_location);
+    without JavaScript there's only the text, which is looked up instead (see weather_place.resolve).
+    """
+    text = request.form.get("weather_location", "").strip()
+    # Only a place Open-Meteo knows is ever stored, so a stored one is one the device can use; if it can't be
+    # checked right now, that's refused too rather than saved unverified.
+    try:
+        return weather_place.resolve(request.form.get("weather_place_id", ""), text, config), []
+    except weather_place.PlaceNotFoundError:
+        return None, [
             (
-                f'We couldn\'t find "{weather_location}" for the weather: try just the town or city name, '
+                f'We couldn\'t find "{text}" for the weather: try just the town or city name, '
                 'not a postcode (e.g. "Kennington" or "Oslo").'
             )
         ]
-    if found is None:
-        return ["We couldn't check the weather location just now. Please try again in a minute."]
-    return []
+    except weather.GeocodingUnavailableError:
+        return None, ["We couldn't check the weather location just now. Please try again in a minute."]
 
 
 def _save_glowmarkt_credentials(device_id: str) -> None:

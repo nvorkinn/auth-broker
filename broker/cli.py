@@ -7,6 +7,7 @@ docker exec auth-broker flask --app wsgi devices code <device_id>
 docker exec auth-broker flask --app wsgi devices owner <device_id> <user id>
 docker exec auth-broker flask --app wsgi devices unpair <device_id> [--config]
 docker exec auth-broker flask --app wsgi devices forget <device_id>
+docker exec auth-broker flask --app wsgi weather backfill
 
 Like any `flask` command it loads the app, so it needs the app's env vars (the container has them).
 """
@@ -18,11 +19,13 @@ import click
 from flask.cli import AppGroup
 from sqlalchemy import select
 
+from .clients import weather as weather_client
 from .db import db
 from .models import Device, DeviceConfig
-from .services import assignments, pairing
+from .services import assignments, pairing, weather_place
 
 devices = AppGroup("devices", help="Manual device admin for development.")
+weather = AppGroup("weather", help="The screens' weather places.")
 
 
 def _get_device(device_id: str) -> Device:
@@ -115,3 +118,39 @@ def forget(device_id: str) -> None:
     db.session.delete(device)
     db.session.commit()
     click.echo(f"{device_id} forgotten; delete its credentials file so it registers again.")
+
+
+@weather.command()
+def backfill() -> None:
+    """Give every config with a weather location but no picked place the place Open-Meteo finds first for it.
+
+    That's the place a renderer looking the name up finds too. weather_location itself is left as it is, so what
+    renderers are sent doesn't change. Safe to run again: a config with a place is skipped. One Open-Meteo can't
+    find is reported and left without a place; if Open-Meteo can't be asked, run it again later.
+    """
+    configs = db.session.scalars(
+        select(DeviceConfig)
+        .where(DeviceConfig.weather_location != "", DeviceConfig.weather_place_id.is_(None))
+        .order_by(DeviceConfig.device_id)
+    ).all()
+    resolved = not_found = unavailable = 0
+    for config in configs:
+        try:
+            results = weather_client.search_places(config.weather_location, count=1)
+        except weather_client.GeocodingUnavailableError:
+            unavailable += 1
+            click.echo(f"{config.device_id}: couldn't ask Open-Meteo about {config.weather_location!r}; skipped.")
+            continue
+        if not results:
+            not_found += 1
+            click.echo(f"{config.device_id}: Open-Meteo finds nothing for {config.weather_location!r}; skipped.")
+            continue
+        weather_place.store(config, results[0], keep_location=True)
+        resolved += 1
+        key = weather_place.weather_key(config)
+        click.echo(f"{config.device_id}: {config.weather_location!r} is {results[0]['label']} ({key}).")
+    db.session.commit()
+    click.echo(f"{resolved} given a place, {not_found} not found, {unavailable} not checked.")
+    if unavailable:
+        msg = f"Open-Meteo couldn't be asked about {unavailable}; run it again later."
+        raise click.ClickException(msg)

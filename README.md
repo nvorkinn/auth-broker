@@ -59,6 +59,17 @@ and how to run and deploy it.
    fetched into the image when it's built (`scripts/fetch_geodata.py`), so they're as fresh as the
    release. Running locally without them there's no suggestion; run
    `python scripts/fetch_geodata.py geodata` for one.
+   The weather location is a town or city picked from a search (`GET /api/places/search?q=`, at least 2
+   characters, for a signed-in paired user like the stop search), which asks
+   [Open-Meteo's geocoding](https://open-meteo.com/en/docs/geocoding-api) and lists up to 8 matches as
+   `{id, name, admin1, country, country_code, latitude, longitude, label}` (`[]` if Open-Meteo is down). The
+   page posts the picked place's Open-Meteo id, and the broker looks that id up again rather than trusting
+   the browser, storing its id, name, label, country code and coordinates (`device_config.weather_place_*`).
+   Text that wasn't picked (a suggestion, or a browser without JavaScript) is saved as Open-Meteo's first
+   match for it, or refused if there's none. Renderers are still sent just the place's name, as
+   `weather.location`. `weather_key()` in `broker/services/weather_place.py` names a place readably and
+   uniquely (`london-gb-2643743`), for keeping weather in Redis by place later. Configs saved before the
+   picker have only their text until `flask weather backfill` (below) gives them a place.
 3. **Spotify:** from `/device`, "Connect Spotify" kicks off the OAuth flow.
    The server exchanges the code for tokens and keeps them — the Pi never
    sees a Spotify token, only its own device secret.
@@ -363,6 +374,11 @@ docker exec auth-broker flask --app wsgi devices unpair <device_id>            #
 docker exec auth-broker flask --app wsgi devices unpair <device_id> --config   # ...and reset its settings and linked accounts
 docker exec auth-broker flask --app wsgi devices forget <device_id>            # delete it; it must register again
 ```
+
+`docker exec auth-broker flask --app wsgi weather backfill` gives every config with a weather location
+but no picked place the place Open-Meteo finds first for its text (the one a renderer finds too), leaving
+the text itself alone. It reports each one, skips any it can't resolve, and is safe to run again; run it
+once after deploying the migration that added the place (0021), as a migration doesn't call the network.
 
 `unpair` keeps the device's identity, so the Pi just shows a new code on its
 next poll. After `forget`, also make the Pi register as a new device:

@@ -1,5 +1,8 @@
+from unittest.mock import patch
+
 from sqlalchemy import func, select
 
+from broker.clients import weather
 from broker.db import db
 from broker.models import DeviceConfig, GitHubToken, GlowmarktCredentials, SpotifyToken
 
@@ -158,3 +161,87 @@ def test_unknown_device_is_an_error(cli):
         result = cli(command, "nope")
         assert result.exit_code == 1
         assert "No device nope." in result.stderr
+
+
+# --- flask weather backfill -----------------------------------------------------------------------------------------
+
+LONDON = {
+    "id": 2643743,
+    "name": "London",
+    "admin1": "England",
+    "country": "United Kingdom",
+    "country_code": "GB",
+    "latitude": 51.50853,
+    "longitude": -0.12574,
+    "label": "London, England, United Kingdom",
+}
+
+
+def _backfill(app):
+    return app.test_cli_runner().invoke(args=["weather", "backfill"])
+
+
+def _set_locations(app, locations):
+    with app.app_context():
+        for device_id, location in locations.items():
+            db.session.get(DeviceConfig, device_id).weather_location = location
+        db.session.commit()
+
+
+def _search(name, **_):
+    return {"london": [LONDON], "nowhere": []}[name.casefold()]
+
+
+def test_weather_backfill_gives_each_free_text_location_a_place(app, register_device):
+    london, _ = register_device()
+    nowhere, _ = register_device("another-very-long-device-secret")
+    blank, _ = register_device("a-third-very-long-device-secret")
+    _set_locations(app, {london: "london", nowhere: "Nowhere", blank: ""})
+
+    with patch("broker.clients.weather.search_places", side_effect=_search) as search:
+        result = _backfill(app)
+
+    assert result.exit_code == 0, result.output
+    assert f"{london}: 'london' is London, England, United Kingdom (london-gb-2643743)." in result.output
+    assert f"{nowhere}: Open-Meteo finds nothing for 'Nowhere'; skipped." in result.output
+    assert "1 given a place, 1 not found, 0 not checked." in result.output
+    assert sorted(call.args[0] for call in search.call_args_list) == ["Nowhere", "london"]
+    with app.app_context():
+        config = db.session.get(DeviceConfig, london)
+        # What renderers are sent stays as it was.
+        assert (config.weather_location, config.weather_place_id, config.weather_country_code) == (
+            "london",
+            2643743,
+            "GB",
+        )
+        assert (config.weather_lat, config.weather_lon) == (51.50853, -0.12574)
+        assert db.session.get(DeviceConfig, nowhere).weather_place_id is None
+        assert db.session.get(DeviceConfig, blank).weather_place_id is None
+
+
+def test_weather_backfill_is_safe_to_run_again(app, register_device):
+    device_id, _ = register_device()
+    _set_locations(app, {device_id: "London"})
+    with patch("broker.clients.weather.search_places", side_effect=_search):
+        _backfill(app)
+
+    with patch("broker.clients.weather.search_places", side_effect=_search) as search:
+        result = _backfill(app)
+
+    assert result.exit_code == 0
+    search.assert_not_called()
+    assert "0 given a place, 0 not found, 0 not checked." in result.output
+
+
+def test_weather_backfill_skips_and_reports_what_open_meteo_couldnt_be_asked_about(app, register_device):
+    device_id, _ = register_device()
+    _set_locations(app, {device_id: "London"})
+
+    with patch("broker.clients.weather.search_places", side_effect=weather.GeocodingUnavailableError):
+        result = _backfill(app)
+
+    assert result.exit_code == 1
+    assert f"{device_id}: couldn't ask Open-Meteo about 'London'; skipped." in result.output
+    assert "run it again later" in result.output
+    with app.app_context():
+        assert db.session.get(DeviceConfig, device_id).weather_place_id is None
