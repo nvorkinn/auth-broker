@@ -1,0 +1,358 @@
+"""The music provider (broker/spotify_provider.py): what it writes to the store, and how it copes with failures.
+
+tests/fixtures/music_player.json and music_top.json are the stored contract: pi-dashboard's renderer tests read the
+same two files (copied into its tests), so a change to either side that breaks the other shows up in both.
+"""
+
+import json
+import threading
+import time
+from datetime import UTC, datetime
+from pathlib import Path
+from unittest.mock import Mock, patch
+
+import fakeredis
+import pytest
+import requests
+
+from broker import spotify_provider
+from broker.clients import spotify as spotify_client
+from broker.db import db
+from broker.models import AppleMusicToken, DeviceConfig, SpotifyToken
+from broker.spotify_provider import (
+    PLAYER_TTL_S,
+    TOP_INTERVAL_S,
+    TOP_TTL_S,
+    MusicProvider,
+    next_tick,
+    player_key,
+    top_key,
+)
+from tests.conftest import apple_song
+
+FIXTURES = Path(__file__).parent / "fixtures"
+PLAYER = json.loads((FIXTURES / "music_player.json").read_text())
+TOP = json.loads((FIXTURES / "music_top.json").read_text())
+FETCHED_AT = datetime.fromisoformat(PLAYER["fetched_at"]).timestamp()
+SPOTIFY_API = "https://api.spotify.com/v1"
+APPLE_SONGS = [apple_song("1", name="Efecto"), apple_song("2", name="Tití Me Preguntó")]
+
+
+def _response(body=None, status_code=200):
+    response = Mock()
+    response.status_code = status_code
+    response.content = b"" if body is None else json.dumps(body).encode()
+    response.json.return_value = body
+    if status_code >= 400:
+        response.raise_for_status.side_effect = requests.HTTPError(f"{status_code}")
+    return response
+
+
+class FakeSpotify:
+    """Spotify's Web API and token endpoint, as far as the provider calls them, answering from the fixture."""
+
+    def __init__(self, queue=None, *, revoked=frozenset()):
+        self.queue = PLAYER["spotify"] if queue is None else queue
+        self.revoked = revoked
+        self.gets: list[tuple[str, dict | None]] = []
+        self.refreshes: list[str] = []
+
+    def get(self, url, headers=None, params=None, timeout=None):  # noqa: ARG002
+        self.gets.append((url, params))
+        if url == f"{SPOTIFY_API}/me/player/queue":
+            return _response(None, 204) if self.queue == "204" else _response(self.queue)
+        type_ = url.removeprefix(f"{SPOTIFY_API}/me/top/")
+        return _response(TOP["spotify"][params["time_range"]][type_])
+
+    def post(self, url, data=None, auth=None, timeout=None):  # noqa: ARG002
+        assert url == spotify_client.TOKEN_URL
+        self.refreshes.append(data["refresh_token"])
+        if data["refresh_token"] in self.revoked:
+            return _response({"error": "invalid_grant"}, 400)
+        return _response({"access_token": f"new-for-{data['refresh_token']}", "expires_in": 3600})
+
+
+@pytest.fixture
+def store():
+    return fakeredis.FakeRedis(decode_responses=True)
+
+
+@pytest.fixture
+def provider(app, store):
+    return MusicProvider(app, store, clock=lambda: FETCHED_AT)
+
+
+@pytest.fixture
+def device(app, register_device):
+    """Make a device with the given services switched on (and linked); return its id."""
+
+    def _make(*, spotify=True, apple_music=False, linked=True, refresh_token="refresh", expires_in=3600):  # noqa: S107
+        device_id, _ = register_device(f"a-very-long-device-secret-{refresh_token}")
+        with app.app_context():
+            config = db.session.get(DeviceConfig, device_id)
+            config.spotify_enabled = spotify
+            config.apple_music_enabled = apple_music
+            if linked:
+                db.session.add(
+                    SpotifyToken(
+                        device_id=device_id,
+                        refresh_token=refresh_token,
+                        access_token="access",
+                        expires_at=time.time() + expires_in,
+                    )
+                )
+                apple = AppleMusicToken(device_id=device_id, seen_ids=[])
+                apple.token = "user-token"
+                db.session.add(apple)
+            db.session.commit()
+        return device_id
+
+    return _make
+
+
+def _run(provider, fake_spotify=None, apple_songs=APPLE_SONGS):
+    fake_spotify = fake_spotify or FakeSpotify()
+    with (
+        patch("broker.clients.spotify.requests.get", side_effect=fake_spotify.get),
+        patch("broker.clients.spotify.requests.post", side_effect=fake_spotify.post),
+        patch("broker.clients.apple_music.recently_played", return_value=apple_songs),
+    ):
+        return provider.run_cycle()
+
+
+def _stored(store, key):
+    value = store.get(key)
+    return None if value is None else json.loads(value)
+
+
+def test_writes_the_player_and_the_top_lists_in_the_stored_shape(app, provider, store, device, musickit):
+    """Both services' parts are what their proxy routes answer, wrapped with when they were fetched."""
+    device_id = device(apple_music=True)
+
+    assert _run(provider) == 2
+
+    assert _stored(store, player_key(device_id)) == PLAYER
+    assert _stored(store, top_key(device_id)) == TOP
+    assert 0 < store.ttl(player_key(device_id)) <= PLAYER_TTL_S
+    assert PLAYER_TTL_S < store.ttl(top_key(device_id)) <= TOP_TTL_S
+
+
+def test_the_stored_parts_are_what_the_proxy_routes_answer(app, client, provider, store, device, musickit):
+    device_id = device(apple_music=True)
+    _run(provider)
+    fake = FakeSpotify()
+    headers = {"Authorization": "Bearer a-very-long-device-secret-refresh"}
+    with (
+        patch("broker.clients.spotify.requests.get", side_effect=fake.get),
+        patch("broker.clients.apple_music.recently_played", return_value=APPLE_SONGS),
+    ):
+        spotify_queue = client.get("/api/spotify/queue", headers=headers).get_json()
+        spotify_top = client.get("/api/spotify/top/tracks?time_range=short_term&limit=5", headers=headers).get_json()
+        apple_queue = client.get("/api/apple-music/queue", headers=headers).get_json()
+        apple_top = client.get("/api/apple-music/top/artists?time_range=long_term&limit=5", headers=headers).get_json()
+
+    assert _stored(store, player_key(device_id))["spotify"] == spotify_queue
+    assert _stored(store, player_key(device_id))["apple_music"] == apple_queue
+    assert _stored(store, top_key(device_id))["spotify"]["short_term"]["tracks"] == spotify_top
+    assert _stored(store, top_key(device_id))["apple_music"]["long_term"]["artists"] == apple_top
+    # Asked for as the renderer asks the proxy.
+    assert (f"{SPOTIFY_API}/me/top/tracks", {"time_range": "short_term", "limit": "5"}) in fake.gets
+
+
+def test_nothing_playing_is_stored_as_such(provider, store, device):
+    """Spotify's 204 (nothing playing) is a queue with nothing playing, not a missing key."""
+    device_id = device()
+
+    _run(provider, FakeSpotify(queue="204"))
+
+    assert _stored(store, player_key(device_id))["spotify"] == {"currently_playing": None, "queue": []}
+
+
+def test_only_the_services_switched_on_are_fetched(provider, store, device):
+    device_id = device()
+
+    _run(provider)
+
+    stored = _stored(store, player_key(device_id))
+    assert stored["spotify"] == PLAYER["spotify"]
+    assert stored["apple_music"] is None
+
+
+def test_devices_with_music_off_or_spotify_unlinked_are_skipped(provider, store, device):
+    off = device(spotify=False, refresh_token="off")
+    unlinked = device(linked=False, refresh_token="unlinked")
+    fake = FakeSpotify()
+
+    assert _run(provider, fake) == 0
+
+    assert store.keys() == []
+    assert fake.gets == []
+    assert {off, unlinked}.isdisjoint(store.keys())
+
+
+def test_apple_music_switched_on_but_not_connected_is_nothing_playing(provider, store, device):
+    """As the proxy answers it."""
+    device_id = device(spotify=False, apple_music=True, linked=False)
+
+    _run(provider)
+
+    assert _stored(store, player_key(device_id))["apple_music"] == {"currently_playing": None, "queue": []}
+    assert _stored(store, top_key(device_id))["apple_music"]["short_term"] == {
+        "tracks": {"items": []},
+        "artists": {"items": []},
+    }
+
+
+def test_one_devices_revoked_token_doesnt_stop_the_others(provider, store, device):
+    revoked = device(refresh_token="revoked", expires_in=-100)
+    fine = device(refresh_token="fine")
+    fake = FakeSpotify(revoked={"revoked"})
+
+    assert _run(provider, fake) == 2
+
+    assert store.get(player_key(revoked)) is None
+    assert store.get(top_key(revoked)) is None
+    assert _stored(store, player_key(fine)) == {**PLAYER, "apple_music": None}
+    # Only the player's refresh is tried: the top lists would only fail the same way.
+    assert fake.refreshes == ["revoked"]
+
+
+def test_a_failing_service_leaves_the_other_ones_part(provider, store, device, musickit):
+    device_id = device(refresh_token="revoked", expires_in=-100, apple_music=True)
+
+    _run(provider, FakeSpotify(revoked={"revoked"}))
+
+    stored = _stored(store, player_key(device_id))
+    assert stored["spotify"] is None
+    assert stored["apple_music"] == PLAYER["apple_music"]
+
+
+def test_a_partial_top_fetch_doesnt_replace_a_full_one(app, store, device, musickit):
+    device_id = device(refresh_token="soon-revoked", apple_music=True)
+    now = [FETCHED_AT]
+    provider = MusicProvider(app, store, clock=lambda: now[0])
+    _run(provider)
+    assert _stored(store, top_key(device_id)) == TOP
+    with app.app_context():
+        db.session.get(SpotifyToken, device_id).expires_at = 0
+        db.session.commit()
+
+    now[0] += TOP_INTERVAL_S
+    _run(provider, FakeSpotify(revoked={"soon-revoked"}))
+
+    assert _stored(store, top_key(device_id)) == TOP  # kept, not replaced by Apple Music's alone
+    assert _stored(store, player_key(device_id))["spotify"] is None
+
+
+def test_refreshed_tokens_are_stored_as_the_proxy_stores_them(app, provider, device):
+    device_id = device(refresh_token="old-refresh", expires_in=-100)
+    fake = FakeSpotify()
+
+    _run(provider, fake)
+
+    assert fake.refreshes == ["old-refresh"]  # once: the top lists' calls use the refreshed token
+    with app.app_context():
+        token = db.session.get(SpotifyToken, device_id)
+        assert token.access_token == "new-for-old-refresh"
+        assert token.refresh_token == "old-refresh"  # Spotify sent no new one, so the old one is kept
+        assert token.expires_at > time.time() + 3000
+
+
+def test_the_top_lists_are_fetched_every_half_hour(app, store, device):
+    device_id = device()
+    now = [FETCHED_AT]
+    provider = MusicProvider(app, store, clock=lambda: now[0])
+    fake = FakeSpotify()
+
+    def top_calls():
+        return sum(1 for url, _ in fake.gets if "/me/top/" in url)
+
+    _run(provider, fake)
+    assert top_calls() == 4  # two time ranges, tracks and artists
+    now[0] += 60
+    _run(provider, fake)
+    assert top_calls() == 4
+    assert sum(1 for url, _ in fake.gets if url.endswith("/queue")) == 2
+    now[0] += TOP_INTERVAL_S
+    _run(provider, fake)
+    assert top_calls() == 8
+    assert store.get(top_key(device_id)) is not None
+
+
+def test_switching_a_service_on_fetches_its_top_lists_at_once(app, provider, store, device, musickit):
+    device_id = device()
+    _run(provider)
+    with app.app_context():
+        db.session.get(DeviceConfig, device_id).apple_music_enabled = True
+        db.session.commit()
+
+    _run(provider)
+
+    assert _stored(store, top_key(device_id))["apple_music"] == TOP["apple_music"]
+
+
+def test_a_failed_top_fetch_is_tried_again_next_cycle(app, store, device):
+    device_id = device()
+    provider = MusicProvider(app, store, clock=lambda: FETCHED_AT)
+    failing = FakeSpotify()
+    original = failing.get
+
+    def get(url, **kwargs):
+        if "/me/top/" in url:
+            return _response({"error": "rate limited"}, 429)
+        return original(url, **kwargs)
+
+    failing.get = get
+    _run(provider, failing)
+    assert store.get(top_key(device_id)) is None
+
+    _run(provider)
+
+    assert _stored(store, top_key(device_id))["spotify"] == TOP["spotify"]
+
+
+def test_redis_down_is_logged_and_tried_next_tick(app, store, device, caplog):
+    device_id = device()
+    server = fakeredis.FakeServer()
+    server.connected = False  # every command raises ConnectionError
+    provider = MusicProvider(app, fakeredis.FakeRedis(server=server, decode_responses=True), clock=lambda: FETCHED_AT)
+
+    # Patched rather than caplog: other tests (alembic's logging set-up) can leave loggers disabled.
+    with (
+        patch("broker.clients.spotify.requests.get", side_effect=FakeSpotify().get),
+        patch.object(spotify_provider, "logger") as logger,
+    ):
+        provider._try_cycle()  # the loop's own error handling: it doesn't raise
+
+    assert "couldn't reach Redis" in logger.warning.call_args.args[0]
+    server.connected = True
+    with patch("broker.clients.spotify.requests.get", side_effect=FakeSpotify().get):
+        provider._try_cycle()
+    # The top lists weren't counted as fetched while they couldn't be written.
+    assert provider.store.get(top_key(device_id)) is not None
+
+
+def test_a_nudge_on_sub_changed_ends_the_wait_early(app, store):
+    provider = MusicProvider(app, store, clock=lambda: FETCHED_AT)
+    assert not provider._listen(0.01)  # subscribes; nothing published yet
+
+    store.publish(spotify_provider.SUB_CHANGED, "")
+
+    assert provider._listen(0.5)
+
+
+def test_stop_ends_the_wait(app, store):
+    """Within a second, though the next tick is most of a minute away."""
+    provider = MusicProvider(app, store, clock=lambda: FETCHED_AT + 1)
+    threading.Timer(0.1, provider.stop).start()
+
+    started = time.monotonic()
+    provider._wait_for_next_cycle()
+
+    assert time.monotonic() - started < 2
+
+
+def test_ticks_are_epoch_aligned():
+    assert next_tick(120.0, 60) == 180.0
+    assert next_tick(179.9, 60) == 180.0
+    assert datetime.fromtimestamp(next_tick(FETCHED_AT + 1, 60), UTC).second == 0

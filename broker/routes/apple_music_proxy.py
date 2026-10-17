@@ -11,9 +11,9 @@ import requests
 from flask import Blueprint, jsonify, request
 
 from broker.auth import require_device_auth
-from broker.clients import apple_music
 from broker.db import db
 from broker.models import DeviceConfig
+from broker.services import music
 
 if TYPE_CHECKING:
     from flask.typing import ResponseReturnValue
@@ -22,8 +22,6 @@ logger = logging.getLogger(__name__)
 
 bp = Blueprint("apple_music_proxy", __name__, url_prefix="/api/apple-music")
 
-# How many of the tracks before the last played the screen gets, in place of Spotify's queue.
-EARLIER = 5
 # The most the top lists hand over, like Spotify's.
 MAX_TOP = 50
 
@@ -48,16 +46,13 @@ def queue(device_id: str) -> ResponseReturnValue:
     switched_on = _switched_on(device_id)
     if switched_on is None:
         return jsonify(error="not found"), 404
-    tracks = None
-    if switched_on and apple_music.configured():
-        try:
-            tracks = apple_music.recent_tracks(device_id)
-        except requests.RequestException as e:
-            logger.warning("Apple Music for device %s: %s", device_id, e)
-            return jsonify(error="Apple Music could not be reached"), 502
-    if not tracks:
-        return jsonify(currently_playing=None, queue=[])
-    return jsonify(currently_playing=tracks[0], queue=tracks[1 : 1 + EARLIER])
+    if not switched_on:
+        return jsonify(music.nothing_playing())
+    try:
+        return jsonify(music.apple_music_queue(device_id))
+    except requests.RequestException as e:
+        logger.warning("Apple Music for device %s: %s", device_id, e)
+        return jsonify(error="Apple Music could not be reached"), 502
 
 
 @bp.get("/top/<any(artists, tracks):type_>")
@@ -72,5 +67,6 @@ def top(device_id: str, type_: str) -> ResponseReturnValue:
     if switched_on is None:
         return jsonify(error="not found"), 404
     limit = min(max(request.args.get("limit", 20, type=int), 1), MAX_TOP)
-    found = apple_music.top(device_id, type_, request.args.get("time_range", "medium_term"), limit)
-    return jsonify(found if switched_on and found else {"items": []})
+    if not switched_on:
+        return jsonify(items=[])
+    return jsonify(music.apple_music_top(device_id, type_, request.args.get("time_range", "medium_term"), limit))

@@ -67,6 +67,27 @@ services:
       SESSION_COOKIE_SAMESITE: Lax
       SPOTIFY_REDIRECT_URI: https://auth.nikolaivorkinn.com/auth/spotify/callback
 
+  # The music provider: what each screen's Spotify and Apple Music are playing, written to Redis for the renderers
+  # (see "Music in the store" in the README). The broker's image and settings, as it uses the broker's database and
+  # Spotify code (and writes refreshed tokens back to it). Under the providers profile, so a deploy neither starts nor
+  # removes it until it's turned on: `docker compose --profile providers up -d spotify-provider`.
+  spotify-provider:
+    <<: *release-image
+    image: ghcr.io/nvorkinn/auth-broker:${AUTH_BROKER_VERSION:-latest}
+    container_name: spotify-provider
+    profiles: [ providers ]
+    logging: *logging
+    # Host networking, to reach Redis on 127.0.0.1:6379 (and VictoriaLogs, like the broker).
+    network_mode: host
+    command: ["python", "-m", "broker.spotify_provider"]
+    volumes:
+      - ./data:/app/data
+    # The broker's secrets, and REDIS_PASSWORD from Redis's own.
+    env_file: [ broker.env, redis.env ]
+    environment:
+      SPOTIFY_REDIRECT_URI: https://auth.nikolaivorkinn.com/auth/spotify/callback
+    stop_grace_period: 30s
+
   caddy:
     <<: *release-image
     image: ghcr.io/nvorkinn/auth-broker-caddy:${CADDY_VERSION:-latest}
