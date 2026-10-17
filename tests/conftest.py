@@ -1,4 +1,5 @@
 import secrets
+import shutil
 
 import pytest
 from cryptography.fernet import Fernet
@@ -12,17 +13,38 @@ from broker.services import assignments
 from broker.services.pair_throttle import PairThrottle
 
 
-@pytest.fixture
-def app(tmp_path, monkeypatch):
+def _set_app_env(monkeypatch, db_path):
     monkeypatch.setenv("FLASK_SECRET_KEY", "test-secret-key")
     monkeypatch.setenv("SPOTIFY_CLIENT_ID", "test-client-id")
     monkeypatch.setenv("SPOTIFY_CLIENT_SECRET", "test-client-secret")
     monkeypatch.setenv("SPOTIFY_REDIRECT_URI", "https://auth.example.com/auth/spotify/callback")
     monkeypatch.setenv("TFL_APP_KEY", "test-tfl-key")
     monkeypatch.setenv("WEATHER_API_KEY", "test-weather-key")
-    monkeypatch.setenv("BROKER_DB_PATH", str(tmp_path / "broker.db"))
+    monkeypatch.setenv("BROKER_DB_PATH", str(db_path))
 
     monkeypatch.setenv("CREDENTIAL_ENCRYPTION_KEY", Fernet.generate_key().decode())
+
+
+@pytest.fixture(scope="session")
+def migrated_db(tmp_path_factory):
+    """Return a DB file migrated to head, built once per test session.
+
+    Running every migration takes most of a second, and nearly every test starts an app; starting
+    each on a copy of this one leaves its own upgrade with nothing to do.
+    """
+    path = tmp_path_factory.mktemp("migrated") / "broker.db"
+    with pytest.MonkeyPatch.context() as monkeypatch:
+        _set_app_env(monkeypatch, path)
+        with create_app().app_context():
+            db.engine.dispose()
+    return path
+
+
+@pytest.fixture
+def app(tmp_path, monkeypatch, migrated_db):
+    db_path = tmp_path / "broker.db"
+    shutil.copyfile(migrated_db, db_path)
+    _set_app_env(monkeypatch, db_path)
 
     application = create_app()
     application.config.update(TESTING=True)
