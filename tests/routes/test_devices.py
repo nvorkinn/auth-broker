@@ -83,9 +83,10 @@ def test_get_config_returns_defaults_and_shared_keys(client, register_device):
         "notice_board": {"postcode": None, "country": None, "style": "airy"},
         "tfl": {"app_key": "test-tfl-key", "stop_ids": [], "style": "grouped"},
         "departures": {"stops": [], "style": "grouped"},
-        "spotify": {"enabled": False, "style": "airy", "source": "spotify"},
+        "spotify": {"enabled": False, "style": "airy"},
         "glowmarkt": {"username": None, "password": None},
         "developer": {"enabled": False},
+        "apple_music": {"enabled": False},
         "pairing_code": body["pairing_code"],
     }
 

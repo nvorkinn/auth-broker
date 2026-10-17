@@ -33,7 +33,7 @@ def _switched_on(device_id: str) -> bool | None:
     config = db.session.get(DeviceConfig, device_id)
     if config is None:
         return None
-    return config.spotify_enabled and config.music_source == "apple_music"
+    return config.apple_music_enabled
 
 
 @bp.get("/queue")

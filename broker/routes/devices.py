@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 
 from countdown_api.blueprints import ApiHTTPError
 from countdown_api.models import (
+    AppleMusic,
     ConfigResponse,
     Departures,
     DepartureStop,
@@ -146,10 +147,12 @@ def get_config(*, device_id: str, x_device_name: str | None = None) -> ConfigRes
             stops=[DepartureStop(source=stops.source_of(s), id=s) for s in stop_ids],
             style=_departures_style(config.style),
         ),
-        spotify=Spotify(enabled=config.spotify_enabled, style=config.style, source=config.music_source),
+        spotify=Spotify(enabled=config.spotify_enabled, style=config.style),
         glowmarkt=Glowmarkt(username=(creds and creds.username) or None, password=creds.password if creds else None),
         # Only the switch: the GitHub token stays here, and the screen gets the panel's data from /api/developer.
         developer=Developer(enabled=config.developer_enabled),
+        # Only the switch, like the developer panel's: the screen gets Apple Music from /api/apple-music.
+        apple_music=AppleMusic(enabled=config.apple_music_enabled),
         pairing_code=pairing.current_code_for(device_id),
     )
 

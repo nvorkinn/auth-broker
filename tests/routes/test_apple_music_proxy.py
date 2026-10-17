@@ -13,11 +13,11 @@ def _get(client, secret, path):
     return client.get(f"/api/apple-music{path}", headers={"Authorization": f"Bearer {secret}"})
 
 
-def _switch_on(app, device_id, *, source="apple_music", linked=True):
+def _switch_on(app, device_id, *, apple_music=True, linked=True):
     with app.app_context():
         config = db.session.get(DeviceConfig, device_id)
         config.spotify_enabled = True
-        config.music_source = source
+        config.apple_music_enabled = apple_music
         if linked:
             stored = AppleMusicToken(device_id=device_id, seen_ids=[])
             stored.token = "user-token"
@@ -31,10 +31,10 @@ def test_requires_auth(client, register_device):
     assert client.get("/api/apple-music/queue").status_code == 401
 
 
-@pytest.mark.parametrize("source", ["spotify", "apple_music"])
-def test_queue_is_empty_unless_apple_music_is_chosen_and_set_up(app, client, register_device, source):
+@pytest.mark.parametrize("apple_music", [False, True])
+def test_queue_is_empty_unless_apple_music_is_switched_on_and_set_up(app, client, register_device, apple_music):
     device_id, secret = register_device()
-    _switch_on(app, device_id, source=source)
+    _switch_on(app, device_id, apple_music=apple_music)
 
     with patch("broker.clients.apple_music.recently_played") as played:
         body = _get(client, secret, "/queue").get_json()
@@ -86,9 +86,9 @@ def test_top_counts_the_logged_plays(app, client, register_device):
     assert artists == {"items": [{"name": "Flume"}]}
 
 
-def test_top_is_empty_when_switched_to_spotify(app, client, register_device):
+def test_top_is_empty_when_apple_music_is_off(app, client, register_device):
     device_id, secret = register_device()
-    _switch_on(app, device_id, source="spotify")
+    _switch_on(app, device_id, apple_music=False)
 
     assert _get(client, secret, "/top/tracks").get_json() == {"items": []}
 
@@ -135,29 +135,22 @@ def test_another_users_device_404s(client, register_device):
     assert client.post(f"/device/{device_id}/apple-music/connect", data={"music_user_token": "x"}).status_code == 404
 
 
-def test_the_config_page_saves_the_music_source_and_sends_it(app, paired_client, musickit):
+def test_the_config_page_switches_both_services_on_and_sends_both(app, paired_client, musickit):
     client, device_id, secret = paired_client
 
     page = client.get("/device").data
-    assert b'value="apple_music"' in page
-    client.post("/device", data={"interval": "20", "spotify_enabled": "on", "music_source": "apple_music"})
+    assert b'name="apple_music_enabled"' in page
+    client.post("/device", data={"interval": "20", "spotify_enabled": "on", "apple_music_enabled": "on"})
 
     with app.app_context():
-        assert db.session.get(DeviceConfig, device_id).music_source == "apple_music"
+        config = db.session.get(DeviceConfig, device_id)
+        assert (config.spotify_enabled, config.apple_music_enabled) == (True, True)
     config = client.get("/api/config", headers={"Authorization": f"Bearer {secret}"}).get_json()
-    assert config["spotify"]["source"] == "apple_music"
+    assert config["spotify"]["enabled"]
+    assert config["apple_music"] == {"enabled": True}
 
 
 def test_the_config_page_hides_apple_music_when_not_set_up(paired_client):
     client, _device_id, _ = paired_client
 
-    assert b'value="apple_music"' not in client.get("/device").data
-
-
-def test_the_config_page_refuses_an_unknown_music_source(paired_client):
-    client, _device_id, _ = paired_client
-
-    response = client.post("/device", data={"interval": "20", "music_source": "tidal"})
-
-    assert response.status_code == 400
-    assert b"The music service must be one of" in response.data
+    assert b'name="apple_music_enabled"' not in client.get("/device").data

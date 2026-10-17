@@ -23,7 +23,6 @@ from broker.models import (
     LANGUAGES,
     MAX_INTERVAL,
     MIN_INTERVAL,
-    MUSIC_SOURCES,
     ORIENTATIONS,
     STYLES,
     Device,
@@ -170,7 +169,6 @@ CHOICES = {
     "clock_format": (CLOCK_FORMATS, "The clock format"),
     "orientation": (ORIENTATIONS, "Orientation"),
     "style": (STYLES, "The style"),
-    "music_source": (MUSIC_SOURCES, "The music service"),
 }
 
 
@@ -188,6 +186,7 @@ def _save_device_config(device_id: str) -> ResponseReturnValue:
     weather_location = request.form.get("weather_location", "").strip()
     spotify_enabled = request.form.get("spotify_enabled") == "on"
     developer_enabled = request.form.get("developer_enabled") == "on"
+    apple_music_enabled = request.form.get("apple_music_enabled") == "on"
 
     raw_postcode = request.form.get("postcode", "")
     postcode = normalize_postcode(raw_postcode)
@@ -211,6 +210,7 @@ def _save_device_config(device_id: str) -> ResponseReturnValue:
     config.postcode = postcode
     config.spotify_enabled = spotify_enabled
     config.developer_enabled = developer_enabled
+    config.apple_music_enabled = apple_music_enabled
     config.tfl_stop_ids = stop_ids
     for field, value in choices.items():
         setattr(config, field, value)
@@ -396,7 +396,6 @@ def _render_device_config(device_id: str, errors: list[str] | None = None) -> st
         stops=stops.resolve(config.tfl_stop_ids),
         MODE_ICONS=stops.MODE_ICONS,
         spotify_linked=db.session.get(SpotifyToken, device_id) is not None,
-        music_sources=MUSIC_SOURCES,
         apple_music_available=apple_music.configured(),
         apple_music_linked=apple_music.linked(device_id),
         glowmarkt=glowmarkt,

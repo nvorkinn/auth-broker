@@ -1,4 +1,4 @@
-"""Add Apple Music: device_config.music_source, apple_music_tokens for the listener's token, apple_music_plays.
+"""Add Apple Music: device_config.apple_music_enabled, apple_music_tokens for the listener's token, apple_music_plays.
 
 Revision ID: 0020
 Revises: 0019
@@ -25,9 +25,9 @@ __all__ = ["branch_labels", "depends_on", "down_revision", "downgrade", "revisio
 
 
 def upgrade() -> None:
-    """Add the music source, Spotify for every device, and the tables for Apple Music's token and plays."""
+    """Add the Apple Music switch, off for every device, and the tables for Apple Music's token and plays."""
     with op.batch_alter_table("device_config") as batch:
-        batch.add_column(sa.Column("music_source", sa.String(), nullable=False, server_default=sa.text("'spotify'")))
+        batch.add_column(sa.Column("apple_music_enabled", sa.Boolean(), nullable=False, server_default=sa.text("0")))
     op.create_table(
         "apple_music_tokens",
         sa.Column("device_id", sa.String(), sa.ForeignKey("devices.device_id"), primary_key=True),
@@ -48,8 +48,8 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    """Drop Apple Music's plays and token, and the music source."""
+    """Drop Apple Music's plays and token, and its switch."""
     op.drop_table("apple_music_plays")
     op.drop_table("apple_music_tokens")
     with op.batch_alter_table("device_config") as batch:
-        batch.drop_column("music_source")
+        batch.drop_column("apple_music_enabled")

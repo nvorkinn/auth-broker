@@ -79,10 +79,6 @@ STYLES = {
 }
 
 
-# Which service the music panel shows: the API contract's Spotify.source, with its name on the config page.
-MUSIC_SOURCES = {"spotify": "Spotify", "apple_music": "Apple Music"}
-
-
 class DeviceConfig(db.Model):
     """A device's settings, as its owner sets them on the config page."""
 
@@ -99,8 +95,8 @@ class DeviceConfig(db.Model):
     # A UK postcode ("SW1A 1AA") or a Norwegian one ("0150"); see pages.normalize_postcode.
     postcode: Mapped[str] = mapped_column(String, default="", server_default=text("''"))
     spotify_enabled: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("0"))
-    # Which service the music panel (spotify_enabled switches it on) shows, one of MUSIC_SOURCES.
-    music_source: Mapped[str] = mapped_column(String, default="spotify", server_default=text("'spotify'"))
+    # Apple Music in the Spotify area, beside Spotify or instead of it (see routes/apple_music_proxy.py).
+    apple_music_enabled: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("0"))
     # The developer panel: GitHub pull requests and builds, and AI plans (see routes/developer.py).
     developer_enabled: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("0"))
     # Every departure stop, in the owner's order: TfL NaPTAN ids and Entur NSR ids (NSR:...) mixed; the id says
