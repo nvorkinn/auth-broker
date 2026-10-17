@@ -60,9 +60,6 @@ def _upload(client, secret, frame):
 
 def test_screen_page_shows_the_picture_and_polls_at_the_screens_interval(app, paired_client):
     client, device_id, secret = paired_client
-    with app.app_context():
-        db.session.get(DeviceConfig, device_id).interval = 45
-        db.session.commit()
     _upload(client, secret, bytes(FRAME_BYTES))
 
     response = client.get(f"/device/{device_id}/screen")
@@ -70,7 +67,7 @@ def test_screen_page_shows_the_picture_and_polls_at_the_screens_interval(app, pa
     assert response.status_code == 200
     html = response.get_data(as_text=True)
     assert f'src="/device/{device_id}/screen/frame.png"' in html
-    assert "const intervalMs = 45 * 1000;" in html
+    assert "const intervalMs = 60 * 1000;" in html
     assert 'width="480" height="800"' in html
 
 

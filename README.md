@@ -85,7 +85,8 @@ and how to run and deploy it.
    glance (open PRs, reviews waiting, repos failing on their default branch,
    and a Release or Deploy workflow running or just finished, with its jobs as
    GitHub's graph: `broker/clients/workflow_graph.py`) and their AI plans,
-   called with the GitHub token saved on `/device`. The
+   called with the GitHub token saved on `/device` (renderers on the server read the same data from Redis instead, see
+   "Developer in the store"). The
    Claude and Gemini plans are placeholders until there's an API to ask
    (`broker/clients/ai_plans.py`).
 
@@ -140,8 +141,8 @@ A screen therefore needs no logic beyond:
    (201 straight away; the screen has a device even before its renderer runs).
 2. Loop on `GET /api/frame` with `If-None-Match`, handling the status and then
    sleeping for the response's `Retry-After` seconds:
-   - 200: draw the frame. `Retry-After` is the device's refresh interval, 20 s to 5 min
-     (set on `/device`).
+   - 200: draw the frame. `Retry-After` is the refresh interval: 60 s, or 20-59 s while a provider's data is bursty
+     (a release is running). Nobody sets it; see [Pace](docs/architecture.md#pace).
    - 304: unchanged. Same `Retry-After`.
    - 404: no frame yet (its renderer is still being set up). `Retry-After: 20`.
    - 401: unknown secret (an unpaired screen is forgotten after 24 hours, or the
@@ -331,6 +332,8 @@ broker/
   cli.py      `flask devices ...` admin commands
   providers/  long-running processes that fill the shared Redis store (the glow-provider)
   spotify_provider.py  the music provider, writing each screen's Spotify and Apple Music to Redis
+  developer_provider.py  the developer provider, writing each screen's GitHub and AI plans to Redis, and the pace
+  provider_loop.py  the loop it runs in (the music and glow providers have their own, older copies)
 ```
 
 `tests/` mirrors this layout.
@@ -885,6 +888,28 @@ docker exec -it redis sh -c 'REDISCLI_AUTH="$REDIS_PASSWORD" redis-cli --scan --
 
 The renderers read it once pi-dashboard's orchestrator is given
 `RENDERER_REDIS_URL` (see its providers README).
+## Developer in the store
+
+`broker/developer_provider.py` is the developer provider, run from the broker's image like the music one. For as long
+as a screen's developer panel is on (`v1:sub:developer` holds its device id) it polls everything the panel shows on its
+own, whether or not a renderer is looking: the owner's GitHub, with the token only the broker holds, and their AI plans
+(`broker/services/developer.py`, the same code `GET /api/developer` answers with), and writes it to
+`v1:developer:<device id>` with `fetched_at` (TTL 15 minutes). The renderers read that instead of calling the route,
+which stays for the ones that read no store. A poll costs GitHub about 25 calls, so it polls every 2 minutes
+(`IDLE_INTERVAL_S`).
+
+It also sets the screen's pace. While one of a device's releases is running its stages change by the minute, so it polls
+every 20 seconds (`BURST_INTERVAL_S`) and writes `v1:pace:developer:<device id>` = 20 with a one-minute TTL, renewed each
+cycle the release still runs. Nothing says a release has ended: the key lapses and the screen goes back to its usual
+60 seconds. The renderer reads the key, sleeps as long, and sends it with its frames as `X-Refresh-Hint`; the broker
+keeps it for three minutes and answers the screen's polls with it as `Retry-After` (`broker/services/pace.py`, and
+"Pace" in [docs/architecture.md](docs/architecture.md#pace)). A burst costs about 750 calls over a ten-minute release,
+against the 5,000 an hour a token gets.
+
+`tests/fixtures/developer.json` is the stored shape, copied into pi-dashboard's tests too, so a change to either side
+that breaks the other shows up in both. To see it on the host: `docker logs -f developer-provider`. Locally,
+`python -m broker.developer_provider`. `deploy.sh` recreates it with the broker.
+
 ## Music in the store
 
 `broker/spotify_provider.py` is the music provider: a long-running process that fetches what each screen's Spotify

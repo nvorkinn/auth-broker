@@ -25,6 +25,7 @@ this page is the map. [The database](database.md) has the tables.
 | **glow-provider** | this repository (`broker/providers/glow.py`), the broker's image, deployed with the broker | Reads the devices' Glowmarkt accounts from the database (read-only), fetches their readings from Glowmarkt and writes them to Redis (`v1:energy:<device id>`), so the passwords never leave the broker. See [the energy provider](../README.md#the-energy-provider). |
 | **Redis** | this repository, `127.0.0.1:6379` | Not used yet. The planned store between one provider per API (writing the latest data per stop or location) and the renderers (reading it). A cache only: nothing on disk. |
 | **spotify-provider** | this repository (`broker/spotify_provider.py`), the broker's image with another command | Fetches each screen's Spotify and Apple Music with the broker's own tokens and code, and writes them to Redis for the renderers (see "Music in the store" in the README). Deployed with the broker. |
+| **developer-provider** | this repository (`broker/developer_provider.py`), the broker's image with another command | Polls each screen's GitHub and AI plans for as long as its developer panel is on, writes them to Redis for the renderers, and asks for a faster screen refresh (`v1:pace:developer:<device id>`) while a release runs. Deployed with the broker. See [Pace](#pace). |
 | **countdown-api** | [countdown-api](https://github.com/nvorkinn/countdown-api), the `vendor/countdown-api` submodule | The OpenAPI contract between renderer and broker (so far `GET /api/config`) and the code generated from it. |
 
 ## Who calls the broker, and how
@@ -304,7 +305,7 @@ sequenceDiagram
     participant B as auth-broker
     participant R as Renderer
     participant O as Orchestrator
-    loop every config.interval seconds (renderer)
+    loop every pace seconds (renderer: 60 s, faster while a provider's data is bursty)
         R->>B: GET /api/config (X-Device-Name)<br/>Bearer renderer secret
         B-->>R: 200 config JSON (pairing_code is null for a paired device, unless a code was just requested)
         Note over R: Polls whichever APIs are due. TfL, Open-Meteo, postcodes.io and Glowmarkt are called directly. Spotify goes through the broker (GET /api/spotify/...)
@@ -312,7 +313,7 @@ sequenceDiagram
         B-->>R: 204
         Note right of B: DB: +frames
     end
-    loop every Retry-After seconds (screen, = the configured interval)
+    loop every Retry-After seconds (screen, = the pace the renderer last asked for)
         S->>B: POST /api/frame {role, metrics, logs}<br/>Bearer display secret
         B-->>S: 200 ETag Retry-After: 15 48000 bytes
         Note right of B: metrics to VictoriaMetrics
@@ -329,8 +330,8 @@ sequenceDiagram
     end
 ```
 
-- The screen sleeps for the `Retry-After` the broker sends, which is the device's `interval` (20 s unless the owner
-  changed it, never under 20 s or over 5 min), or 20 s while there is no frame yet.
+- The screen sleeps for the `Retry-After` the broker sends: 60 s, or what the renderer asked for (20-59 s) while a
+  provider's data is bursty, or 20 s while there is no frame yet. See [Pace](#pace).
 - The renderer uploads only when its picture changed. If the same frame is uploaded again, only `frames.rendered_at`
   moves, which says the renderer is alive.
 - Metrics and logs the screen reports are forwarded in the background to VictoriaMetrics and VictoriaLogs, and never
@@ -460,3 +461,12 @@ What was not run, and is described from reading the source or configuration: the
 | countdown-api | `2a932bd` |
 
 If the code changes, these pages do not: check a diagram against the code before trusting it.
+
+## Pace
+
+How often a screen refreshes isn't a setting; the providers decide. A provider whose data is bursty (the developer
+provider, while a release runs) writes a pace key to the store with a short TTL. The renderer reads the fastest of its
+panels' keys, sleeps that long between cycles, and sends it as `X-Refresh-Hint` (seconds) with each `PUT /api/frame`.
+The broker keeps it on the frame row for 3 minutes (`frames.pace`, `pace_until`; `services/pace.py`) and answers the
+screen's polls with it as `Retry-After`, kept between 20 s and the 60 s base. Every upload restates the hint, so a
+frame without one ends it, and a renderer that stops asking or dies lapses back to 60 s on its own.

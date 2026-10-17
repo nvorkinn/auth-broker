@@ -130,7 +130,7 @@ def test_device_config_groups_fields_into_sections(paired_client):
     titles = re.findall(r'<h2 class="card-title">([^<]+)</h2>', html)
     assert titles[:4] == ["General", "Style", "Weather", "Notice board"]
     general, style, weather, notice_board = re.split(r'<h2 class="card-title">', html)[1:5]
-    assert 'id="interval"' in general
+    assert 'id="interval"' not in html
     assert 'name="style"' in style
     assert 'name="orientation"' in general
     assert 'name="clock_format"' in general
@@ -214,7 +214,6 @@ def test_device_config_post_without_clock_format_keeps_the_stored_one(app, paire
     with app.app_context():
         config = db.session.get(DeviceConfig, device_id)
         assert config.clock_format == "12h"
-        assert config.interval == 20
 
 
 @pytest.mark.parametrize("clock_format", ["", "invalid", "12", "24"])
@@ -242,12 +241,7 @@ def test_device_config_post_rejects_invalid_clock_formats_without_saving_anythin
     assert b"Nothing was saved." in response.data
     with app.app_context():
         config = db.session.get(DeviceConfig, device_id)
-        assert (config.clock_format, config.interval, config.weather_location, config.spotify_enabled) == (
-            "12h",
-            20,
-            "",
-            False,
-        )
+        assert (config.clock_format, config.weather_location, config.spotify_enabled) == ("12h", "", False)
         assert config.style == "airy"
         assert db.session.get(GlowmarktCredentials, device_id) is None
 
@@ -278,33 +272,18 @@ def test_device_config_post_persists_settings(app, paired_client):
 
     with app.app_context():
         config = db.session.get(DeviceConfig, device_id)
-        assert config.interval == 20
         assert config.weather_location == "London"
         assert config.spotify_enabled is True
         assert config.tfl_stop_ids == ["940GZZLUEUS", "490000173F"]
 
 
-def test_device_config_post_falls_back_to_default_interval_for_garbage_input(app, paired_client):
-    client, device_id, _ = paired_client
-    client.post("/device", data={"interval": "not-a-number"})
-
-    with app.app_context():
-        assert db.session.get(DeviceConfig, device_id).interval == 20
-
-
-@pytest.mark.parametrize(("submitted", "saved"), [("5", 20), ("0", 20), ("20", 20), ("300", 300), ("3600", 300)])
-def test_device_config_post_keeps_the_interval_between_20_seconds_and_5_minutes(app, paired_client, submitted, saved):
-    client, device_id, _ = paired_client
-    client.post("/device", data={"interval": submitted})
-
-    with app.app_context():
-        assert db.session.get(DeviceConfig, device_id).interval == saved
-
-
-def test_device_config_page_offers_only_the_allowed_intervals(paired_client):
+def test_device_config_page_has_no_refresh_interval_to_set(paired_client):
     client, _, _ = paired_client
 
-    assert b'min="20" max="300"' in client.get("/device").data
+    html = client.get("/device").get_data(as_text=True)
+
+    assert 'name="interval"' not in html
+    assert "Refresh interval" not in html
 
 
 def test_device_config_shows_resolved_stop_names(paired_client):
@@ -519,7 +498,7 @@ def test_device_config_post_rejects_invalid_postcode_and_saves_nothing(app, pair
 
     with app.app_context():
         config = db.session.get(DeviceConfig, device_id)
-        assert (config.interval, config.postcode, config.weather_location) == (20, "SW1A 1AA", "London")
+        assert (config.postcode, config.weather_location) == ("SW1A 1AA", "London")
 
 
 def test_device_config_post_rejects_weather_location_open_meteo_cant_find(app, paired_client, weather_location_lookup):
@@ -535,7 +514,7 @@ def test_device_config_post_rejects_weather_location_open_meteo_cant_find(app, p
     weather_location_lookup.assert_called_with("SE17 2PX", count=1)
     with app.app_context():
         config = db.session.get(DeviceConfig, device_id)
-        assert (config.interval, config.weather_location) == (20, "London")
+        assert config.weather_location == "London"
 
 
 def test_device_config_post_refuses_an_unverified_weather_location_when_open_meteo_is_unreachable(
@@ -804,6 +783,13 @@ def test_saving_the_config_publishes_subscriptions_to_redis(paired_client, fake_
     assert fake_redis.published == [("v1:sub:changed", "")]
 
 
+def test_saving_the_config_subscribes_a_device_with_the_developer_panel_on(paired_client, fake_redis):
+    client, device_id, _ = paired_client
+    client.post("/device", data={"developer_enabled": "on"})
+
+    assert _subscriptions(fake_redis) == {"developer": {device_id}}
+
+
 def test_saving_the_config_subscribes_a_device_with_a_glowmarkt_password_to_glow(paired_client, fake_redis):
     client, device_id, _ = paired_client
     client.post(
@@ -840,7 +826,7 @@ def test_the_config_is_saved_even_when_redis_is_down(app, paired_client, fake_re
 
     assert response.status_code == 302
     with app.app_context():
-        assert db.session.get(DeviceConfig, device_id).interval == 30
+        assert db.session.get(DeviceConfig, device_id).weather_location == "London"
 
 
 # --- The weather place picker ---------------------------------------------------------------------------------------

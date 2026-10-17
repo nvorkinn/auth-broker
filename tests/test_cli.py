@@ -76,7 +76,7 @@ def test_unpair_with_config_also_resets_settings_and_linked_accounts(app, client
     device_id, secret = _paired_device(client, register_device)
     with app.app_context():
         config = db.session.get(DeviceConfig, device_id)
-        config.weather_location, config.tfl_stop_ids, config.interval = "London", ["940GZZLUKNG"], 60
+        config.weather_location, config.tfl_stop_ids = "London", ["940GZZLUKNG"]
         config.clock_format = "12h"
         db.session.add(SpotifyToken(device_id=device_id, refresh_token="r"))
         db.session.add(GlowmarktCredentials(device_id=device_id, username="me"))
@@ -87,7 +87,7 @@ def test_unpair_with_config_also_resets_settings_and_linked_accounts(app, client
 
     config = _config(client, device_id, secret)
     assert config["pairing_code"] is not None
-    assert (config["interval"], config["weather"]["location"], config["tfl"]["stop_ids"]) == (20, "", [])
+    assert (config["weather"]["location"], config["tfl"]["stop_ids"]) == ("", [])
     assert config["clock_format"] == "24h"
     assert config["glowmarkt"] == {"username": None, "password": None}
     assert config["notice_board"] == {"postcode": None, "country": None, "style": "airy"}
