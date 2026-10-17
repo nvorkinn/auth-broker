@@ -23,6 +23,8 @@ this page is the map. [The database](database.md) has the tables.
 | **Fluent Bit, VictoriaLogs, VictoriaMetrics** | this repository | Where the screens' and renderers' logs and metrics end up. |
 | **Redis** | this repository, `127.0.0.1:6379` | The store between one provider per API (writing the latest data per stop or location) and the renderers (reading it). The broker writes the subscriptions; the glow-provider below is the first provider here. A cache only: nothing on disk. |
 | **glow-provider** | this repository (`broker/providers/glow.py`), the broker's image, under the `providers` compose profile | Reads the devices' Glowmarkt accounts from the database (read-only), fetches their readings from Glowmarkt and writes them to Redis (`v1:energy:<device id>`), so the passwords never leave the broker. See [the energy provider](../README.md#the-energy-provider). |
+| **Redis** | this repository, `127.0.0.1:6379` | Not used yet. The planned store between one provider per API (writing the latest data per stop or location) and the renderers (reading it). A cache only: nothing on disk. |
+| **spotify-provider** | this repository (`broker/spotify_provider.py`), the broker's image with another command | Fetches each screen's Spotify and Apple Music with the broker's own tokens and code, and writes them to Redis for the renderers (see "Music in the store" in the README). Off until its compose profile is turned on. |
 | **countdown-api** | [countdown-api](https://github.com/nvorkinn/countdown-api), the `vendor/countdown-api` submodule | The OpenAPI contract between renderer and broker (so far `GET /api/config`) and the code generated from it. |
 
 ## Who calls the broker, and how
