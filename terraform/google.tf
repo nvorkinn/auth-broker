@@ -3,7 +3,8 @@
 # passkey or authenticator app. A user with neither has to set one up first.
 #
 # The two flows, their stage bindings and policy bindings are new to Authentik (the blueprint change that added them was
-# never applied there), so none of them is imported: the first apply creates them and points the Google source at them.
+# never applied there), so the first apply creates them and points the Google source at them. Each is imported only when
+# it already exists, so a run after an interrupted apply adopts what that apply made instead of failing on a duplicate.
 resource "authentik_flow" "source_authentication" {
   name               = "Broker Google login"
   slug               = "broker-source-authentication"
@@ -19,6 +20,13 @@ resource "authentik_flow" "source_authentication" {
   }
 }
 
+import {
+  for_each = toset(compact([lookup(local.ids.flows, "broker-source-authentication", "")]))
+
+  to = authentik_flow.source_authentication
+  id = "broker-source-authentication"
+}
+
 resource "authentik_flow" "source_enrollment" {
   name               = "Broker Google sign-up"
   slug               = "broker-source-enrollment"
@@ -32,6 +40,13 @@ resource "authentik_flow" "source_enrollment" {
   lifecycle {
     ignore_changes = [background, compatibility_mode]
   }
+}
+
+import {
+  for_each = toset(compact([lookup(local.ids.flows, "broker-source-enrollment", "")]))
+
+  to = authentik_flow.source_enrollment
+  id = "broker-source-enrollment"
 }
 
 # Google as a federated login source. A Google user is matched to an existing account by email.

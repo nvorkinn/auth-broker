@@ -78,6 +78,15 @@ reads). To plan from your own machine, export those two and run `terraform init`
 `-backend-config="bucket=..."`, `-backend-config="region=..."` and `-backend-config='endpoints={s3="..."}'`.
 State locking is not turned on (it isn't confirmed to work on Oracle's S3 API), so the workflow's concurrency group keeps applies to one at a time instead.
 
+Oracle's S3 API refuses the chunked, checksummed upload the AWS SDK sends by default (`501 AWS chunked encoding not
+supported`), so the workflow sets `AWS_REQUEST_CHECKSUM_CALCULATION` and `AWS_RESPONSE_CHECKSUM_VALIDATION` to
+`when_required`. Export both too when you run Terraform from your own machine. Terraform saves state only at the end of
+an apply, after Authentik has changed, so the apply job first writes and removes a throwaway workspace in the bucket
+and stops there if that fails. If an apply still can't save, the job attaches `errored.tfstate` as the
+`errored-tfstate` artifact for a day: `terraform state push errored.tfstate` puts it back. Losing state that way is
+recoverable: a plan imports what exists again, and objects an interrupted apply already created are adopted, not
+duplicated.
+
 ## Secrets
 
 Repository secrets (Settings > Secrets and variables > Actions), none of them in a file:
