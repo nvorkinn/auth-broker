@@ -1,8 +1,9 @@
 name: Terraform
 
 # Checks and plans terraform/ on pull requests that change it; all-checks treats a workflow that never started as
-# fine. The "Run workflow" button (Actions > Terraform) plans main and, with "apply" ticked, applies that exact plan
-# once it is approved in the terraform environment. See terraform/README.md.
+# fine. The plan reads the live Authentik, so it needs the secrets below and is skipped without them (pull requests
+# from forks and Dependabot don't get them). The "Run workflow" button (Actions > Terraform) plans main and, with
+# "apply" ticked, applies that exact plan once it is approved in the terraform environment. See terraform/README.md.
 on:
   pull_request:
     branches: [main]
@@ -30,6 +31,10 @@ env:
   TF_IN_AUTOMATION: "1"
   TF_INPUT: "0"
   TF_PLUGIN_CACHE_DIR: ${{ github.workspace }}/.terraform-plugins
+  # Where the state bucket is (Settings > Secrets and variables > Actions > Variables); see terraform/README.md.
+  TF_STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
+  TF_STATE_REGION: ${{ vars.TF_STATE_REGION }}
+  TF_STATE_ENDPOINT: ${{ vars.TF_STATE_ENDPOINT }}
 
 defaults:
   run:
@@ -59,7 +64,10 @@ jobs:
       - name: Check formatting
         run: terraform fmt -check -recursive -diff
 
+      # The Authentik provider insists on a token even to validate; nothing contacts the server.
       - name: Validate
+        env:
+          AUTHENTIK_TOKEN: validation-only
         run: |
           mkdir -p "$TF_PLUGIN_CACHE_DIR"
           terraform init -backend=false -lockfile=readonly
@@ -105,19 +113,37 @@ jobs:
     permissions:
       contents: read
       pull-requests: write
+    # AUTHENTIK_TOKEN is the Authentik provider's own variable, and what scripts/authentik_ids.py reads. The plan only
+    # needs to read, so the repository-level secret can be a read-only token; apply gets the terraform environment's.
+    env:
+      AUTHENTIK_TOKEN: ${{ secrets.AUTHENTIK_TOKEN }}
+      # The state bucket's credentials: an Oracle customer secret key, read by the S3 backend under these names.
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      HAVE_SECRETS: ${{ secrets.AUTHENTIK_TOKEN != '' && secrets.AWS_ACCESS_KEY_ID != '' }}
+      TF_VAR_google_client_id: ${{ secrets.TF_VAR_GOOGLE_CLIENT_ID }}
+      TF_VAR_google_client_secret: ${{ secrets.TF_VAR_GOOGLE_CLIENT_SECRET }}
+      TF_VAR_logs_client_secret: ${{ secrets.TF_VAR_LOGS_CLIENT_SECRET }}
+      TF_VAR_metrics_client_secret: ${{ secrets.TF_VAR_METRICS_CLIENT_SECRET }}
     steps:
       - uses: actions/checkout@v7
 
       - *setup-terraform
       - *provider-cache
 
+      - name: Skip the plan without secrets
+        if: env.HAVE_SECRETS != 'true'
+        run: echo "::notice::No AUTHENTIK_TOKEN or state credentials here (a fork or Dependabot pull request, or not set up yet), so there is no plan."
+
       # PR plans don't take the state lock, so they never hold up each other or an apply.
       - name: Plan
+        if: env.HAVE_SECRETS == 'true'
         env:
           LOCK: ${{ github.event_name == 'workflow_dispatch' }}
         run: |
           mkdir -p "$TF_PLUGIN_CACHE_DIR"
-          terraform init -lockfile=readonly
+          terraform init -lockfile=readonly -backend-config="bucket=$TF_STATE_BUCKET" -backend-config="region=$TF_STATE_REGION" \
+            -backend-config="endpoints={s3=\"$TF_STATE_ENDPOINT\"}"
           terraform plan -lock="$LOCK" -out=tfplan
           terraform show -no-color tfplan > plan.txt
           { echo '### Terraform plan'; echo '```'; cat plan.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
@@ -126,7 +152,8 @@ jobs:
       # have the job summary.
       - name: Comment the plan on the PR
         if: >-
-          github.event_name == 'pull_request'
+          env.HAVE_SECRETS == 'true'
+          && github.event_name == 'pull_request'
           && github.event.pull_request.head.repo.full_name == github.repository
           && github.actor != 'dependabot[bot]'
         uses: actions/github-script@v9
@@ -149,7 +176,7 @@ jobs:
             }
 
       - name: Keep the plan for apply
-        if: inputs.apply
+        if: inputs.apply && env.HAVE_SECRETS == 'true'
         uses: actions/upload-artifact@v7
         with:
           name: tfplan
@@ -167,6 +194,12 @@ jobs:
     concurrency:
       group: terraform-apply
       cancel-in-progress: false
+    # The environment's secret, which takes precedence over the repository's, so apply can use a token that
+    # may write while plans use one that can only read.
+    env:
+      AUTHENTIK_TOKEN: ${{ secrets.AUTHENTIK_TOKEN }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
     steps:
       - uses: actions/checkout@v7
 
@@ -175,6 +208,7 @@ jobs:
         run: |
           grep -qE '^\s*(backend\s+"|cloud\s*\{)' ./*.tf \
             || { echo "::error::No remote backend configured in terraform/backend.tf, so there is nowhere to keep state"; exit 1; }
+          [ -n "$TF_STATE_BUCKET" ] || { echo "::error::The TF_STATE_BUCKET variable is not set"; exit 1; }
 
       - *setup-terraform
       - *provider-cache
@@ -187,5 +221,6 @@ jobs:
       - name: Apply
         run: |
           mkdir -p "$TF_PLUGIN_CACHE_DIR"
-          terraform init -lockfile=readonly
+          terraform init -lockfile=readonly -backend-config="bucket=$TF_STATE_BUCKET" -backend-config="region=$TF_STATE_REGION" \
+            -backend-config="endpoints={s3=\"$TF_STATE_ENDPOINT\"}"
           terraform apply tfplan

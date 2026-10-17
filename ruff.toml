@@ -37,3 +37,4 @@ ignore = [
 "broker/migrations/**" = ["INP001"]
 # Stand-alone command-line tools run by path; print is their output.
 "scripts/**" = ["INP001", "T201"]
+"terraform/scripts/**" = ["INP001", "T201"]

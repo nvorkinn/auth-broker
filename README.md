@@ -503,12 +503,12 @@ service, name it: `docker compose up -d caddy`.
 
 While the images build, `release.yml` packages the release's deploy bundle,
 `deploy-<tag>.tar.gz` (this release's `docker-compose.yml`,
-`scripts/deploy.sh`, `authentik/authentik-config.yaml` and encrypted secrets),
-and attaches it to the GitHub Release. Then it has four deploy jobs, one per
-environment: `deploy-caddy`, `deploy-config`, `deploy-authentik` and
-`deploy-authentik-config`. Each one waits, paused, until someone approves it on
-the workflow run page, and each is approved on its own. The two Authentik jobs
-run upstream's image, so they only wait for the bundle, not this repo's images.
+`scripts/deploy.sh`, Authentik's brand assets and encrypted secrets),
+and attaches it to the GitHub Release. Then it has three deploy jobs, one per
+environment: `deploy-caddy`, `deploy-config` and `deploy-authentik`. Each one
+waits, paused, until someone approves it on the workflow run page, and each is
+approved on its own. The Authentik job runs upstream's image, so it only waits
+for the bundle, not this repo's images.
 An approved job SSHes into the host and runs `scripts/fetch-release.sh`, which
 downloads the bundle from the release into `/opt/auth-broker/releases/<tag>/`
 (checking its SHA-256, and skipping the download when that release is already
@@ -529,29 +529,24 @@ there) and runs the bundle's own `deploy.sh`, which:
 Deploying the config server then lists the devices, as a check that the
 database came through. `deploy-config` goes on to deploy Fluent Bit,
 VictoriaLogs and VictoriaMetrics the same way, then Redis, which is brought up
-like Authentik (see [Redis](#redis)). The Authentik jobs skip steps
+like Authentik (see [Redis](#redis)). The Authentik job skips steps
 4–5: they bring the three Authentik services up on the pinned
-`AUTHENTIK_VERSION` (recreating only what changed). `deploy-authentik-config`
-then installs the bundle's `authentik/authentik-config.yaml` into
-`/opt/auth-broker/authentik/` (mounted into the worker at
-`/blueprints/custom/`) and applies it with
-`docker compose exec authentik-worker ak apply_blueprint custom/authentik-config.yaml`,
-which validates the whole blueprint before changing anything. It also installs
+`AUTHENTIK_VERSION` (recreating only what changed). It also installs
 `authentik-assets/countdown-pill.svg` (the brand logo) into
 `/opt/auth-broker/authentik-assets/`, which the server mounts read-only at
 `/web/dist/assets/countdown`, so it is public at
-`/static/dist/assets/countdown/`. Only brand assets belong there; the blueprint
-stays in `authentik/`. The blueprint is
-labelled `blueprints.goauthentik.io/instantiate: 'false'`, so the worker never
-applies it on its own. It takes the providers' client secrets with `!Env` from
-`authentik.env` (`BLUEPRINT_LOGS_CLIENT_SECRET`,
-`BLUEPRINT_METRICS_CLIENT_SECRET`), and likewise the Google login source's OAuth
-client (`BLUEPRINT_GOOGLE_CLIENT_ID`, `BLUEPRINT_GOOGLE_CLIENT_SECRET`; its
-redirect URI is `https://sso.nikolaivorkinn.com/source/oauth/callback/google/`); never commit them in the YAML. It leaves
-users alone: no users, tokens, TOTP or passkey devices, or group members are
-in it, so manage those in Authentik's UI. It holds only what this repo owns
-(the recovery flow, the sign-up flow, passkey login, the brands, the Logs and Metrics proxy
-providers and apps, the embedded outpost's providers, the Google source).
+`/static/dist/assets/countdown/`. Only brand assets belong there.
+
+What Authentik is *configured* with is not part of a release: it lives in
+`terraform/` (see its [README](terraform/README.md)) and is planned on every PR and
+applied by hand from the Terraform workflow. It leaves users alone: no users, tokens, TOTP or
+passkey devices, or group members are in it, so manage those in Authentik's UI. It holds only what
+this repo owns (the recovery flow, the sign-up flow, passkey login, the brands, the Broker, Logs and
+Metrics proxy providers and apps, the embedded outpost's providers, the Google source), and
+the Google client and the Logs and Metrics client secrets are GitHub secrets
+(`TF_VAR_GOOGLE_CLIENT_ID`, `TF_VAR_GOOGLE_CLIENT_SECRET`, `TF_VAR_LOGS_CLIENT_SECRET`,
+`TF_VAR_METRICS_CLIENT_SECRET`), never committed. The Google client's redirect URI is
+`https://sso.nikolaivorkinn.com/source/oauth/callback/google/`.
 Google login and sign-up use their own flows (`broker-source-authentication`, `broker-source-enrollment`)
 that run the same mandatory second-factor stage as the sign-up before logging the user in, so a Google
 sign-in no longer skips the passkey or authenticator app; a user with neither sets one up first.
@@ -565,12 +560,8 @@ login. The check isn't a security boundary, as the query can be forged: a new ac
 internal user in no group, so it can't reach Logs or Metrics, which stay admin-only. The login
 flow itself still asks for a second factor only from users who have one.
 Authentik's own default and system blueprints own the stock flows, stages,
-policies, mappings and groups: look those up with `!Find` by name or slug, and
-patch the few this file customises, and never paste in a UI export, whose exported
-pks exist only on one instance and clash with the stock objects' names. Blueprints
-only create and update, so removing an entry doesn't delete the object; add a
-`state: absent` entry or delete it in the UI. Entries are applied in order,
-so an object has to come before anything that points at it. Re-running
+policies, mappings and groups; Terraform imports the few this repo customises and sets only the
+attributes it overrides, so it leaves the rest of those objects as Authentik has them. Re-running
 a job redeploys the same tag; to roll back, re-run the deploy jobs of the older
 release's workflow run, which deploys that release's own bundle. Old releases
 stay under `releases/`; they're a few KB each.
@@ -581,9 +572,7 @@ already-enrolled TOTP authenticator or WebAuthn device, then enter and confirm
 a new password. Recovery uses the existing password-change policy and denies
 users without either supported second factor; it does not enroll new factors
 or reactivate disabled accounts. Both recovery and the sign-up's email
-confirmation need working email: see [Email](#email-resend). The blueprint uses `!Env` tags, so
-generic YAML schema validators cannot parse it unchanged; the deploy job uses
-Authentik's own `ak apply_blueprint`, which applies changes, not just validates.
+confirmation need working email: see [Email](#email-resend).
 
 Passkey login: the login screen's identification stage offers a passkey
 (Face ID / Touch ID) button, backed by the `default-authentication-passkey-validation`
@@ -596,19 +585,10 @@ before this change that aren't discoverable still work as a second factor only.
 
 One-time setup in the repo's **Settings**:
 
-- **Blueprint validation** in the Authentik config workflow (which only runs when
-  `authentik/`, its validator or `docker-compose.yml` changes) needs no secrets.
-  `scripts/validate_authentik_config.py` starts a throwaway Authentik and
-  Postgres with Docker Compose (`scripts/authentik-validate/`, on the
-  `AUTHENTIK_VERSION` that `docker-compose.yml` defaults to), migrates it, applies
-  Authentik's default and system blueprints, then applies the candidate with
-  `ak apply_blueprint`, with validation-only values for the `!Env` tags, and tears
-  everything down. It is a real apply, not `--dry-run`: the dry run can't resolve
-  `!KeyOf` references to objects the blueprint is about to create. It takes about
-  2 to 4 minutes, so run it locally with `python scripts/validate_authentik_config.py`
-  (it needs Docker).
-- **Environments**: create `deploy-caddy`, `deploy-config`, `deploy-authentik`
-  and `deploy-authentik-config`, and on each tick
+- **Terraform** (Authentik's configuration): the `AUTHENTIK_TOKEN` and `TF_VAR_*` secrets and the
+  `terraform` environment, described in [terraform/README.md](terraform/README.md#secrets).
+- **Environments**: create `deploy-caddy`, `deploy-config` and `deploy-authentik`,
+  and on each tick
   **Required reviewers** and add yourself. That rule is what keeps the jobs
   from running on their own. Optionally limit each to `v*` tags under
   **Deployment branches and tags**.

@@ -106,7 +106,7 @@ jobs:
             ${{ env.IMAGE }}:latest
 
   # The deploy bundle is what the host deploys from: this release's
-  # docker-compose.yml, deploy.sh, Authentik blueprint and SOPS-encrypted
+  # docker-compose.yml, deploy.sh, Authentik's brand assets and SOPS-encrypted
   # secrets, attached to the GitHub Release. It doesn't need the images, so it
   # builds alongside them.
   package:
@@ -129,7 +129,6 @@ jobs:
           mkdir -p "deploy-$TAG/secrets" "deploy-$TAG/authentik"
           cp docker-compose.yml scripts/deploy.sh "deploy-$TAG/"
           cp secrets/*.env "deploy-$TAG/secrets/"
-          cp authentik/authentik-config.yaml "deploy-$TAG/authentik/"
           mkdir -p "deploy-$TAG/authentik-assets"
           cp authentik-assets/countdown-pill.svg "deploy-$TAG/authentik-assets/"
           # Fixed order, times and owners, so a re-run builds the same bytes.
@@ -209,12 +208,9 @@ jobs:
         include:
           # Installs this release's compose file, then brings up the three
           # Authentik services on the AUTHENTIK_VERSION pinned in the host's .env.
+          # Authentik's own configuration is Terraform's, not part of a release.
           - environment: deploy-authentik
             services: authentik
-          # The same, then installs authentik/authentik-config.yaml and applies
-          # it to the running Authentik with `ak apply_blueprint`.
-          - environment: deploy-authentik-config
-            services: authentik-config
     environment: ${{ matrix.environment }}
     concurrency:
       group: ${{ matrix.environment }}-${{ needs.tag.outputs.value }}

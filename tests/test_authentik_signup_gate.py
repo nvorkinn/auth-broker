@@ -1,4 +1,4 @@
-"""Test the sign-up gate in authentik/authentik-config.yaml, run here the way Authentik does.
+"""Test the sign-up gate in terraform/policies, run here the way Authentik does.
 
 Its text is the body of a function of `request`. It offers the sign-up only to a login that will return to the
 broker's /pair page.
@@ -13,16 +13,13 @@ from urllib.parse import urlencode
 
 import pytest
 
-BLUEPRINT = "authentik/authentik-config.yaml"
+GATE = "terraform/policies/broker-enrollment-from-broker.expression"
 
 
 def _gate():
-    text = Path(BLUEPRINT).read_text()
-    start = text.index("      name: broker-enrollment-from-broker")
-    body = text[text.index("      expression: |\n", start) + len("      expression: |\n") :]
-    body = body[: body.index("\n  - model:")]
+    body = Path(GATE).read_text()
     namespace = {}
-    exec("def gate(request):\n" + textwrap.indent(textwrap.dedent(body), "    "), namespace)  # noqa: S102 -- builds the gate from the blueprint text under test
+    exec("def gate(request):\n" + textwrap.indent(body, "    "), namespace)  # noqa: S102 -- builds the gate from the policy text under test
     return namespace["gate"]
 
 

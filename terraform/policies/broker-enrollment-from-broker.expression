@@ -1,0 +1,15 @@
+import base64
+import json
+from urllib.parse import parse_qs, urlparse
+
+# The sign-in's `state` is a token from the proxy that carries the page to return to.
+http_request = request.http_request
+query = parse_qs(http_request.GET.get("query", "")) if http_request else {}
+state = (query.get("state") or [""])[0]
+try:
+    payload = state.split(".")[1]
+    claims = json.loads(base64.urlsafe_b64decode(payload + "=" * (-len(payload) % 4)))
+    target = urlparse(claims.get("redirect", ""))
+except (IndexError, ValueError, TypeError, AttributeError):
+    return False
+return target.hostname == "auth.nikolaivorkinn.com" and target.path == "/pair"

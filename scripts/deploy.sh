@@ -4,7 +4,7 @@
 # /opt/auth-broker/releases/<tag>/ and runs this copy, which installs the
 # bundled docker-compose.yml, pins one compose service to the tag in .env, then
 # pulls and restarts just that service.
-# Usage: deploy.sh <auth-broker|caddy|fluent-bit|victoria-logs|victoria-metrics|redis|authentik|authentik-config> <tag>
+# Usage: deploy.sh <auth-broker|caddy|fluent-bit|victoria-logs|victoria-metrics|redis|authentik> <tag>
 #
 # Secrets come from the bundle's SOPS-encrypted secrets/<name>.env, all of
 # them decrypted on every deploy with the host's age key into <name>.env next
@@ -14,12 +14,8 @@
 # authentik is the three Authentik services. Their image is upstream's, pinned
 # by hand with AUTHENTIK_VERSION in .env (one minor version at a time), so
 # they aren't pinned to the release tag: this installs the compose file and
-# brings them up on whatever is pinned.
-#
-# authentik-config does the same, then installs the bundle's Authentik
-# blueprint (authentik/authentik-config.yaml) into authentik/, which the
-# worker mounts, and applies it with `ak apply_blueprint`. The blueprint reads
-# its secrets with !Env from authentik.env.
+# the brand assets the server serves, and brings them up on whatever is
+# pinned. What Authentik is configured with is Terraform's (terraform/).
 #
 # redis is upstream's image too, pinned in docker-compose.yml itself. Like
 # authentik, it's brought up rather than force-recreated, so a release that
@@ -49,7 +45,7 @@ case "$service" in
     var="${service^^}"
     var="${var//-/_}_VERSION"
     ;;
-  authentik | authentik-config) services=(authentik-postgresql authentik-server authentik-worker) ;;
+  authentik) services=(authentik-postgresql authentik-server authentik-worker) ;;
   redis) ;;
   *) echo "unknown service: $service" >&2; exit 1 ;;
 esac
@@ -96,14 +92,10 @@ fi
   # Copy then mv, so compose never reads a half-written file.
   cp "$bundle/docker-compose.yml" docker-compose.yml.tmp
   mv docker-compose.yml.tmp docker-compose.yml
-  # The worker bind-mounts authentik/; made here so Docker doesn't create it
-  # root-owned. Only an authentik-config deploy changes what's in it.
-  # authentik-assets/ is the server's public static mount (brand assets only),
-  # kept apart from authentik/ so the blueprint is never served.
-  mkdir -p authentik authentik-assets
-  if [ "$service" = authentik-config ]; then
-    cp "$bundle/authentik/authentik-config.yaml" authentik/.authentik-config.yaml.tmp
-    mv authentik/.authentik-config.yaml.tmp authentik/authentik-config.yaml
+  # authentik-assets/ is the server's public static mount (brand assets
+  # only); made here so Docker doesn't create it root-owned.
+  mkdir -p authentik-assets
+  if [ "$service" = authentik ]; then
     cp "$bundle/authentik-assets/countdown-pill.svg" authentik-assets/.countdown-pill.svg.tmp
     mv authentik-assets/.countdown-pill.svg.tmp authentik-assets/countdown-pill.svg
   fi
@@ -126,20 +118,14 @@ if [ -n "$var" ]; then
   docker compose up -d --no-deps --force-recreate "${services[@]}"
 else
   # Recreates only what changed, so a release that doesn't touch Authentik
-  # (or Redis) leaves it running. The authentik, authentik-config and
-  # deploy-config (for redis) jobs can run at once, so they take turns.
+  # (or Redis) leaves it running. The authentik and deploy-config (for
+  # redis) jobs can run at once, so they take turns.
   (
     flock 9
     docker compose up -d --wait --wait-timeout 600 "${services[@]}"
   ) 9>up.lock
 fi
 docker compose ps "${services[@]}"
-
-if [ "$service" = authentik-config ]; then
-  # Validates the whole blueprint first and applies nothing if it's invalid.
-  docker compose exec -T authentik-worker ak apply_blueprint custom/authentik-config.yaml
-  echo "Applied authentik-config.yaml"
-fi
 
 if [ "$service" = auth-broker ]; then
   # A check that the database came through.
