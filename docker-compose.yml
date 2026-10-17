@@ -59,8 +59,11 @@ services:
     command: ["gunicorn", "--bind", "127.0.0.1:5000", "wsgi:app"]
     volumes:
       - ./data:/app/data
-    # Secrets, decrypted from secrets/broker.env by deploy.sh.
-    env_file: broker.env
+    # Secrets, decrypted from secrets/broker.env by deploy.sh; and Redis's password (REDIS_PASSWORD, from
+    # secrets/redis.env), for writing the subscriptions to Redis.
+    env_file:
+      - broker.env
+      - redis.env
     environment:
       <<: *request-logging
       SESSION_COOKIE_SECURE: "true"
