@@ -35,6 +35,10 @@ env:
   TF_STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
   TF_STATE_REGION: ${{ vars.TF_STATE_REGION }}
   TF_STATE_ENDPOINT: ${{ vars.TF_STATE_ENDPOINT }}
+  # Oracle's S3 API answers the AWS SDK's default chunked, checksummed upload with 501 "AWS chunked encoding not
+  # supported", so state couldn't be saved. These make the S3 backend send a plain upload instead.
+  AWS_REQUEST_CHECKSUM_CALCULATION: when_required
+  AWS_RESPONSE_CHECKSUM_VALIDATION: when_required
 
 defaults:
   run:
@@ -218,9 +222,27 @@ jobs:
           name: tfplan
           path: terraform
 
-      - name: Apply
+      # Terraform saves state only at the end of an apply, after Authentik has already changed, so find out now that the
+      # bucket takes writes. A throwaway workspace is written, and removed, through the same code path as the state.
+      - name: Check the state bucket accepts writes
         run: |
           mkdir -p "$TF_PLUGIN_CACHE_DIR"
           terraform init -lockfile=readonly -backend-config="bucket=$TF_STATE_BUCKET" -backend-config="region=$TF_STATE_REGION" \
             -backend-config="endpoints={s3=\"$TF_STATE_ENDPOINT\"}"
-          terraform apply tfplan
+          terraform workspace new "preflight-$GITHUB_RUN_ID"
+          terraform workspace select default
+          terraform workspace delete "preflight-$GITHUB_RUN_ID"
+
+      - name: Apply
+        run: terraform apply tfplan
+
+      # If the bucket can't be reached, Terraform writes the state here instead. It holds secrets, so it is kept for a
+      # day only: push it back with `terraform state push errored.tfstate`.
+      - name: Keep the state of a failed apply
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: errored-tfstate
+          path: terraform/errored.tfstate
+          if-no-files-found: ignore
+          retention-days: 1

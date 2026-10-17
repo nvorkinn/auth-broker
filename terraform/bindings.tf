@@ -1,9 +1,6 @@
 # Which stages each flow runs, in order. A flow's stages are found by where they sit (flow and order), because a
 # binding has no name of its own.
 locals {
-  # Created by the first apply, not imported (see google.tf), so their bindings are created too.
-  new_flows = ["broker-source-authentication", "broker-source-enrollment"]
-
   flows = {
     "default-recovery-flow"        = authentik_flow.recovery
     "broker-enrollment"            = authentik_flow.enrollment
@@ -69,8 +66,12 @@ resource "authentik_flow_stage_binding" "this" {
   re_evaluate_policies = each.value.re_evaluate_policies
 }
 
+# Only the bindings that exist are imported: those of the Google flows are new until the first apply creates them.
 import {
-  for_each = { for key, binding in local.flow_bindings : key => binding if !contains(local.new_flows, binding.flow) }
+  for_each = {
+    for key, binding in local.flow_bindings : key => binding
+    if contains(keys(local.ids.flow_bindings), "${lookup(local.ids.flows, binding.flow, "none")}/${binding.order}")
+  }
 
   to = authentik_flow_stage_binding.this[each.key]
   id = local.ids.flow_bindings["${local.ids.flows[each.value.flow]}/${each.value.order}"]
@@ -130,4 +131,35 @@ resource "authentik_policy_binding" "source_enrollment_if_username" {
   enabled = true
   negate  = false
   timeout = 30
+}
+
+# The Google flows' policy bindings are new as well, so each is imported only when it exists. Their ids are looked up by
+# where they sit (target, order, policy), like the stage bindings.
+locals {
+  google_flow_policy_bindings = {
+    source_authentication_if_sso  = "${lookup(local.ids.flows, "broker-source-authentication", "none")}/0/${local.ids.policies["default-source-authentication-if-sso"]}"
+    source_enrollment_if_sso      = "${lookup(local.ids.flows, "broker-source-enrollment", "none")}/0/${local.ids.policies["default-source-enrollment-if-sso"]}"
+    source_enrollment_if_username = "${lookup(local.ids.flow_bindings, "${lookup(local.ids.flows, "broker-source-enrollment", "none")}/10", "none")}/0/${local.ids.policies["default-source-enrollment-if-username"]}"
+  }
+}
+
+import {
+  for_each = toset(compact([lookup(local.ids.policy_bindings, local.google_flow_policy_bindings.source_authentication_if_sso, "")]))
+
+  to = authentik_policy_binding.source_authentication_if_sso
+  id = each.value
+}
+
+import {
+  for_each = toset(compact([lookup(local.ids.policy_bindings, local.google_flow_policy_bindings.source_enrollment_if_sso, "")]))
+
+  to = authentik_policy_binding.source_enrollment_if_sso
+  id = each.value
+}
+
+import {
+  for_each = toset(compact([lookup(local.ids.policy_bindings, local.google_flow_policy_bindings.source_enrollment_if_username, "")]))
+
+  to = authentik_policy_binding.source_enrollment_if_username
+  id = each.value
 }
