@@ -110,6 +110,9 @@ services:
     env_file:
       - broker.env
       - redis.env
+    # Not used here, but the broker's create_app() won't start without it.
+    environment:
+      SPOTIFY_REDIRECT_URI: https://auth.nikolaivorkinn.com/auth/spotify/callback
     stop_grace_period: 30s
 
   caddy:
