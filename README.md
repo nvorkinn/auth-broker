@@ -327,6 +327,7 @@ broker/
   auth.py     the decorators that guard routes
   config.py   environment variables → app.config
   cli.py      `flask devices ...` admin commands
+  providers/  long-running processes that fill the shared Redis store (the glow-provider)
   spotify_provider.py  the music provider, writing each screen's Spotify and Apple Music to Redis
 ```
 
@@ -806,7 +807,8 @@ The `redis` compose service is upstream's `redis:8.10-alpine`, pinned in
 `docker-compose.yml` (bump it there). It is the store in the middle of the
 renderers: the broker records which stops and locations screens want, one
 provider per API fetches them and writes the latest data under a key per stop
-or location, and the renderers read it. Nothing uses it yet.
+or location, and the renderers read it. The broker writes the subscriptions,
+and [the energy provider](#the-energy-provider) is the first provider here.
 
 It is a cache only, so it keeps nothing on disk: provider data comes back
 within minutes and the subscriptions are rebuilt from the broker's database.
@@ -820,6 +822,72 @@ change its service leaves it running. To look inside, on the host:
 docker exec -it redis sh -c 'REDISCLI_AUTH="$REDIS_PASSWORD" redis-cli'
 ```
 
+### The energy provider
+
+`broker/providers/glow.py`, the `glow-provider` compose service, fetches every
+Glow device's electricity readings from Glowmarkt and writes them to Redis, so
+the renderers on the host draw the energy panel from there instead of signing
+in to Glowmarkt themselves. It's the broker's own image with another command
+(`python -m broker.providers.glow`), because the Glowmarkt passwords are
+encrypted with the broker's `CREDENTIAL_ENCRYPTION_KEY`: it reads the devices
+with an account straight from the database (opened read-only, `./data` mounted
+`:ro`; the same accounts as the broker's `v1:sub:glow`, less any without a
+username), so the passwords never leave the broker and it needs no token of its
+own. Renderers on standalone Pis can't reach Redis, so `GET /api/config` still
+carries the credentials for them.
+
+Every 15 minutes (on the epoch-aligned tick, or at once for an account that's
+new or changed when the broker publishes on `v1:sub:changed`) it asks Glowmarkt,
+per device, for the three pages the renderer's energy panel draws, and writes
+`v1:energy:<device id>` with a TTL of an hour. Glowmarkt has a new reading at
+most every half-hour; an hour is four cycles, so a blip of a cycle or two goes
+unnoticed, while after an hour without a fetch the key is gone and the renderers
+stop drawing new pages (each keeps its last) rather than redraw stale ones. A device
+whose sign-in fails is logged and skipped (its key expires); its token is kept
+between cycles and renewed when Glowmarkt refuses it. The value is Glowmarkt's
+answers as they came, in a thin wrapper, so the renderer reads them with the
+models it already has (pi-dashboard's `countdown_core/store/energy.py`):
+
+```json
+{
+  "fetched_at": "2026-09-25T05:10:00+00:00",
+  "device_id": "a1b2c3d4e5f6",
+  "offset": "-60",
+  "resource_id": "<the electricity consumption resource>",
+  "hourly":  {"data": [[1790229600, 0.21], "..."], "...": "Glowmarkt's PT1H readings, the last 24 hours"},
+  "daily":   {"data": [[1787616000, 6.4], "..."],  "...": "P1D, the last 31 days"},
+  "monthly": {"data": [[1767225600, 190.0], "..."], "...": "P1M, since 1st January"}
+}
+```
+
+Each page is asked for from the start of its window's first bucket (the hour
+24 hours ago, midnight 31 days ago, 1st January) to now, in the screen's time
+zone (the `timezone` `GET /api/config` sends: Europe/London or Europe/Oslo) at
+today's UTC offset. `offset` is Glowmarkt's parameter for it, minutes from local
+time to UTC (BST is `-60`): Glowmarkt labels each bucket with its local
+wall-clock start as if it were UTC, and the renderer relabels them with it. The
+renderer cuts each page to its window as of when it draws, so a value up to an
+hour old still draws the right 24 hours, 31 days and year, missing at most the
+readings since `fetched_at`. `tests/fixtures/glow_energy.json` is one fetch,
+from Glowmarkt's answers to the stored value; pi-dashboard's tests read the
+same file, so change both together.
+
+It runs under the `providers` compose profile, so a deploy neither starts nor
+upgrades it. To try it on the host (Redis must be up):
+
+```bash
+cd /opt/auth-broker
+docker compose --profile providers up -d glow-provider
+docker logs -f glow-provider
+docker exec -it redis sh -c 'REDISCLI_AUTH="$REDIS_PASSWORD" redis-cli --scan --pattern "v1:energy:*"'
+```
+
+A container started that way is left alone by later deploys: not upgraded with
+the broker. To have the releases run it, remove its `profiles` line and add it
+to `deploy.sh`'s `auth-broker` services (it runs the same image, so it's pinned
+by `AUTH_BROKER_VERSION` and recreated with the broker). The renderers read it
+once pi-dashboard's orchestrator is given `RENDERER_REDIS_URL` (see its
+providers README).
 ## Music in the store
 
 `broker/spotify_provider.py` is the music provider: a long-running process that fetches what each screen's Spotify

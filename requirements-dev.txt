@@ -3,4 +3,5 @@ pytest
 pytest-cov
 pytest-xdist
 fakeredis
+responses
 ruff==0.17.0
