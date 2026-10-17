@@ -5,7 +5,7 @@ used to be a blueprint applied by the `deploy-authentik-config` release job.
 
 ```
 versions.tf    Terraform and provider versions
-backend.tf     where state lives (not chosen yet, see below)
+backend.tf     where state lives: an Oracle Object Storage bucket (see Remote state)
 providers.tf   provider settings
 variables.tf   inputs; secret ones come from GitHub secrets as TF_VAR_*
 main.tf        (empty: the resources are in the files below)
@@ -50,11 +50,29 @@ from the live server (read-only, with `AUTHENTIK_TOKEN`) and `imports.tf` expose
 The first plan should show imports and no creates or destroys. After one apply has put everything in the state,
 the import blocks do nothing and can be deleted; `local.ids` is still used to find stock objects by name.
 
-## Before the first apply: remote state
+## Remote state
 
-State is local until a backend is chosen, so the apply job refuses to run: local state on a CI runner is thrown
-away with it, and Terraform would lose track of what it imported. Pick a backend, fill in `backend.tf`, and put
-its credentials in GitHub secrets.
+State lives in an Oracle Cloud Object Storage bucket, through its S3-compatible API (`backend.tf`). Local state on a
+CI runner would be thrown away with it, and Terraform would lose track of what it imported, so the apply job refuses
+to run without a bucket. One-time setup in Oracle Cloud:
+
+1. Create a private bucket, e.g. `auth-broker-tfstate`, and turn on versioning so an earlier state can be restored.
+2. Create a customer secret key for a user that may manage objects in that bucket (Profile > User settings >
+   Customer secret keys); it gives an access key and a secret.
+3. Note your Object Storage namespace (Tenancy details) and the bucket's region.
+
+Then add these in the repo's Settings > Secrets and variables > Actions, and nothing else about the bucket is committed:
+
+| Variable | Value |
+| --- | --- |
+| `TF_STATE_BUCKET` | the bucket name |
+| `TF_STATE_REGION` | its region, e.g. `eu-frankfurt-1` |
+| `TF_STATE_ENDPOINT` | `https://<namespace>.compat.objectstorage.<region>.oraclecloud.com` |
+
+The access key and secret go in the secrets `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` (the names the S3 backend
+reads). To plan from your own machine, export those two and run `terraform init` with the same three values as
+`-backend-config="bucket=..."`, `-backend-config="region=..."` and `-backend-config='endpoints={s3="..."}'`.
+State locking is not turned on (it isn't confirmed to work on Oracle's S3 API), so the workflow's concurrency group keeps applies to one at a time instead.
 
 ## Secrets
 
@@ -65,8 +83,9 @@ Repository secrets (Settings > Secrets and variables > Actions), none of them in
 | `AUTHENTIK_TOKEN` | An Authentik API token (Directory > Tokens, for a dedicated service account). Plans only read, so the repository secret can be a read-only token; add one that may write as a secret of the `terraform` environment, which apply uses instead. |
 | `TF_VAR_GOOGLE_CLIENT_ID`, `TF_VAR_GOOGLE_CLIENT_SECRET` | The Google login source's OAuth client (they were `BLUEPRINT_GOOGLE_*` in `secrets/authentik.env`). |
 | `TF_VAR_LOGS_CLIENT_SECRET`, `TF_VAR_METRICS_CLIENT_SECRET` | The Logs and Metrics providers' client secrets (`BLUEPRINT_LOGS_CLIENT_SECRET`, `BLUEPRINT_METRICS_CLIENT_SECRET`). |
+| `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` | The state bucket's customer secret key (see [Remote state](#remote-state)). |
 
-Without `AUTHENTIK_TOKEN` the plan is skipped (the other checks still run). A saved plan contains the
+Without `AUTHENTIK_TOKEN` and the bucket's key the plan is skipped (the other checks still run). A saved plan contains the
 secret values, so the plan artifact `apply` uses is kept for a day only.
 
 ## Changing Authentik's configuration
