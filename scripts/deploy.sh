@@ -44,6 +44,8 @@ case "$service" in
   auth-broker | caddy | fluent-bit | victoria-logs | victoria-metrics)
     var="${service^^}"
     var="${var//-/_}_VERSION"
+    # The providers run the broker's image (and so its AUTH_BROKER_VERSION), so they're recreated with it.
+    if [ "$service" = auth-broker ]; then services=(auth-broker glow-provider spotify-provider); fi
     ;;
   authentik) services=(authentik-postgresql authentik-server authentik-worker) ;;
   redis) ;;

@@ -874,22 +874,17 @@ readings since `fetched_at`. `tests/fixtures/glow_energy.json` is one fetch,
 from Glowmarkt's answers to the stored value; pi-dashboard's tests read the
 same file, so change both together.
 
-It runs under the `providers` compose profile, so a deploy neither starts nor
-upgrades it. To try it on the host (Redis must be up):
+It runs the broker's image, so `deploy.sh` recreates it with the broker on
+every `deploy-config`, pinned by the same `AUTH_BROKER_VERSION`. To see it on
+the host:
 
 ```bash
-cd /opt/auth-broker
-docker compose --profile providers up -d glow-provider
 docker logs -f glow-provider
 docker exec -it redis sh -c 'REDISCLI_AUTH="$REDIS_PASSWORD" redis-cli --scan --pattern "v1:energy:*"'
 ```
 
-A container started that way is left alone by later deploys: not upgraded with
-the broker. To have the releases run it, remove its `profiles` line and add it
-to `deploy.sh`'s `auth-broker` services (it runs the same image, so it's pinned
-by `AUTH_BROKER_VERSION` and recreated with the broker). The renderers read it
-once pi-dashboard's orchestrator is given `RENDERER_REDIS_URL` (see its
-providers README).
+The renderers read it once pi-dashboard's orchestrator is given
+`RENDERER_REDIS_URL` (see its providers README).
 ## Music in the store
 
 `broker/spotify_provider.py` is the music provider: a long-running process that fetches what each screen's Spotify
@@ -948,15 +943,14 @@ the provider makes no more Spotify calls than the renderers it stands in for: on
 every half hour. It also fetches the devices of standalone Pis (the database can't tell which renderers read the
 store), which still call the routes too.
 
-To try it on the host: `docker compose --profile providers up -d spotify-provider`, then
+To see it on the host: `docker logs -f spotify-provider`, and
 `docker exec -it redis sh -c 'REDISCLI_AUTH="$REDIS_PASSWORD" redis-cli GET v1:spotify:<device id>'`. Locally, with
 Redis running and the broker's environment loaded, `python -m broker.spotify_provider` (`LOG_LEVEL=debug` shows each
 cycle).
 
-It's under the `providers` compose profile, so a deploy neither starts nor upgrades it. To turn it on for good:
-remove `profiles: [ providers ]` from its service, and add `spotify-provider` to the services `deploy.sh` recreates
-for `auth-broker` (it runs the same image, pinned by `AUTH_BROKER_VERSION`). Then set `RENDERER_REDIS_URL` for
-pi-dashboard's orchestrator (its providers README, "Enabling in production"), so the renderers read the store.
+It runs the broker's image, so `deploy.sh` recreates it with the broker on every `deploy-config`, pinned by the same
+`AUTH_BROKER_VERSION`. The renderers read it once pi-dashboard's orchestrator is given `RENDERER_REDIS_URL` (its
+providers README, "Enabling in production").
 
 ## Not built yet
 

@@ -72,13 +72,12 @@ services:
 
   # The music provider: what each screen's Spotify and Apple Music are playing, written to Redis for the renderers
   # (see "Music in the store" in the README). The broker's image and settings, as it uses the broker's database and
-  # Spotify code (and writes refreshed tokens back to it). Under the providers profile, so a deploy neither starts nor
-  # removes it until it's turned on: `docker compose --profile providers up -d spotify-provider`.
+  # Spotify code (and writes refreshed tokens back to it). Deployed with the broker (deploy.sh's auth-broker), on the
+  # same AUTH_BROKER_VERSION.
   spotify-provider:
     <<: *release-image
     image: ghcr.io/nvorkinn/auth-broker:${AUTH_BROKER_VERSION:-latest}
     container_name: spotify-provider
-    profiles: [ providers ]
     logging: *logging
     # Host networking, to reach Redis on 127.0.0.1:6379 (and VictoriaLogs, like the broker).
     network_mode: host
@@ -199,13 +198,12 @@ services:
   # The glow-provider (broker/providers/glow.py): every Glow device's energy readings, from Glowmarkt into Redis as
   # v1:energy:<device id>. The broker's own image with another command, so it decrypts the Glowmarkt passwords with
   # the broker's key (broker.env) and they never leave the broker; it opens the database read-only. Host networking
-  # for Redis on 127.0.0.1:6379, with REDIS_PASSWORD from redis.env. Under the providers profile, so deploys neither
-  # start nor upgrade it yet: see "The energy provider" in the README to turn it on.
+  # for Redis on 127.0.0.1:6379, with REDIS_PASSWORD from redis.env. Deployed with the broker (deploy.sh's auth-broker),
+  # on the same AUTH_BROKER_VERSION.
   glow-provider:
     <<: *release-image
     image: ghcr.io/nvorkinn/auth-broker:${AUTH_BROKER_VERSION:-latest}
     container_name: glow-provider
-    profiles: [ providers ]
     logging: *logging
     network_mode: host
     command: ["python", "-m", "broker.providers.glow"]
