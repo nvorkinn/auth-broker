@@ -66,9 +66,13 @@ ORIENTATIONS = ("horizontal", "vertical")
 CLOCK_FORMATS = {"24h": "24-hour (13:00)", "12h": "12-hour (1:00 PM)"}
 # What the screen is drawn in: the API contract's language, with its name in itself for the config page.
 LANGUAGES = {"en": "English", "nb": "Norsk"}
-# The screen's refresh interval, in seconds: its default and the range the config site accepts.
-DEFAULT_INTERVAL = 20
-MIN_INTERVAL, MAX_INTERVAL = 20, 300
+# How often a screen refreshes, in seconds. Nobody sets it: it is BASE_INTERVAL, unless a provider's data is bursty
+# (a release is running) and the renderer asks for faster, never below MIN_INTERVAL. See services/pace.py.
+BASE_INTERVAL = 60
+MIN_INTERVAL = 20
+# How long a renderer's request for a faster refresh holds after its last frame upload, so one that stops asking
+# (or dies) is back at BASE_INTERVAL by itself.
+PACE_LEASE_S = 180
 # How the screen draws every panel (the departures, Spotify, the notice board): the API contract's style, with the
 # name and description the config page shows beside each one's picture (broker/static/styles/<style>.png, cut from
 # the renderer's own portrait snapshot of every panel in it).
@@ -85,7 +89,6 @@ class DeviceConfig(db.Model):
     __tablename__ = "device_config"
 
     device_id: Mapped[str] = mapped_column(ForeignKey("devices.device_id"), primary_key=True)
-    interval: Mapped[int] = mapped_column(Integer, default=DEFAULT_INTERVAL, server_default=text("20"))
     clock_format: Mapped[str] = mapped_column(String, default="24h", server_default=text("'24h'"))
     # The screen's language, one of LANGUAGES.
     language: Mapped[str] = mapped_column(String, default="en", server_default=text("'en'"))
@@ -223,6 +226,10 @@ class Frame(db.Model):
     frame: Mapped[bytes] = mapped_column(LargeBinary)
     etag: Mapped[str] = mapped_column(String)
     rendered_at: Mapped[datetime] = mapped_column(UTCDateTime)
+    # The refresh interval the renderer asked for with this frame, while a provider's data is bursty, and when that
+    # lapses. None when it didn't ask.
+    pace: Mapped[int | None] = mapped_column(Integer)
+    pace_until: Mapped[datetime | None] = mapped_column(UTCDateTime)
 
 
 class RendererAssignment(db.Model):

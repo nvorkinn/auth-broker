@@ -397,7 +397,7 @@ def test_schema_creates_frames_table(app):
         inspector = inspect(db.engine)
         columns = {column["name"]: column for column in inspector.get_columns("frames")}
         primary_key = inspector.get_pk_constraint("frames")["constrained_columns"]
-    assert set(columns) == {"device_id", "frame", "etag", "rendered_at"}
+    assert set(columns) == {"device_id", "frame", "etag", "rendered_at", "pace", "pace_until"}
     assert primary_key == ["device_id"]
     assert str(columns["frame"]["type"]) == "BLOB"
     assert not any(columns[name]["nullable"] for name in ("frame", "etag", "rendered_at"))
@@ -862,3 +862,73 @@ def test_post_on_the_id_less_route_uses_the_secrets_own_device(client, register_
     _post(client, {"metrics": LINES}, secret=display_secret, path="/api/frame")
 
     assert _metrics_calls(shipped)[0]["data"] == f"esp,device_id={device_id} uptime_s=3600i,rssi=-60i".encode()
+
+
+# --- the pace: a renderer asking for a faster refresh, as a lease -------------------------------------------------
+
+
+def _retry_after(client, secret=SECRET):
+    return _get(client, None, secret).headers["Retry-After"]
+
+
+def test_a_frame_is_polled_again_after_the_base_interval_by_default(client, register_device):
+    device_id, _ = register_device()
+    _put(client, device_id, _frame())
+
+    assert _retry_after(client) == "60"
+
+
+def test_a_renderer_can_ask_for_a_faster_refresh_with_its_frame(client, register_device):
+    register_device()
+
+    response = client.put("/api/frame", data=_frame(), headers={**_auth(), "X-Refresh-Hint": "20"})
+
+    assert response.status_code == 204
+    assert _retry_after(client) == "20"
+
+
+def test_a_conditional_get_carries_the_faster_refresh_too(client, register_device):
+    device_id, _ = register_device()
+    client.put("/api/frame", data=_frame(), headers={**_auth(), "X-Refresh-Hint": "30"})
+    etag = _get(client, device_id, SECRET).headers["ETag"]
+
+    response = _get(client, device_id, SECRET, **{"If-None-Match": etag})
+
+    assert (response.status_code, response.headers["Retry-After"]) == (304, "30")
+
+
+@pytest.mark.parametrize(("asked", "granted"), [("5", "20"), ("0", "20"), ("45", "45"), ("60", "60"), ("3600", "60")])
+def test_the_asked_for_refresh_is_kept_between_the_minimum_and_base(client, register_device, asked, granted):
+    register_device()
+
+    client.put("/api/frame", data=_frame(), headers={**_auth(), "X-Refresh-Hint": asked})
+
+    assert _retry_after(client) == granted
+
+
+@pytest.mark.parametrize("asked", ["", "soon", "-5", "2.5"])
+def test_junk_hints_are_no_request(client, register_device, asked):
+    register_device()
+
+    client.put("/api/frame", data=_frame(), headers={**_auth(), "X-Refresh-Hint": asked})
+
+    assert _retry_after(client) == "60"
+
+
+def test_the_next_frame_without_a_hint_ends_the_faster_refresh(client, register_device):
+    device_id, _ = register_device()
+    client.put("/api/frame", data=_frame(), headers={**_auth(), "X-Refresh-Hint": "20"})
+
+    _put(client, device_id, _frame())
+
+    assert _retry_after(client) == "60"
+
+
+def test_the_faster_refresh_lapses_when_the_renderer_stops_asking(app, client, register_device):
+    device_id, _ = register_device()
+    client.put("/api/frame", data=_frame(), headers={**_auth(), "X-Refresh-Hint": "20"})
+    with app.app_context():
+        db.session.get(Frame, device_id).pace_until = datetime.now(UTC) - timedelta(seconds=1)
+        db.session.commit()
+
+    assert _retry_after(client) == "60"

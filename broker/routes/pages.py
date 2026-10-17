@@ -20,10 +20,7 @@ from broker.clients import apple_music, weather
 from broker.db import db
 from broker.models import (
     CLOCK_FORMATS,
-    DEFAULT_INTERVAL,
     LANGUAGES,
-    MAX_INTERVAL,
-    MIN_INTERVAL,
     ORIENTATIONS,
     STYLES,
     Device,
@@ -33,7 +30,7 @@ from broker.models import (
     GlowmarktCredentials,
     SpotifyToken,
 )
-from broker.services import assignments, frame_image, geoip, pairing, stops, weather_place
+from broker.services import assignments, frame_image, geoip, pace, pairing, stops, weather_place
 
 if TYPE_CHECKING:
     from flask.typing import ResponseReturnValue
@@ -77,6 +74,7 @@ def _write_subscriptions_to_redis() -> None:
         "weather": set(),
         "glow": set(),
         "spotify": set(),
+        "developer": set(),
     }
 
     for config in configs:
@@ -86,6 +84,8 @@ def _write_subscriptions_to_redis() -> None:
             subs["weather"].add(config.weather_location)
         if config.spotify_enabled:
             subs["spotify"].add(config.device_id)
+        if config.developer_enabled:
+            subs["developer"].add(config.device_id)
     subs["glow"] = set(
         db.session.scalars(
             db.select(GlowmarktCredentials.device_id).where(GlowmarktCredentials.password_encrypted.is_not(None))
@@ -214,12 +214,6 @@ def _save_device_config(device_id: str) -> ResponseReturnValue:
     raw_stops = request.form.get("stops_order", "")
     stop_ids = [s.strip() for s in raw_stops.split(",") if s.strip()]
 
-    interval_val = request.form.get("interval", "").strip()
-    # Kept in range rather than refused: a screen never refreshes more often or more seldom than that.
-    interval = DEFAULT_INTERVAL
-    if interval_val.isdigit():
-        interval = min(max(int(interval_val), MIN_INTERVAL), MAX_INTERVAL)
-
     spotify_enabled = request.form.get("spotify_enabled") == "on"
     developer_enabled = request.form.get("developer_enabled") == "on"
     apple_music_enabled = request.form.get("apple_music_enabled") == "on"
@@ -241,7 +235,6 @@ def _save_device_config(device_id: str) -> ResponseReturnValue:
     if errors:
         return _render_device_config(device_id, errors=[*errors, "Nothing was saved."]), 400
 
-    config.interval = interval
     weather_place.store(config, place)
     config.postcode = postcode
     config.spotify_enabled = spotify_enabled
@@ -351,7 +344,7 @@ def screen_view() -> ResponseReturnValue:
         device_id=g.device_id,
         has_frame=frame is not None,
         rendered_at=frame.rendered_at if frame else None,
-        interval=config.interval,
+        interval=pace.effective_interval(frame),
         width=width,
         height=height,
     )
@@ -430,8 +423,6 @@ def _render_device_config(device_id: str, errors: list[str] | None = None) -> st
         weather_suggestion=weather_suggestion,
         clock_formats=CLOCK_FORMATS,
         languages=LANGUAGES,
-        min_interval=MIN_INTERVAL,
-        max_interval=MAX_INTERVAL,
         orientations=ORIENTATIONS,
         styles=STYLES,
         page_orientation=PAGE_ORIENTATION,
