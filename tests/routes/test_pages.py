@@ -3,15 +3,28 @@ from unittest.mock import Mock, patch
 
 import pytest
 
+from broker.clients import weather
 from broker.db import db
 from broker.models import Device, DeviceConfig, GitHubToken, GlowmarktCredentials, SpotifyToken
 from broker.routes.pages import normalize_postcode, postcode_country
 
 
+def _place(name, place_id=1, **fields):
+    """Return a place as the weather client gives Open-Meteo's: one with only a name has the name as its label."""
+    return weather._place({"id": place_id, "name": name, "latitude": 1.0, "longitude": 2.0, **fields})
+
+
 @pytest.fixture(autouse=True)
 def weather_location_lookup():
-    """Stands in for the Open-Meteo check on save so no test hits the network; finds every location by default."""
-    with patch("broker.clients.weather.location_found", return_value=True) as lookup:
+    """Stands in for Open-Meteo's search on save so no test hits the network; finds every location by default."""
+    with patch("broker.clients.weather.search_places", side_effect=lambda name, **_: [_place(name)]) as lookup:
+        yield lookup
+
+
+@pytest.fixture(autouse=True)
+def weather_place_lookup():
+    """Stands in for Open-Meteo's lookup of a picked place by id; finds none by default."""
+    with patch("broker.clients.weather.get_place", return_value=None) as lookup:
         yield lookup
 
 
@@ -513,13 +526,13 @@ def test_device_config_post_rejects_weather_location_open_meteo_cant_find(app, p
     client, device_id, _ = paired_client
     client.post("/device", data={"interval": "20", "weather_location": "London"})
 
-    weather_location_lookup.return_value = False
+    weather_location_lookup.side_effect, weather_location_lookup.return_value = None, []
     response = client.post("/device", data={"interval": "30", "weather_location": "SE17 2PX"})
 
     assert response.status_code == 400
     assert b"find &#34;SE17 2PX&#34;" in response.data
     assert b"Nothing was saved" in response.data
-    weather_location_lookup.assert_called_with("SE17 2PX")
+    weather_location_lookup.assert_called_with("SE17 2PX", count=1)
     with app.app_context():
         config = db.session.get(DeviceConfig, device_id)
         assert (config.interval, config.weather_location) == (20, "London")
@@ -529,7 +542,7 @@ def test_device_config_post_refuses_an_unverified_weather_location_when_open_met
     app, paired_client, weather_location_lookup
 ):
     client, device_id, _ = paired_client
-    weather_location_lookup.return_value = None
+    weather_location_lookup.side_effect = weather.GeocodingUnavailableError
 
     response = client.post("/device", data={"interval": "15", "weather_location": "London"})
 
@@ -547,7 +560,7 @@ def test_device_config_post_blank_weather_location_skips_the_lookup(paired_clien
 
 def test_device_config_post_reports_every_invalid_field_at_once(paired_client, weather_location_lookup):
     client, _, _ = paired_client
-    weather_location_lookup.return_value = False
+    weather_location_lookup.side_effect, weather_location_lookup.return_value = None, []
 
     response = client.post("/device", data={"interval": "15", "weather_location": "Nowhere", "postcode": "nope"})
 
@@ -828,3 +841,114 @@ def test_the_config_is_saved_even_when_redis_is_down(app, paired_client, fake_re
     assert response.status_code == 302
     with app.app_context():
         assert db.session.get(DeviceConfig, device_id).interval == 30
+
+
+# --- The weather place picker ---------------------------------------------------------------------------------------
+
+LONDON_ON = _place("London", 6058560, admin1="Ontario", country="Canada", country_code="CA")
+
+
+def _weather_columns(app, device_id):
+    with app.app_context():
+        config = db.session.get(DeviceConfig, device_id)
+        return (
+            config.weather_location,
+            config.weather_place_id,
+            config.weather_place_label,
+            config.weather_country_code,
+        )
+
+
+def test_device_config_post_stores_the_picked_place_as_open_meteo_has_it(
+    app, paired_client, weather_place_lookup, weather_location_lookup
+):
+    client, device_id, _ = paired_client
+    weather_place_lookup.return_value = LONDON_ON
+
+    # Only the id is trusted; Open-Meteo is asked for the rest.
+    response = client.post(
+        "/device",
+        data={"interval": "20", "weather_place_id": "6058560", "weather_location": "London, Ontario, Canada"},
+    )
+
+    assert response.status_code == 302
+    weather_place_lookup.assert_called_once_with(6058560)
+    weather_location_lookup.assert_not_called()
+    assert _weather_columns(app, device_id) == ("London", 6058560, "London, Ontario, Canada", "CA")
+    with app.app_context():
+        config = db.session.get(DeviceConfig, device_id)
+        assert (config.weather_lat, config.weather_lon) == (1.0, 2.0)
+
+
+def test_device_config_post_refuses_a_picked_id_open_meteo_doesnt_have(app, paired_client):
+    client, device_id, _ = paired_client
+    response = client.post(
+        "/device", data={"interval": "30", "weather_place_id": "999999999", "weather_location": "Atlantis"}
+    )
+
+    assert response.status_code == 400
+    assert b"find &#34;Atlantis&#34;" in response.data
+    assert b"Nothing was saved" in response.data
+    assert _weather_columns(app, device_id) == ("", None, None, None)
+
+
+def test_device_config_post_without_a_pick_stores_open_meteos_first_match(app, paired_client, weather_location_lookup):
+    client, device_id, _ = paired_client
+    weather_location_lookup.side_effect, weather_location_lookup.return_value = None, [LONDON_ON]
+
+    assert client.post("/device", data={"interval": "20", "weather_location": "london"}).status_code == 302
+
+    weather_location_lookup.assert_called_once_with("london", count=1)
+    assert _weather_columns(app, device_id) == ("London", 6058560, "London, Ontario, Canada", "CA")
+
+
+def test_device_config_post_keeps_the_saved_place_without_asking_open_meteo(
+    app, paired_client, weather_place_lookup, weather_location_lookup
+):
+    client, device_id, _ = paired_client
+    weather_place_lookup.return_value = LONDON_ON
+    form = {"interval": "20", "weather_place_id": "6058560", "weather_location": "London, Ontario, Canada"}
+    client.post("/device", data=form)
+    weather_place_lookup.reset_mock()
+
+    assert client.post("/device", data=form | {"interval": "40"}).status_code == 302
+
+    weather_place_lookup.assert_not_called()
+    weather_location_lookup.assert_not_called()
+    assert _weather_columns(app, device_id) == ("London", 6058560, "London, Ontario, Canada", "CA")
+
+
+def test_device_config_post_blank_weather_location_clears_the_place(app, paired_client, weather_place_lookup):
+    client, device_id, _ = paired_client
+    weather_place_lookup.return_value = LONDON_ON
+    client.post("/device", data={"interval": "20", "weather_place_id": "6058560", "weather_location": "London"})
+
+    # Without JavaScript the saved id is still posted; the empty box is what counts.
+    client.post("/device", data={"interval": "20", "weather_place_id": "6058560", "weather_location": ""})
+
+    assert _weather_columns(app, device_id) == ("", None, None, None)
+
+
+def test_device_config_shows_the_saved_place_and_its_id_for_the_picker(app, paired_client, weather_place_lookup):
+    client, _, _ = paired_client
+    weather_place_lookup.return_value = LONDON_ON
+    client.post("/device", data={"interval": "20", "weather_place_id": "6058560", "weather_location": "London"})
+
+    html = client.get("/device").get_data(as_text=True)
+
+    assert 'name="weather_location" value="London, Ontario, Canada"' in html
+    assert 'name="weather_place_id" value="6058560"' in html
+    assert "Now: <span" in html
+    assert "/api/places/search" in html
+
+
+def test_device_config_shows_a_location_saved_before_places_with_no_id(app, paired_client):
+    client, device_id, _ = paired_client
+    with app.app_context():
+        db.session.get(DeviceConfig, device_id).weather_location = "Leeds"
+        db.session.commit()
+
+    html = client.get("/device").get_data(as_text=True)
+
+    assert 'name="weather_location" value="Leeds"' in html
+    assert 'name="weather_place_id" value=""' in html

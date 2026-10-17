@@ -559,3 +559,19 @@ def test_0018_starts_new_devices_on_airy_and_keeps_the_others(app):
             _insert_device(conn, "after")
 
         assert _styles(("style",)) == {"before": ("hero",), "picked": ("card",), "after": ("airy",)}
+
+
+# --- 0021: the picked weather place ---------------------------------------------------------------------------------
+
+
+def test_0021_keeps_existing_weather_locations_and_leaves_their_place_to_the_backfill(app):
+    with app.app_context():
+        downgrade(revision="0020")
+        assert "weather_place_id" not in {column["name"] for column in inspect(db.engine).get_columns("device_config")}
+        with db.engine.begin() as conn:
+            _insert_device(conn, "old", weather_location="Tromsø", postcode="9008")
+        upgrade(revision="0021")
+
+        config = db.session.get(DeviceConfig, "old")
+        assert (config.weather_location, config.postcode) == ("Tromsø", "9008")
+        assert (config.weather_place_id, config.weather_place_name, config.weather_lat) == (None, None, None)

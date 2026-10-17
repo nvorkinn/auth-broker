@@ -19,6 +19,7 @@ from .routes import (
     frames,
     orchestrator,
     pages,
+    place_search,
     renderers,
     spotify_oauth,
     spotify_proxy,
@@ -70,6 +71,7 @@ def create_app() -> Flask:
     app.register_blueprint(apple_music_link.bp)
     app.register_blueprint(pages.bp)
     app.register_blueprint(stop_search.bp)
+    app.register_blueprint(place_search.bp)
     app.register_blueprint(frames.bp)
     app.register_blueprint(status.bp)
     app.register_blueprint(orchestrator.bp)
@@ -79,5 +81,6 @@ def create_app() -> Flask:
     api_module.api.register(app)
 
     app.cli.add_command(cli.devices)
+    app.cli.add_command(cli.weather)
 
     return app

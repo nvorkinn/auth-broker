@@ -94,7 +94,7 @@ public URL (`BROKER_URL`).
 | **Renderer** | `POST /api/renderers/claim`, `GET /api/config`, `PUT /api/frame`, `GET /api/spotify/{now-playing,queue,top/artists,top/tracks}`, `GET /api/developer`, `POST /api/devices/pairing-code` | the **claim token** (claim only), otherwise the **renderer secret** |
 | **Orchestrator** | `GET /api/orchestrator/assignments`, `POST /api/orchestrator/assignments/{id}/status` | `ORCHESTRATOR_TOKEN` |
 | **Home Assistant** | `GET /api/status/devices` | `STATUS_TOKEN` |
-| **Signed-in user** | `/pair`, `POST /pair/token`, `/device[/{id}]` and `/name`, `POST /api/displays/{id}/renderer`, Spotify connect and disconnect, `POST /device[/{id}]/display/unlink`, `GET /api/stops/search` (and its old name, `/api/tfl/search`) | `X-Authentik-Uid` from Caddy |
+| **Signed-in user** | `/pair`, `POST /pair/token`, `/device[/{id}]` and `/name`, `POST /api/displays/{id}/renderer`, Spotify connect and disconnect, `POST /device[/{id}]/display/unlink`, `GET /api/stops/search` (and its old name, `/api/tfl/search`), `GET /api/places/search` | `X-Authentik-Uid` from Caddy |
 | **Operator** | `flask devices list \| code \| owner \| unpair \| forget` | a shell on the host |
 
 [Which role may call what](../README.md#which-role-may-call-what) has the per-route role table. A wrong or missing

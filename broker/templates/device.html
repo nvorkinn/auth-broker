@@ -119,10 +119,17 @@
             <h2 class="card-title">Weather</h2>
         </div>
         <div class="form-grid">
+            <!-- A town or city picked from Open-Meteo's search: the id of the one picked goes in weather_place_id. Typing
+                 clears it, so text that wasn't picked (or a browser without JavaScript) is looked up when saved. -->
             <div class="form-group">
                 <label for="weather_location">Weather location</label>
-                <input type="text" id="weather_location" name="weather_location" value="{{ config.weather_location or weather_suggestion or '' }}" placeholder="e.g. London" aria-describedby="weather_location_hint">
-                <p id="weather_location_hint" class="form-hint">Used for the forecast on your screen.{% if weather_suggestion %} Suggested from your location.{% endif %}</p>
+                <div class="search-container" style="margin-bottom: 0;">
+                    <input type="text" id="weather_location" name="weather_location" value="{{ config.weather_place_label or config.weather_location or weather_suggestion or '' }}" placeholder="Search for a town or city" autocomplete="off" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="placeResults" aria-describedby="weather_location_hint">
+                    <span id="placeSpinner" class="search-spinner">Searching…</span>
+                    <div id="placeResults" class="search-results" role="listbox" aria-label="Towns and cities"></div>
+                </div>
+                <input type="hidden" id="weather_place_id" name="weather_place_id" value="{{ config.weather_place_id if config.weather_place_id is not none else '' }}">
+                <p id="weather_location_hint" class="form-hint">Used for the forecast on your screen.{% if config.weather_place_label %} Now: <span id="weather_place_saved">{{ config.weather_place_label }}</span>.{% endif %}{% if weather_suggestion %} Suggested from your location.{% endif %}</p>
             </div>
         </div>
     </div>
@@ -375,6 +382,90 @@
             }, 120);
         });
         show(chosen(), false);
+    });
+
+    // The weather place picker: search Open-Meteo's towns and cities as the user types, and keep the one picked.
+    const placeInput = document.getElementById('weather_location');
+    const placeId = document.getElementById('weather_place_id');
+    const placeSpinner = document.getElementById('placeSpinner');
+    const placeResults = document.getElementById('placeResults');
+    let placeMatches = [];
+    let placeDebounce = null;
+    let placeQuery = 0;
+
+    function hidePlaceResults() {
+        placeResults.style.display = 'none';
+        placeResults.innerHTML = '';
+        placeInput.setAttribute('aria-expanded', 'false');
+    }
+
+    function pickPlace(place) {
+        placeInput.value = place.label;
+        placeId.value = place.id;
+        hidePlaceResults();
+    }
+
+    placeInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+            // Enter picks the first match rather than submitting the form half-typed.
+            e.preventDefault();
+            if (placeMatches.length && placeResults.style.display === 'block') pickPlace(placeMatches[0]);
+        } else if (e.key === 'Escape') {
+            hidePlaceResults();
+        }
+    });
+
+    placeInput.addEventListener('input', () => {
+        // What's typed is no longer the place picked; if nothing is picked, the text is looked up on save.
+        placeId.value = '';
+        clearTimeout(placeDebounce);
+        const query = placeInput.value.trim();
+        if (query.length < 2) {
+            placeMatches = [];
+            placeSpinner.style.display = 'none';
+            hidePlaceResults();
+            return;
+        }
+        placeSpinner.style.display = 'block';
+        const thisQuery = ++placeQuery;
+        placeDebounce = setTimeout(() => {
+            fetch(`/api/places/search?q=${encodeURIComponent(query)}`)
+                .then(r => r.json())
+                .then(data => {
+                    if (thisQuery !== placeQuery) return;  // a later keystroke's answer is the one to show
+                    placeSpinner.style.display = 'none';
+                    renderPlaceResults(data);
+                })
+                .catch(err => {
+                    placeSpinner.style.display = 'none';
+                    console.error('Place search error:', err);
+                });
+        }, 300);
+    });
+
+    function renderPlaceResults(places) {
+        placeMatches = places || [];
+        if (placeMatches.length === 0) {
+            placeResults.innerHTML = '<div style="padding: 12px 16px; color: #64748b; font-size: 13px;">No matching towns or cities found.</div>';
+        } else {
+            placeResults.innerHTML = placeMatches.map((place, index) => `
+                <button type="button" class="search-item place-item" role="option" data-index="${index}">
+                    <span class="place-name">${escapeHtml(place.name)}</span>
+                    <span class="place-detail">${escapeHtml([place.admin1, place.country].filter(p => p && p !== place.name).join(', '))}</span>
+                </button>
+            `).join('');
+        }
+        placeResults.style.display = 'block';
+        placeInput.setAttribute('aria-expanded', 'true');
+    }
+
+    placeResults.addEventListener('click', (e) => {
+        const item = e.target.closest('.place-item');
+        if (item) pickPlace(placeMatches[Number(item.dataset.index)]);
+    });
+
+    document.addEventListener('click', (e) => {
+        if (!e.target.closest('#placeResults') && e.target !== placeInput) hidePlaceResults();
     });
 
     // A stop's icon by mode: the modes with a fixed icon; buses (and coaches) show their stop letter.

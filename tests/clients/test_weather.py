@@ -1,38 +1,126 @@
 from unittest.mock import Mock, patch
 
+import pytest
 import requests
 
-from broker.clients.weather import location_found
+from broker.clients.weather import GeocodingUnavailableError, get_place, search_places
+
+LONDON = {
+    "id": 2643743,
+    "name": "London",
+    "latitude": 51.50853,
+    "longitude": -0.12574,
+    "country_code": "GB",
+    "admin1": "England",
+    "country": "United Kingdom",
+    "population": 8961989,
+}
+OSLO = {
+    "id": 3143244,
+    "name": "Oslo",
+    "latitude": 59.91273,
+    "longitude": 10.74609,
+    "country_code": "NO",
+    "admin1": "Oslo",
+    "country": "Norway",
+}
 
 
-def _geocoding_response(json_data):
+def _response(json_data, status_code=200):
     response = Mock()
+    response.status_code = status_code
     response.json.return_value = json_data
-    response.raise_for_status = Mock()
+    if status_code >= 400:
+        response.raise_for_status = Mock(side_effect=requests.HTTPError(str(status_code)))
+    else:
+        response.raise_for_status = Mock()
     return response
 
 
-def test_weather_location_found_asks_open_meteo_the_same_way_the_device_does(app):
-    found = {"results": [{"name": "London", "latitude": 51.5, "longitude": -0.13}]}
+def test_search_places_asks_open_meteo_for_english_names_and_returns_each_with_a_label(app):
     with (
         app.app_context(),
-        patch("broker.clients.weather.requests.get", return_value=_geocoding_response(found)) as get,
+        patch("broker.clients.weather.requests.get", return_value=_response({"results": [LONDON]})) as get,
     ):
-        assert location_found("London") is True
+        places = search_places("London")
 
     get.assert_called_once_with(
         "https://geocoding-api.open-meteo.com/v1/search",
-        params={"name": "London", "count": 1, "format": "json"},
-        timeout=5,
+        params={"name": "London", "count": 8, "language": "en", "format": "json"},
+        timeout=4,
     )
+    assert places == [
+        {
+            "id": 2643743,
+            "name": "London",
+            "admin1": "England",
+            "country": "United Kingdom",
+            "country_code": "GB",
+            "latitude": 51.50853,
+            "longitude": -0.12574,
+            "label": "London, England, United Kingdom",
+        }
+    ]
 
 
-def test_weather_location_found_is_false_when_open_meteo_has_no_results(app):
+def test_search_places_leaves_a_region_named_like_the_place_out_of_its_label(app):
+    with app.app_context(), patch("broker.clients.weather.requests.get", return_value=_response({"results": [OSLO]})):
+        assert search_places("Oslo")[0]["label"] == "Oslo, Norway"
+
+
+def test_search_places_copes_with_a_place_missing_its_region_and_country(app):
+    bare = {"id": 1, "name": "Somewhere", "latitude": 1, "longitude": 2}
+    with app.app_context(), patch("broker.clients.weather.requests.get", return_value=_response({"results": [bare]})):
+        [place] = search_places("Somewhere")
+    assert (place["label"], place["country_code"], place["admin1"]) == ("Somewhere", "", "")
+
+
+def test_search_places_is_empty_when_open_meteo_has_no_results(app):
     not_found = {"generationtime_ms": 0.4}  # Open-Meteo leaves "results" out entirely when nothing matches
-    with app.app_context(), patch("broker.clients.weather.requests.get", return_value=_geocoding_response(not_found)):
-        assert location_found("SE17 2PX") is False
+    with app.app_context(), patch("broker.clients.weather.requests.get", return_value=_response(not_found)):
+        assert search_places("SE17 2PX") == []
 
 
-def test_weather_location_found_is_none_when_open_meteo_is_unreachable(app):
-    with app.app_context(), patch("broker.clients.weather.requests.get", side_effect=requests.ConnectionError):
-        assert location_found("London") is None
+@pytest.mark.parametrize(
+    "failure",
+    [
+        {"side_effect": requests.ConnectionError},
+        {"side_effect": requests.Timeout},
+        {"return_value": _response({}, status_code=502)},
+        {"return_value": _response({"results": [{"name": "no id"}]})},
+    ],
+)
+def test_search_places_raises_when_open_meteo_cant_be_asked(app, failure):
+    with (
+        app.app_context(),
+        patch("broker.clients.weather.requests.get", **failure),
+        pytest.raises(GeocodingUnavailableError),
+    ):
+        search_places("London")
+
+
+def test_get_place_looks_the_id_up(app):
+    with app.app_context(), patch("broker.clients.weather.requests.get", return_value=_response(LONDON)) as get:
+        place = get_place(2643743)
+
+    get.assert_called_once_with(
+        "https://geocoding-api.open-meteo.com/v1/get",
+        params={"id": 2643743, "language": "en", "format": "json"},
+        timeout=4,
+    )
+    assert (place["id"], place["label"]) == (2643743, "London, England, United Kingdom")
+
+
+def test_get_place_is_none_for_an_id_open_meteo_doesnt_have(app):
+    unknown = {"error": True, "reason": "Id not found"}
+    with app.app_context(), patch("broker.clients.weather.requests.get", return_value=_response(unknown, 400)):
+        assert get_place(999999999) is None
+
+
+def test_get_place_raises_when_open_meteo_cant_be_asked(app):
+    with (
+        app.app_context(),
+        patch("broker.clients.weather.requests.get", side_effect=requests.ConnectionError),
+        pytest.raises(GeocodingUnavailableError),
+    ):
+        get_place(2643743)

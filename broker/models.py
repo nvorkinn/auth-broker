@@ -91,7 +91,18 @@ class DeviceConfig(db.Model):
     language: Mapped[str] = mapped_column(String, default="en", server_default=text("'en'"))
     # How every panel is drawn, one of STYLES.
     style: Mapped[str] = mapped_column(String, default="airy", server_default=text("'airy'"))
+    # The weather's town or city by name, as renderers are sent it. Picked on the settings page, it is the name of
+    # the place below; a config saved before places were picked may have only this (see `flask weather backfill`).
     weather_location: Mapped[str] = mapped_column(String, default="", server_default=text("''"))
+    # The place picked for the weather, as Open-Meteo's geocoding gave it: its id (GeoNames'), name, what the page
+    # shows for it ("London, England, United Kingdom"), ISO country code ("GB") and coordinates. All None for
+    # none. See services/weather_place.py, whose weather_key() names the place by these.
+    weather_place_id: Mapped[int | None] = mapped_column(Integer)
+    weather_place_name: Mapped[str | None] = mapped_column(String)
+    weather_place_label: Mapped[str | None] = mapped_column(String)
+    weather_country_code: Mapped[str | None] = mapped_column(String)
+    weather_lat: Mapped[float | None] = mapped_column(Float)
+    weather_lon: Mapped[float | None] = mapped_column(Float)
     # A UK postcode ("SW1A 1AA") or a Norwegian one ("0150"); see pages.normalize_postcode.
     postcode: Mapped[str] = mapped_column(String, default="", server_default=text("''"))
     spotify_enabled: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("0"))
