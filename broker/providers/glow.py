@@ -107,18 +107,16 @@ def accounts() -> list[Account]:
         ).all()
         found = []
         for creds, config in rows:
-            # A renderer only turns the panel on with both (countdown_core.core.api_registry.is_enabled).
-            if not creds.username.strip():
-                continue
+            # The same rule as the config's glowmarkt.enabled, which turns the renderer's panel on.
             try:
-                password = creds.password or ""
+                sign_in = creds.sign_in()
             except InvalidToken:
                 logger.warning("Can't decrypt the Glowmarkt password of device %s", creds.device_id)
                 continue
-            if not password.strip():
+            if sign_in is None:
                 continue
             zone = _timezone(postcode_country(config.postcode), config.tfl_stop_ids) if config else DEFAULT_ZONE
-            found.append(Account(creds.device_id, creds.username.strip(), password, zone))
+            found.append(Account(creds.device_id, *sign_in, zone))
         return found
     finally:
         db.session.remove()

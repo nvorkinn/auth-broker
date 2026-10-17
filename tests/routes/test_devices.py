@@ -6,7 +6,7 @@ from countdown_api.models import ConfigResponse
 from sqlalchemy import func, select, update
 
 from broker.db import db
-from broker.models import Device, DeviceConfig, GitHubToken, PairingCode
+from broker.models import Device, DeviceConfig, GitHubToken, GlowmarktCredentials, PairingCode
 
 
 def test_register_creates_device(client):
@@ -84,7 +84,7 @@ def test_get_config_returns_defaults_and_shared_keys(client, register_device):
         "tfl": {"app_key": "test-tfl-key", "stop_ids": [], "style": "grouped"},
         "departures": {"stops": [], "style": "grouped"},
         "spotify": {"enabled": False, "style": "airy"},
-        "glowmarkt": {"username": None, "password": None},
+        "glowmarkt": {"enabled": False, "username": None, "password": None},
         "developer": {"enabled": False},
         "apple_music": {"enabled": False},
         "pairing_code": body["pairing_code"],
@@ -302,12 +302,40 @@ def test_get_config_blank_device_name_header_does_not_overwrite(app, client, reg
     assert device_name == "camilla"
 
 
-def test_get_config_returns_decrypted_glowmarkt_credentials(paired_client):
+def test_get_config_switches_glowmarkt_on_but_never_sends_its_credentials(paired_client):
     client, _device_id, secret = paired_client
     client.post("/device", data={"glowmarkt_username": "someone@example.com", "glowmarkt_password": "hunter2"})
 
     response = client.get("/api/config", headers={"Authorization": f"Bearer {secret}"})
-    assert response.get_json()["glowmarkt"] == {"username": "someone@example.com", "password": "hunter2"}
+
+    # The nulls are sent, not left out: renderers that predate `enabled` require the keys.
+    assert response.get_json()["glowmarkt"] == {"enabled": True, "username": None, "password": None}
+    assert b"someone@example.com" not in response.data
+    assert b"hunter2" not in response.data
+
+
+@pytest.mark.parametrize(
+    "credentials",
+    [
+        {"username": "someone@example.com"},  # no password
+        {"username": "  ", "password": "hunter2"},
+        {"username": "someone@example.com", "password": "   "},
+        {"username": "someone@example.com", "password_encrypted": "not-a-fernet-token"},  # won't decrypt
+    ],
+)
+def test_get_config_leaves_glowmarkt_off_without_an_account_the_provider_can_use(
+    app, client, register_device, credentials
+):
+    device_id, secret = register_device()
+    with app.app_context():
+        creds = GlowmarktCredentials(device_id=device_id, **credentials)
+        db.session.add(creds)
+        db.session.commit()
+
+    response = client.get("/api/config", headers={"Authorization": f"Bearer {secret}"})
+
+    assert response.status_code == 200
+    assert response.get_json()["glowmarkt"] == {"enabled": False, "username": None, "password": None}
 
 
 def test_get_config_issues_a_code_to_an_unpaired_device_and_keeps_it_stable(client, register_device):

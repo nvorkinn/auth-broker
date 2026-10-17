@@ -155,6 +155,18 @@ class GlowmarktCredentials(db.Model):
     def password(self, plaintext: str) -> None:
         self.password_encrypted = encrypt(plaintext)
 
+    def sign_in(self) -> tuple[str, str] | None:
+        """Return the username and password to sign in to Glowmarkt with, or None if either is blank.
+
+        The rule for a usable account: the Glowmarkt provider signs in with these, and the config's
+        `glowmarkt.enabled` says whether there are any. Raises InvalidToken if the password won't decrypt.
+        """
+        username = self.username.strip()
+        if not username or self.password_encrypted is None:
+            return None
+        password = self.password or ""
+        return (username, password) if password.strip() else None
+
 
 class GitHubToken(db.Model):
     """The GitHub token the owner gave for a device's developer panel, encrypted at rest.

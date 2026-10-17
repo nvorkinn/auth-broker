@@ -19,6 +19,7 @@ from countdown_api.models import (
     Tfl,
     Weather,
 )
+from cryptography.fernet import InvalidToken
 from flask import Blueprint, current_app, jsonify, request
 from sqlalchemy.exc import IntegrityError
 
@@ -149,13 +150,27 @@ def get_config(*, device_id: str, x_device_name: str | None = None) -> ConfigRes
             style=_departures_style(config.style),
         ),
         spotify=Spotify(enabled=config.spotify_enabled, style=config.style),
-        glowmarkt=Glowmarkt(username=(creds and creds.username) or None, password=creds.password if creds else None),
+        # Only the switch: the Glowmarkt provider signs in and fills the store, which the screen reads. The
+        # credentials go as explicit nulls, since renderers that predate `enabled` require the keys.
+        glowmarkt=Glowmarkt(enabled=_glowmarkt_enabled(creds), username=None, password=None),
         # Only the switch: the GitHub token stays here, and the screen gets the panel's data from /api/developer.
         developer=Developer(enabled=config.developer_enabled),
         # Only the switch, like the developer panel's: the screen gets Apple Music from /api/apple-music.
         apple_music=AppleMusic(enabled=config.apple_music_enabled),
         pairing_code=pairing.current_code_for(device_id),
     )
+
+
+def _glowmarkt_enabled(creds: GlowmarktCredentials | None) -> bool:
+    """Return whether the device has a Glowmarkt account the provider signs in with (GlowmarktCredentials.sign_in)."""
+    if creds is None:
+        return False
+    try:
+        return creds.sign_in() is not None
+    except InvalidToken:
+        # The provider skips it too, so there would be nothing in the store to show.
+        current_app.logger.warning("Can't decrypt the Glowmarkt password of device %s", creds.device_id)
+        return False
 
 
 def _departures_style(style: str) -> str:
