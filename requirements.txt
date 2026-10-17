@@ -11,4 +11,6 @@ click
 maxminddb
 pydantic
 redis
+# The IANA time zones for zoneinfo (the glow-provider asks Glowmarkt in each screen's), whatever the image has.
+tzdata
 -e ./vendor/countdown-api[server]

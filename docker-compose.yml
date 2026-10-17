@@ -169,6 +169,28 @@ services:
       retries: 3
       start_period: 5s
 
+  # The glow-provider (broker/providers/glow.py): every Glow device's energy readings, from Glowmarkt into Redis as
+  # v1:energy:<device id>. The broker's own image with another command, so it decrypts the Glowmarkt passwords with
+  # the broker's key (broker.env) and they never leave the broker; it opens the database read-only. Host networking
+  # for Redis on 127.0.0.1:6379, with REDIS_PASSWORD from redis.env. Under the providers profile, so deploys neither
+  # start nor upgrade it yet: see "The energy provider" in the README to turn it on.
+  glow-provider:
+    <<: *release-image
+    image: ghcr.io/nvorkinn/auth-broker:${AUTH_BROKER_VERSION:-latest}
+    container_name: glow-provider
+    profiles: [ providers ]
+    logging: *logging
+    network_mode: host
+    command: ["python", "-m", "broker.providers.glow"]
+    volumes:
+      - ./data:/app/data:ro
+    env_file:
+      - broker.env
+      - redis.env
+    depends_on:
+      redis:
+        condition: service_healthy
+
   # Authentik (SSO with passkeys). All three read their secrets from
   # authentik.env, decrypted from secrets/authentik.env by deploy.sh.
   # AUTHENTIK_VERSION in .env pins the upstream release; bump it by hand,
