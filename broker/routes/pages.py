@@ -74,6 +74,7 @@ def _write_subscriptions_to_redis() -> None:
         "weather": set(),
         "glow": set(),
         "spotify": set(),
+        "developer": set(),
     }
 
     for config in configs:
@@ -83,6 +84,8 @@ def _write_subscriptions_to_redis() -> None:
             subs["weather"].add(config.weather_location)
         if config.spotify_enabled:
             subs["spotify"].add(config.device_id)
+        if config.developer_enabled:
+            subs["developer"].add(config.device_id)
     subs["glow"] = set(
         db.session.scalars(
             db.select(GlowmarktCredentials.device_id).where(GlowmarktCredentials.password_encrypted.is_not(None))

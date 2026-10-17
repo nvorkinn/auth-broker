@@ -12,9 +12,9 @@ import requests
 from flask import Blueprint, jsonify
 
 from broker.auth import require_device_auth
-from broker.clients import ai_plans, github
 from broker.db import db
 from broker.models import DeviceConfig, GitHubToken
+from broker.services import developer as developer_data
 
 if TYPE_CHECKING:
     from flask.typing import ResponseReturnValue
@@ -38,13 +38,8 @@ def developer(device_id: str) -> ResponseReturnValue:
         return jsonify(github=None, plans=[])
 
     token = db.session.get(GitHubToken, device_id)
-    summary = copilot_used = None
-    if token is not None:
-        try:
-            summary = github.summary(token.token)
-            copilot_used = github.copilot_premium_requests(token.token, summary["login"])
-        except requests.RequestException as e:
-            logger.warning("GitHub for device %s: %s", device_id, e)
-            return jsonify(error="GitHub could not be reached"), 502
-    today = datetime.now(UTC).date()
-    return jsonify(github=summary, plans=ai_plans.plans(today, copilot_used, has_copilot=token is not None))
+    try:
+        return jsonify(developer_data.snapshot(token and token.token, datetime.now(UTC).date()))
+    except requests.RequestException as e:
+        logger.warning("GitHub for device %s: %s", device_id, e)
+        return jsonify(error="GitHub could not be reached"), 502

@@ -783,6 +783,13 @@ def test_saving_the_config_publishes_subscriptions_to_redis(paired_client, fake_
     assert fake_redis.published == [("v1:sub:changed", "")]
 
 
+def test_saving_the_config_subscribes_a_device_with_the_developer_panel_on(paired_client, fake_redis):
+    client, device_id, _ = paired_client
+    client.post("/device", data={"developer_enabled": "on"})
+
+    assert _subscriptions(fake_redis) == {"developer": {device_id}}
+
+
 def test_saving_the_config_subscribes_a_device_with_a_glowmarkt_password_to_glow(paired_client, fake_redis):
     client, device_id, _ = paired_client
     client.post(

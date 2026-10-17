@@ -93,6 +93,25 @@ services:
       SPOTIFY_REDIRECT_URI: https://auth.nikolaivorkinn.com/auth/spotify/callback
     stop_grace_period: 30s
 
+  # The developer provider: each screen's developer panel (GitHub and AI plans), polled for as long as the panel is on
+  # and written to Redis for the renderers, which it also asks to refresh faster while a release runs (the pace key).
+  # The broker's image and settings, like the music provider, on the same AUTH_BROKER_VERSION.
+  developer-provider:
+    <<: *release-image
+    image: ghcr.io/nvorkinn/auth-broker:${AUTH_BROKER_VERSION:-latest}
+    container_name: developer-provider
+    logging: *logging
+    # Host networking, to reach Redis on 127.0.0.1:6379 (and VictoriaLogs, like the broker).
+    network_mode: host
+    command: ["python", "-m", "broker.developer_provider"]
+    volumes:
+      - ./data:/app/data
+    # The broker's secrets (the GitHub tokens are decrypted with its key), and Redis's password.
+    env_file:
+      - broker.env
+      - redis.env
+    stop_grace_period: 30s
+
   caddy:
     <<: *release-image
     image: ghcr.io/nvorkinn/auth-broker-caddy:${CADDY_VERSION:-latest}
