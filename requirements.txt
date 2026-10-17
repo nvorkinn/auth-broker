@@ -10,4 +10,5 @@ werkzeug
 click
 maxminddb
 pydantic
+redis
 -e ./vendor/countdown-api[server]

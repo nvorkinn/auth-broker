@@ -2,6 +2,7 @@ import secrets
 import shutil
 
 import pytest
+import redis
 from cryptography.fernet import Fernet
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ec
@@ -51,6 +52,7 @@ def app(tmp_path, monkeypatch, migrated_db):
 
     application = create_app()
     application.config.update(TESTING=True)
+    application.extensions["redis"] = FakeRedis()
     # Tests register far more devices a minute than the real limit allows; the throttle's own
     # tests put the real one back (see register_throttle).
     application.extensions["register_throttle"] = PairThrottle(max_events=10_000)
@@ -58,6 +60,60 @@ def app(tmp_path, monkeypatch, migrated_db):
 
     with application.app_context():
         db.engine.dispose()
+
+
+class FakeRedis:
+    """Just enough of Redis to see what a config save writes: sets, and what was published."""
+
+    def __init__(self):
+        self.sets: dict[str, set[str]] = {}
+        self.published: list[tuple[str, str]] = []
+        self.fail = False
+
+    def pipeline(self, *, transaction=True):  # noqa: ARG002
+        return FakePipeline(self)
+
+
+class FakePipeline:
+    def __init__(self, server: FakeRedis):
+        self.server = server
+        self.ops = []
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+    def delete(self, key):
+        self.ops.append(("delete", key))
+
+    def sadd(self, key, *members):
+        self.ops.append(("sadd", key, members))
+
+    def publish(self, channel, message):
+        self.ops.append(("publish", channel, message))
+
+    def execute(self):
+        if self.server.fail:
+            msg = "redis is down"
+            raise redis.ConnectionError(msg)
+        for op, key, *rest in self.ops:
+            if op == "delete":
+                self.server.sets.pop(key, None)
+            elif op == "sadd":
+                self.server.sets.setdefault(key, set()).update(rest[0])
+            else:
+                self.server.published.append((key, rest[0]))
+        self.ops = []
+
+
+@pytest.fixture
+def fake_redis(app):
+    """Replace the app's Redis with an in-memory one."""
+    fake = FakeRedis()
+    app.extensions["redis"] = fake
+    return fake
 
 
 USER = "user-1"
