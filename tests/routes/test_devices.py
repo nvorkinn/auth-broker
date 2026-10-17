@@ -6,7 +6,7 @@ from countdown_api.models import ConfigResponse
 from sqlalchemy import func, select, update
 
 from broker.db import db
-from broker.models import Device, DeviceConfig, PairingCode
+from broker.models import Device, DeviceConfig, GitHubToken, PairingCode
 
 
 def test_register_creates_device(client):
@@ -85,8 +85,24 @@ def test_get_config_returns_defaults_and_shared_keys(client, register_device):
         "departures": {"stops": [], "style": "grouped"},
         "spotify": {"enabled": False, "style": "airy"},
         "glowmarkt": {"username": None, "password": None},
+        "developer": {"enabled": False},
         "pairing_code": body["pairing_code"],
     }
+
+
+def test_get_config_sends_the_developer_switch_but_never_the_github_token(app, client, register_device):
+    device_id, secret = register_device()
+    _set_config(app, device_id, developer_enabled=True)
+    with app.app_context():
+        token = GitHubToken(device_id=device_id)
+        token.token = "github_pat_secret"
+        db.session.add(token)
+        db.session.commit()
+
+    response = client.get("/api/config", headers={"Authorization": f"Bearer {secret}"})
+
+    assert response.get_json()["developer"] == {"enabled": True}
+    assert b"github_pat_secret" not in response.data
 
 
 def _set_config(app, device_id, **values):

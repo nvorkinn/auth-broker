@@ -1,7 +1,7 @@
 from sqlalchemy import func, select
 
 from broker.db import db
-from broker.models import DeviceConfig, GlowmarktCredentials, SpotifyToken
+from broker.models import DeviceConfig, GitHubToken, GlowmarktCredentials, SpotifyToken
 
 
 def _headers(secret):
@@ -77,6 +77,7 @@ def test_unpair_with_config_also_resets_settings_and_linked_accounts(app, client
         config.clock_format = "12h"
         db.session.add(SpotifyToken(device_id=device_id, refresh_token="r"))
         db.session.add(GlowmarktCredentials(device_id=device_id, username="me"))
+        db.session.add(GitHubToken(device_id=device_id, token_encrypted="x"))
         db.session.commit()
 
     assert cli("unpair", device_id, "--config").exit_code == 0
@@ -89,6 +90,7 @@ def test_unpair_with_config_also_resets_settings_and_linked_accounts(app, client
     assert config["notice_board"] == {"postcode": None, "country": None, "style": "airy"}
     with app.app_context():
         assert db.session.scalar(select(func.count()).select_from(SpotifyToken)) == 0
+        assert db.session.scalar(select(func.count()).select_from(GitHubToken)) == 0
 
 
 def test_forget_deletes_the_device_so_it_must_register_again(app, client, register_device, cli):

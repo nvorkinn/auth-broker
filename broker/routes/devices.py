@@ -10,6 +10,7 @@ from countdown_api.models import (
     ConfigResponse,
     Departures,
     DepartureStop,
+    Developer,
     Glowmarkt,
     NoticeBoard,
     Screen,
@@ -147,6 +148,8 @@ def get_config(*, device_id: str, x_device_name: str | None = None) -> ConfigRes
         ),
         spotify=Spotify(enabled=config.spotify_enabled, style=config.style),
         glowmarkt=Glowmarkt(username=(creds and creds.username) or None, password=creds.password if creds else None),
+        # Only the switch: the GitHub token stays here, and the screen gets the panel's data from /api/developer.
+        developer=Developer(enabled=config.developer_enabled),
         pairing_code=pairing.current_code_for(device_id),
     )
 

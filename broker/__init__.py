@@ -10,6 +10,7 @@ from . import cli, config, request_log
 from . import db as db_module
 from .auth import current_username
 from .routes import (
+    developer,
     devices,
     frames,
     orchestrator,
@@ -52,6 +53,7 @@ def create_app() -> Flask:
     app.register_blueprint(renderers.bp)
     app.register_blueprint(spotify_proxy.bp)
     app.register_blueprint(spotify_oauth.bp)
+    app.register_blueprint(developer.bp)
     app.register_blueprint(pages.bp)
     app.register_blueprint(stop_search.bp)
     app.register_blueprint(frames.bp)

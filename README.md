@@ -69,7 +69,12 @@ and how to run and deploy it.
    `SpotifyClient.get_current_track()` in `countdown` so the Pi-side swap is a
    drop-in). `GET /api/spotify/queue` works the same way and returns the
    upcoming Spotify queue as a JSON list of the same track shape.
-   `GET /api/spotify/top/<artists|tracks>` is served the same way.
+   `GET /api/spotify/top/<artists|tracks>` is served the same way. With the
+   developer panel on, `GET /api/developer` returns the owner's GitHub at a
+   glance (open PRs, reviews waiting, repos failing on their default branch)
+   and their AI plans, called with the GitHub token saved on `/device`. The
+   Claude and Gemini plans are placeholders until there's an API to ask
+   (`broker/clients/ai_plans.py`).
 
 Every browser page shows the signed-in user's username at the top, from the
 `X-Authentik-Username` header the login proxy sets next to `X-Authentik-Uid` (set
@@ -193,6 +198,7 @@ hasn't made a request (`devices.display_last_seen_at`) for 24 hours becomes `sus
 |---|---|
 | `GET /api/config` | renderer |
 | `GET /api/spotify/<now-playing \| queue \| top/<artists\|tracks>>` | renderer |
+| `GET /api/developer` | renderer |
 | `POST /api/devices/pairing-code` | renderer, display |
 | `PUT /api/frame` (raw 800x480 1-bit, 48000 bytes) | renderer |
 | `GET /api/frame` (ETag / `If-None-Match` → 304) | renderer, display |

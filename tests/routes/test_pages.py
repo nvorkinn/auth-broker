@@ -4,7 +4,7 @@ from unittest.mock import Mock, patch
 import pytest
 
 from broker.db import db
-from broker.models import Device, DeviceConfig, GlowmarktCredentials, SpotifyToken
+from broker.models import Device, DeviceConfig, GitHubToken, GlowmarktCredentials, SpotifyToken
 from broker.routes.pages import normalize_postcode, postcode_country
 
 
@@ -720,3 +720,47 @@ def test_about_page_pictures_are_all_there(anonymous_client):
         response = anonymous_client.get(picture)
         assert response.status_code == 200, picture
         assert response.mimetype in {"image/png", "image/jpeg"}
+
+
+def test_device_config_post_switches_the_developer_panel_and_stores_the_github_token_encrypted(app, paired_client):
+    client, device_id, _ = paired_client
+
+    client.post("/device", data={"interval": "15", "developer_enabled": "on", "github_token": " github_pat_abc "})
+
+    with app.app_context():
+        assert db.session.get(DeviceConfig, device_id).developer_enabled
+        token = db.session.get(GitHubToken, device_id)
+        assert token.token_encrypted != "github_pat_abc"
+        assert token.token == "github_pat_abc"
+
+
+def test_device_config_post_blank_github_token_keeps_the_saved_one(app, paired_client):
+    client, device_id, _ = paired_client
+    client.post("/device", data={"interval": "15", "github_token": "github_pat_abc"})
+
+    client.post("/device", data={"interval": "15"})
+
+    with app.app_context():
+        assert not db.session.get(DeviceConfig, device_id).developer_enabled
+        assert db.session.get(GitHubToken, device_id).token == "github_pat_abc"
+
+
+def test_device_config_get_never_shows_the_github_token(paired_client):
+    client, _device_id, _ = paired_client
+    client.post("/device", data={"interval": "15", "github_token": "github_pat_abc"})
+
+    response = client.get("/device")
+
+    assert b"github_pat_abc" not in response.data
+    assert b"GitHub connected" in response.data
+
+
+def test_github_disconnect_forgets_the_token(app, paired_client):
+    client, device_id, _ = paired_client
+    client.post("/device", data={"interval": "15", "github_token": "github_pat_abc"})
+
+    response = client.post("/device/github/disconnect")
+
+    assert response.status_code == 302
+    with app.app_context():
+        assert db.session.get(GitHubToken, device_id) is None

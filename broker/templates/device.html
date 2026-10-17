@@ -43,6 +43,7 @@
 
 <!-- Lives outside the settings form because forms can't nest; the Disconnect button points at it. -->
 <form id="spotifyDisconnectForm" method="POST" action="{{ url_for('pages.spotify_disconnect', device_id=device_id) }}"></form>
+<form id="githubDisconnectForm" method="POST" action="{{ url_for('pages.github_disconnect', device_id=device_id) }}"></form>
 <form id="displayUnlinkForm" method="POST" action="{{ url_for('pages.display_unlink', device_id=device_id) }}"></form>
 
 <form method="POST" action="{{ url_for('pages.device_config', device_id=device_id) }}">
@@ -212,6 +213,41 @@
                     <a href="{{ url_for('spotify_oauth.login', device=device_id) }}" class="btn-action" style="text-decoration:none;">Connect</a>
                 {% endif %}
             </div>
+        </div>
+    </div>
+
+    <!-- Developer -->
+    <div class="card">
+        <div class="card-header">
+            <h2 class="card-title">Developer</h2>
+        </div>
+        <div class="status-row">
+            <div class="checkbox-group">
+                <input type="checkbox" id="developer_enabled" name="developer_enabled" {% if config.developer_enabled %}checked{% endif %}>
+                <label for="developer_enabled" style="margin: 0; cursor: pointer; font-size: 14px;">Enabled</label>
+            </div>
+            <div class="status-row">
+                {% if github_linked %}
+                    <span class="status-pill status-linked">GitHub connected</span>
+                    <button type="submit" form="githubDisconnectForm" class="btn-action btn-delete">Remove token</button>
+                {% else %}
+                    <span class="status-pill status-unlinked">GitHub not connected</span>
+                {% endif %}
+            </div>
+        </div>
+        <div class="form-group" style="margin-top: 12px;">
+            <label for="github_token">GitHub token</label>
+            <input
+                type="password"
+                id="github_token"
+                name="github_token"
+                placeholder="{{ 'Saved — leave blank to keep it' if github_linked else 'github_pat_…' }}"
+                autocomplete="new-password"
+            >
+            <span class="card-subtitle" style="display: block; margin-top: 6px;">
+                A <a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener">fine-grained token</a>,
+                read-only, for all your repositories: Actions, Metadata and Pull requests, plus Plan for Copilot usage.
+            </span>
         </div>
     </div>
 
