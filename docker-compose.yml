@@ -21,7 +21,7 @@ x-request-logging: &request-logging
 
 # Shared by the Authentik server and worker, which run the same image.
 x-authentik: &authentik
-  image: ghcr.io/goauthentik/server:${AUTHENTIK_VERSION:-2026.8.3}
+  image: ghcr.io/goauthentik/server:${AUTHENTIK_VERSION:-2026.8.4}
   restart: unless-stopped
   env_file: authentik.env
   environment:
