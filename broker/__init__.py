@@ -1,7 +1,9 @@
 """The auth broker: a Flask app that pairs screens with their owners and serves them config and frames."""
 
 import logging
+import os
 
+import redis
 from flask import Flask
 from werkzeug.middleware.proxy_fix import ProxyFix
 
@@ -49,6 +51,14 @@ def create_app() -> Flask:
     app.extensions["pair_throttle"] = PairThrottle()
     app.extensions["register_throttle"] = PairThrottle(
         max_events=REGISTRATIONS_PER_MINUTE, max_lockout=MAX_REGISTRATION_LOCKOUT_SECONDS
+    )
+
+    app.extensions["redis"] = redis.Redis.from_url(
+        os.environ.get("REDIS_URL", "redis://127.0.0.1:6379/0"),
+        password=os.environ.get("REDIS_PASSWORD"),
+        decode_responses=True,
+        socket_timeout=1,  # a dead Redis can't hang a config save
+        socket_connect_timeout=1,
     )
 
     app.register_blueprint(devices.bp)

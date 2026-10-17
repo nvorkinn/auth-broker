@@ -5,6 +5,7 @@ from http import HTTPStatus
 from typing import TYPE_CHECKING
 
 from flask import Blueprint, Response, current_app, g, jsonify, redirect, render_template, request, url_for
+from redis import Redis, RedisError
 
 from broker.auth import (
     current_user,
@@ -66,6 +67,42 @@ def postcode_country(postcode: str) -> str | None:
     if not postcode:
         return None
     return "NO" if NORWEGIAN_POSTCODE_RE.match(postcode) else "GB"
+
+
+def _write_subscriptions_to_redis() -> None:
+    configs = db.session.scalars(db.select(DeviceConfig)).all()
+    subs: dict[str, set[str]] = {
+        "tfl": set(),
+        "entur": set(),
+        "weather": set(),
+        "glow": set(),
+        "spotify": set(),
+    }
+
+    for config in configs:
+        for stop_id in config.tfl_stop_ids:
+            subs["entur" if stop_id.startswith("NSR:") else "tfl"].add(stop_id)
+        if config.weather_location:
+            subs["weather"].add(config.weather_location)
+        if config.spotify_enabled:
+            subs["spotify"].add(config.device_id)
+    subs["glow"] = set(
+        db.session.scalars(
+            db.select(GlowmarktCredentials.device_id).where(GlowmarktCredentials.password_encrypted.is_not(None))
+        )
+    )
+    redis: Redis = current_app.extensions["redis"]
+    try:
+        with redis.pipeline(transaction=True) as pipe:
+            for name, members in subs.items():
+                key = f"v1:sub:{name}"
+                pipe.delete(key)
+                if members:
+                    pipe.sadd(key, *members)
+            pipe.publish("v1:sub:changed", "")
+            pipe.execute()
+    except RedisError:
+        current_app.logger.warning("Couldn't publish subscriptions to Redis", exc_info=True)
 
 
 @bp.app_context_processor
@@ -218,6 +255,7 @@ def _save_device_config(device_id: str) -> ResponseReturnValue:
     _save_github_token(device_id)
 
     db.session.commit()
+    _write_subscriptions_to_redis()
     return redirect(url_for("pages.device_config", device_id=device_id))
 
 

@@ -764,3 +764,67 @@ def test_github_disconnect_forgets_the_token(app, paired_client):
     assert response.status_code == 302
     with app.app_context():
         assert db.session.get(GitHubToken, device_id) is None
+
+
+def _subscriptions(fake_redis):
+    return {key.removeprefix("v1:sub:"): members for key, members in fake_redis.sets.items()}
+
+
+def test_saving_the_config_publishes_subscriptions_to_redis(paired_client, fake_redis):
+    client, device_id, _ = paired_client
+    client.post(
+        "/device",
+        data={
+            "stops_order": "940GZZLUEUS,NSR:StopPlace:58366",
+            "interval": "20",
+            "weather_location": "London",
+            "spotify_enabled": "on",
+        },
+    )
+
+    assert _subscriptions(fake_redis) == {
+        "tfl": {"940GZZLUEUS"},
+        "entur": {"NSR:StopPlace:58366"},
+        "weather": {"London"},
+        "spotify": {device_id},
+    }
+    assert fake_redis.published == [("v1:sub:changed", "")]
+
+
+def test_saving_the_config_subscribes_a_device_with_a_glowmarkt_password_to_glow(paired_client, fake_redis):
+    client, device_id, _ = paired_client
+    client.post(
+        "/device",
+        data={"interval": "15", "glowmarkt_username": "someone@example.com", "glowmarkt_password": "hunter2"},
+    )
+
+    assert _subscriptions(fake_redis) == {"glow": {device_id}}
+
+
+def test_saving_the_config_drops_what_the_device_no_longer_wants(paired_client, fake_redis):
+    client, _, _ = paired_client
+    client.post("/device", data={"stops_order": "940GZZLUEUS", "interval": "20", "spotify_enabled": "on"})
+    client.post("/device", data={"interval": "20"})
+
+    assert _subscriptions(fake_redis) == {}
+    assert len(fake_redis.published) == 2
+
+
+def test_a_rejected_config_save_publishes_nothing(paired_client, fake_redis):
+    client, _, _ = paired_client
+    response = client.post("/device", data={"interval": "20", "postcode": "not a postcode"})
+
+    assert response.status_code == 400
+    assert fake_redis.sets == {}
+    assert fake_redis.published == []
+
+
+def test_the_config_is_saved_even_when_redis_is_down(app, paired_client, fake_redis):
+    client, device_id, _ = paired_client
+    fake_redis.fail = True
+
+    response = client.post("/device", data={"interval": "30", "weather_location": "London"})
+
+    assert response.status_code == 302
+    with app.app_context():
+        assert db.session.get(DeviceConfig, device_id).interval == 30
