@@ -10,6 +10,8 @@ werkzeug
 click
 maxminddb
 pydantic
+# The workflow files the developer panel's release graph is drawn from.
+pyyaml
 redis
 # The IANA time zones for zoneinfo (the glow-provider asks Glowmarkt in each screen's), whatever the image has.
 tzdata

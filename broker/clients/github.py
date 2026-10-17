@@ -1,12 +1,19 @@
 """Talks to GitHub on a device's behalf, with the token its owner gave for the developer panel.
 
 What the panel shows: how many repos the owner has, their open pull requests, the ones waiting for their review,
-which repos are failing on their default branch, and their Copilot premium requests this month.
+which repos are failing on their default branch, any release running (or just finished) with its jobs as GitHub's
+graph, and their Copilot premium requests this month.
 """
 
+import logging
+import re
 from datetime import UTC, datetime, timedelta
 
 import requests
+
+from broker.clients import workflow_graph
+
+logger = logging.getLogger(__name__)
 
 API_URL = "https://api.github.com"
 TIMEOUT = 10
@@ -16,6 +23,12 @@ MOST_CHECKED = 20
 PAGE_SIZE = 100
 # What a finished run ends in when it didn't pass.
 FAILED = {"failure", "timed_out", "startup_failure"}
+# A workflow is a release if its name says so.
+RELEASE = re.compile(r"release|deploy", re.IGNORECASE)
+# Runs started this recently are looked through for a release: one takes minutes, so this is plenty.
+RECENT_RUNS = timedelta(hours=6)
+# A finished release stays on the screen this long, so its result is seen.
+SHOWN_AFTER = timedelta(minutes=10)
 
 
 def summary(token: str) -> dict:
@@ -26,12 +39,14 @@ def summary(token: str) -> dict:
     session = _session(token)
     login = _get(session, "/user")["login"]
     repos = _owned_repos(session)
+    recent = _recently_pushed(repos)
     return {
         "login": login,
         "repos": len(repos),
         "open_prs": _count(session, f"is:pr is:open author:{login}"),
         "review_requests": _count(session, f"is:pr is:open review-requested:{login}"),
-        "failing": [repo["name"] for repo in _recently_pushed(repos) if _failing(session, repo)],
+        "failing": [repo["name"] for repo in recent if _failing(session, repo)],
+        "releases": _releases(session, recent),
     }
 
 
@@ -110,3 +125,73 @@ def _failing(session: requests.Session, repo: dict) -> bool:
     for run in runs:  # newest first
         latest.setdefault(run["workflow_id"], run["conclusion"])
     return any(conclusion in FAILED for conclusion in latest.values())
+
+
+def _releases(session: requests.Session, repos: list[dict]) -> list[dict]:
+    """Return each repo's release that's running or finished in the last few minutes, the latest started first.
+
+    A repo whose release can't be read is left out, so the rest of the panel still shows.
+    """
+    now = datetime.now(UTC)
+    found = []
+    for repo in repos:
+        try:
+            release = _release(session, repo, now)
+        except requests.RequestException as e:
+            logger.warning("Couldn't read %s's release: %s", repo["full_name"], e)
+            continue
+        if release is not None:
+            found.append(release)
+    return sorted(found, key=lambda release: release["started"], reverse=True)
+
+
+def _release(session: requests.Session, repo: dict, now: datetime) -> dict | None:
+    """Return the repo's latest release run with its jobs as graph nodes; None if none, or it finished a while ago."""
+    runs = _get(
+        session,
+        f"/repos/{repo['full_name']}/actions/runs",
+        created=f">={now - RECENT_RUNS:%Y-%m-%dT%H:%M:%SZ}",
+        per_page=30,
+    )["workflow_runs"]
+    run = next((run for run in runs if RELEASE.search(run["name"])), None)  # newest first
+    if run is None:
+        return None
+    finished = run["status"] == "completed"
+    if finished and datetime.fromisoformat(run["updated_at"]) < now - SHOWN_AFTER:
+        return None
+    jobs = _get(session, f"/repos/{repo['full_name']}/actions/runs/{run['id']}/jobs", per_page=100)["jobs"]
+    return {
+        "repo": repo["name"],
+        "title": _title(run, repo),
+        "state": workflow_graph.run_state(run),
+        "started": run["run_started_at"],
+        "finished": run["updated_at"] if finished else None,
+        "jobs": workflow_graph.nodes(_workflow_jobs(session, repo, run), jobs),
+    }
+
+
+def _title(run: dict, repo: dict) -> str:
+    """Return the tag a release was pushed for, else its run number (one started by hand runs on the default branch)."""
+    if run["event"] == "push" and run["head_branch"] != repo["default_branch"]:
+        return run["head_branch"]
+    return f"#{run['run_number']}"
+
+
+def _workflow_jobs(session: requests.Session, repo: dict, run: dict) -> list[workflow_graph.WorkflowJob]:
+    """Return the jobs of the run's workflow file, as at the run's commit; none if it can't be read.
+
+    Without them the graph still shows the run's jobs, but not the lines between them.
+    """
+    path = run["path"].split("@")[0]
+    try:
+        response = session.get(
+            f"{API_URL}/repos/{repo['full_name']}/contents/{path}",
+            params={"ref": run["head_sha"]},
+            headers={"Accept": "application/vnd.github.raw+json"},
+            timeout=TIMEOUT,
+        )
+        response.raise_for_status()
+        return workflow_graph.workflow_jobs(response.text)
+    except (requests.RequestException, ValueError) as e:
+        logger.warning("Couldn't read %s's %s: %s", repo["full_name"], path, e)
+        return []
