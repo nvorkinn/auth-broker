@@ -1,0 +1,272 @@
+{
+  "fetched_at": "2026-10-17T12:00:00+00:00",
+  "spotify": {
+    "long_term": {
+      "tracks": {
+        "items": [
+          {
+            "album": {
+              "album_type": "album",
+              "name": "Short n' Sweet",
+              "images": [
+                {
+                  "width": 640,
+                  "height": 640,
+                  "url": "https://i.scdn.co/image/ab01640"
+                },
+                {
+                  "width": 300,
+                  "height": 300,
+                  "url": "https://i.scdn.co/image/ab01300"
+                },
+                {
+                  "width": 64,
+                  "height": 64,
+                  "url": "https://i.scdn.co/image/ab0164"
+                }
+              ],
+              "release_date": "2024-03-01"
+            },
+            "artists": [
+              {
+                "name": "Sabrina Carpenter",
+                "id": "aab01",
+                "type": "artist",
+                "uri": "spotify:artist:aab01"
+              }
+            ],
+            "duration_ms": 175459,
+            "explicit": false,
+            "id": "tab01",
+            "is_local": false,
+            "name": "Espresso",
+            "popularity": 71,
+            "type": "track",
+            "uri": "spotify:track:tab01"
+          },
+          {
+            "album": {
+              "album_type": "album",
+              "name": "Hit Me Hard and Soft",
+              "images": [
+                {
+                  "width": 640,
+                  "height": 640,
+                  "url": "https://i.scdn.co/image/cd01640"
+                },
+                {
+                  "width": 300,
+                  "height": 300,
+                  "url": "https://i.scdn.co/image/cd01300"
+                },
+                {
+                  "width": 64,
+                  "height": 64,
+                  "url": "https://i.scdn.co/image/cd0164"
+                }
+              ],
+              "release_date": "2024-03-01"
+            },
+            "artists": [
+              {
+                "name": "Billie Eilish",
+                "id": "acd01",
+                "type": "artist",
+                "uri": "spotify:artist:acd01"
+              }
+            ],
+            "duration_ms": 210373,
+            "explicit": false,
+            "id": "tcd01",
+            "is_local": false,
+            "name": "Birds of a Feather",
+            "popularity": 71,
+            "type": "track",
+            "uri": "spotify:track:tcd01"
+          }
+        ]
+      },
+      "artists": {
+        "items": [
+          {
+            "name": "Sabrina Carpenter",
+            "id": "x1",
+            "genres": [
+              "pop"
+            ],
+            "popularity": 90,
+            "type": "artist"
+          },
+          {
+            "name": "Billie Eilish",
+            "id": "x2",
+            "genres": [],
+            "popularity": 92,
+            "type": "artist"
+          }
+        ]
+      }
+    },
+    "short_term": {
+      "tracks": {
+        "items": [
+          {
+            "album": {
+              "album_type": "album",
+              "name": "Hit Me Hard and Soft",
+              "images": [
+                {
+                  "width": 640,
+                  "height": 640,
+                  "url": "https://i.scdn.co/image/cd01640"
+                },
+                {
+                  "width": 300,
+                  "height": 300,
+                  "url": "https://i.scdn.co/image/cd01300"
+                },
+                {
+                  "width": 64,
+                  "height": 64,
+                  "url": "https://i.scdn.co/image/cd0164"
+                }
+              ],
+              "release_date": "2024-03-01"
+            },
+            "artists": [
+              {
+                "name": "Billie Eilish",
+                "id": "acd01",
+                "type": "artist",
+                "uri": "spotify:artist:acd01"
+              }
+            ],
+            "duration_ms": 210373,
+            "explicit": false,
+            "id": "tcd01",
+            "is_local": false,
+            "name": "Birds of a Feather",
+            "popularity": 71,
+            "type": "track",
+            "uri": "spotify:track:tcd01"
+          }
+        ]
+      },
+      "artists": {
+        "items": [
+          {
+            "name": "Billie Eilish",
+            "id": "x2",
+            "genres": [],
+            "popularity": 92,
+            "type": "artist"
+          }
+        ]
+      }
+    }
+  },
+  "apple_music": {
+    "long_term": {
+      "tracks": {
+        "items": [
+          {
+            "name": "Efecto",
+            "duration_ms": 213061,
+            "artists": [
+              {
+                "name": "Bad Bunny"
+              }
+            ],
+            "album": {
+              "name": "Un Verano Sin Ti",
+              "images": [
+                {
+                  "width": 300,
+                  "height": 300,
+                  "url": "https://is5-ssl.mzstatic.com/x/300x300bb.jpg"
+                }
+              ]
+            }
+          },
+          {
+            "name": "Tití Me Preguntó",
+            "duration_ms": 213061,
+            "artists": [
+              {
+                "name": "Bad Bunny"
+              }
+            ],
+            "album": {
+              "name": "Un Verano Sin Ti",
+              "images": [
+                {
+                  "width": 300,
+                  "height": 300,
+                  "url": "https://is5-ssl.mzstatic.com/x/300x300bb.jpg"
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "artists": {
+        "items": [
+          {
+            "name": "Bad Bunny"
+          }
+        ]
+      }
+    },
+    "short_term": {
+      "tracks": {
+        "items": [
+          {
+            "name": "Efecto",
+            "duration_ms": 213061,
+            "artists": [
+              {
+                "name": "Bad Bunny"
+              }
+            ],
+            "album": {
+              "name": "Un Verano Sin Ti",
+              "images": [
+                {
+                  "width": 300,
+                  "height": 300,
+                  "url": "https://is5-ssl.mzstatic.com/x/300x300bb.jpg"
+                }
+              ]
+            }
+          },
+          {
+            "name": "Tití Me Preguntó",
+            "duration_ms": 213061,
+            "artists": [
+              {
+                "name": "Bad Bunny"
+              }
+            ],
+            "album": {
+              "name": "Un Verano Sin Ti",
+              "images": [
+                {
+                  "width": 300,
+                  "height": 300,
+                  "url": "https://is5-ssl.mzstatic.com/x/300x300bb.jpg"
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "artists": {
+        "items": [
+          {
+            "name": "Bad Bunny"
+          }
+        ]
+      }
+    }
+  }
+}

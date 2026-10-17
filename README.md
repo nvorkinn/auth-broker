@@ -327,6 +327,7 @@ broker/
   auth.py     the decorators that guard routes
   config.py   environment variables → app.config
   cli.py      `flask devices ...` admin commands
+  spotify_provider.py  the music provider, writing each screen's Spotify and Apple Music to Redis
 ```
 
 `tests/` mirrors this layout.
@@ -818,6 +819,74 @@ change its service leaves it running. To look inside, on the host:
 ```bash
 docker exec -it redis sh -c 'REDISCLI_AUTH="$REDIS_PASSWORD" redis-cli'
 ```
+
+## Music in the store
+
+`broker/spotify_provider.py` is the music provider: a long-running process that fetches what each screen's Spotify
+and Apple Music are playing, and their top lists, and writes them to Redis, so the renderers on the server read them
+from there rather than calling `/api/spotify` and `/api/apple-music`. It runs from the broker's image with the
+broker's settings and `data/`, and calls the services with the same code as those routes, so the tokens never leave
+the broker and a token it refreshes is stored just as the routes store it. The routes stay: standalone Pis can't
+reach Redis and keep calling them.
+
+Its loop follows pi-dashboard's providers (`countdown/providers/README.md` there): a cycle on start, then on every
+epoch-aligned minute, or at once on a `v1:sub:changed` message (a config was saved). Each cycle reads the devices
+from the database: Spotify switched on and linked, or Apple Music switched on (connected or not; the latter stored as
+nothing playing, as the route answers it). A device whose fetch fails (a revoked token, Spotify down) is logged and
+left out, so its keys expire; an unreachable Redis is logged and tried again next minute. SIGTERM stops it between
+devices.
+
+| Key | TTL | Fetched | Holds |
+|---|---|---|---|
+| `v1:spotify:<device id>` | 3 min | every minute | `{"fetched_at", "spotify", "apple_music"}`: each service's `/queue` body |
+| `v1:spotify-top:<device id>` | 2 h | every 30 min, and at once for a device new to it | `{"fetched_at", "spotify", "apple_music"}`: each service's top lists |
+
+Each service's part is exactly what its route answers the renderer, so the renderer reads it with the models it
+already has; the only new definition is the wrapper (pi-dashboard's `countdown_core/store/music.py`):
+
+```json
+{
+  "fetched_at": "2026-10-17T12:00:00+00:00",
+  "spotify": {"currently_playing": {...}, "queue": [...]},
+  "apple_music": null
+}
+```
+
+```json
+{
+  "fetched_at": "2026-10-17T12:00:00+00:00",
+  "spotify": {
+    "long_term": {"tracks": {"items": [...]}, "artists": {"items": [...]}},
+    "short_term": {"tracks": {"items": [...]}, "artists": {"items": [...]}}
+  },
+  "apple_music": null
+}
+```
+
+- A part is `null` when the service is switched off or its fetch failed; the renderer then keeps its last panel, as
+  when a route call fails. Top lists short of a service are written only if there's no copy yet: a full older one
+  is kept, and the fetch is tried again next minute.
+- Nothing playing is a queue with `"currently_playing": null` (and `"queue": []` for Spotify's 204), not a missing
+  key: a missing key means the provider is down.
+- The top lists are Spotify's `/me/top/{tracks,artists}?time_range=<long_term|short_term>&limit=5`, the two time
+  ranges the renderer shows, and Apple Music's counted equivalents.
+- `tests/fixtures/music_player.json` and `music_top.json` are an example of each; pi-dashboard's tests read copies
+  of the same files, so keep them in step.
+
+A minute is as often as a renderer moves its music panel on today, and it shows the player only every other page, so
+the provider makes no more Spotify calls than the renderers it stands in for: one a minute per device, plus four
+every half hour. It also fetches the devices of standalone Pis (the database can't tell which renderers read the
+store), which still call the routes too.
+
+To try it on the host: `docker compose --profile providers up -d spotify-provider`, then
+`docker exec -it redis sh -c 'REDISCLI_AUTH="$REDIS_PASSWORD" redis-cli GET v1:spotify:<device id>'`. Locally, with
+Redis running and the broker's environment loaded, `python -m broker.spotify_provider` (`LOG_LEVEL=debug` shows each
+cycle).
+
+It's under the `providers` compose profile, so a deploy neither starts nor upgrades it. To turn it on for good:
+remove `profiles: [ providers ]` from its service, and add `spotify-provider` to the services `deploy.sh` recreates
+for `auth-broker` (it runs the same image, pinned by `AUTH_BROKER_VERSION`). Then set `RENDERER_REDIS_URL` for
+pi-dashboard's orchestrator (its providers README, "Enabling in production"), so the renderers read the store.
 
 ## Not built yet
 

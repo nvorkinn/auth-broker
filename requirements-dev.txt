@@ -2,4 +2,5 @@
 pytest
 pytest-cov
 pytest-xdist
+fakeredis
 ruff==0.17.0
