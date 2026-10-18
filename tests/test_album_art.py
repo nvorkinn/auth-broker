@@ -219,7 +219,16 @@ def test_a_host_that_doesnt_answer_is_tried_once_a_cycle(art, binary, host, logg
     assert binary.get(art_key(other)) == ART
 
 
-@pytest.mark.parametrize("url", ["http://i.scdn.co/image/ab01300", "file:///etc/hosts", "https:///no-host", "nonsense"])
+@pytest.mark.parametrize(
+    "url",
+    [
+        "http://i.scdn.co/image/ab01300",
+        "file:///etc/hosts",
+        "https:///no-host",
+        "nonsense",
+        "https://[i.scdn.co/image/ab01300",  # urlsplit can't parse it (an unclosed IPv6 bracket)
+    ],
+)
 def test_only_an_https_url_is_fetched(art, binary, host, logger, url):
     art.keep([url])
 
