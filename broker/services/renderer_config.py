@@ -48,14 +48,7 @@ def build(config: DeviceConfig, *, pairing_code: str | None) -> ConfigResponse:
         timezone=timezone(country, stop_ids),
         screen=Screen(orientation=config.orientation, width=config.width, height=config.height),
         # The key is what the weather is subscribed under, so it's what the renderer reads (v1:weather:<key>).
-        weather=Weather(
-            # No weather API key: the renderer reads the forecast from the store, and Open-Meteo needs none. Sent
-            # empty, and explicitly (a default left unset is left out of the response), because renderers built on
-            # countdown-api before api_key was optional require it; it goes once none of those is deployed.
-            api_key="",
-            location=config.weather_location,
-            key=weather_place.weather_key(config),
-        ),
+        weather=Weather(location=config.weather_location, key=weather_place.weather_key(config)),
         style=config.style,
         # The panels' own styles, for renderers that predate `style`, in the names they know.
         notice_board=NoticeBoard(postcode=config.postcode or None, country=country, style=config.style),

@@ -980,9 +980,8 @@ and don't need the broker to be up, and a save reaches the screen at once
 (`broker/services/config_store.py`; `services/renderer_config.py` makes it, and the route's answer, the same way):
 
 - **The value** is exactly `GET /api/config`'s JSON for the device (the contract's `ConfigResponse`), less its
-  pairing code (`pairing_code` null). It carries no API key: `weather.api_key` is empty in both, only because
-  renderers built on countdown-api before the field was optional still require it, and TfL's key isn't in the
-  config at all any more.
+  pairing code (`pairing_code` null). It carries no API key: neither the weather's nor TfL's is in the config at
+  all any more.
   `tests/fixtures/config_store.json` is an example; pi-dashboard's tests read the same file, so change both together.
 - **Written** for every device on every config save, as the broker starts (gunicorn's `post_worker_init`, in
   `gunicorn.conf.py`, which writes the subscriptions too), by `flask weather backfill` and by

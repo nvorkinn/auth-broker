@@ -79,7 +79,7 @@ def test_get_config_returns_defaults(client, register_device):
         "timezone": "Europe/London",
         "style": "airy",
         "screen": {"orientation": "vertical", "width": 480, "height": 800},
-        "weather": {"api_key": "", "location": "", "key": None},
+        "weather": {"location": "", "key": None},
         "notice_board": {"postcode": None, "country": None, "style": "airy"},
         "tfl": {"stop_ids": [], "style": "grouped"},
         "departures": {"stops": [], "style": "grouped"},
@@ -103,18 +103,13 @@ def test_get_config_never_sends_the_tfl_key(app, client, register_device):
     assert b"test-tfl-key" not in response.data
 
 
-def test_get_config_sends_an_empty_weather_api_key_for_renderers_that_require_one(client, register_device):
-    """Nothing uses a weather key (the weather provider calls Open-Meteo, which needs none), so there is none to send.
-
-    But renderers built on countdown-api before `Weather.api_key` was optional (pi-dashboard v1.25.0 and earlier)
-    reject a config without it, so it's sent empty until none of them is deployed. Moving vendor/countdown-api to a
-    contract without the field would silently stop sending it, and fails here.
-    """
+def test_get_config_sends_no_weather_api_key(client, register_device):
+    """Nothing uses one: the weather provider calls Open-Meteo, which needs none, and the screen reads the store."""
     _device_id, secret = register_device()
 
     response = client.get("/api/config", headers={"Authorization": f"Bearer {secret}"})
 
-    assert response.get_json()["weather"]["api_key"] == ""
+    assert "api_key" not in response.get_json()["weather"]
 
 
 def test_get_config_sends_the_developer_switch_but_never_the_github_token(app, client, register_device):
@@ -149,7 +144,7 @@ def test_get_config_sends_the_key_the_weather_is_subscribed_under(app, client, r
 
     body = client.get("/api/config", headers={"Authorization": f"Bearer {secret}"}).get_json()
 
-    assert body["weather"] == {"api_key": "", "location": "London", "key": "london-gb-2643743"}
+    assert body["weather"] == {"location": "London", "key": "london-gb-2643743"}
 
 
 def test_get_config_sends_the_slug_as_the_key_of_a_location_with_no_place_picked(app, client, register_device):
