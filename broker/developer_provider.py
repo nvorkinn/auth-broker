@@ -7,10 +7,10 @@ terms (the developer panel switched on) it polls everything the panel shows (the
 the broker holds, and their AI plans) on its own, whether or not a renderer is looking, and writes it to
 `v1:developer:<device id>`. The renderers on the server read that instead of calling /api/developer.
 
-It also sets the pace. While any of a device's releases is running, the panel's stages change by the minute, so the
-provider polls every BURST_INTERVAL_S and asks for the screen to refresh as fast, with `v1:pace:developer:<device id>`
-(a TTL of PACE_TTL_S, renewed each cycle it still holds). Nothing says a release has ended: the key lapses, and the
-screen goes back to its usual pace. See "The pace" in pi-dashboard's countdown README.
+It also sets the pace. While the panel shows a release (running, or finished in the last github.SHOWN_AFTER), its stages
+change by the minute, so the provider polls every BURST_INTERVAL_S and asks for the screen to refresh as fast, with
+`v1:pace:developer:<device id>` (a TTL of PACE_TTL_S, renewed each cycle it still holds). Once none shows, the key is
+deleted (or lapses), and the screen goes back to its usual pace. See "The pace" in pi-dashboard's countdown README.
 
 A device whose GitHub rate-limits its token (403/429, see github.rate_limit_wait) isn't polled again until GitHub says
 it may be (Retry-After, or X-RateLimit-Reset), and its keys are left as they are meanwhile.
@@ -41,9 +41,9 @@ if TYPE_CHECKING:
 # Pull requests and builds change slowly, but a release that starts is worth catching soon: every full poll costs
 # GitHub ~25 calls (of the 5,000 an hour a token gets), which this keeps to a sixth.
 IDLE_INTERVAL_S = 120
-# While a release runs, its jobs change by the minute.
+# While a release shows, its jobs change by the minute (and a finished one must go once its minute is up).
 BURST_INTERVAL_S = 20
-# The refresh pace asked of the screen while a release runs: what the renderer will not go under either.
+# The refresh pace asked of the screen while a release shows: what the renderer will not go under either.
 PACE_S = 20
 # The pace key lapses unless the next cycle renews it: three burst cycles, so one missed poll doesn't slow the screen.
 PACE_TTL_S = 60
@@ -83,9 +83,13 @@ def wanted_devices() -> list[Wanted]:
     return [Wanted(device_id, token and token.token) for device_id, token in rows]
 
 
-def release_running(snapshot: dict) -> bool:
-    """Whether any of the owner's releases is running (not one just finished, which stays on the panel a while)."""
-    return any(release["state"] == "running" for release in (snapshot["github"] or {}).get("releases", []))
+def release_shown(snapshot: dict) -> bool:
+    """Whether the panel shows a release: one running, or one just finished (for github.SHOWN_AFTER).
+
+    A finished one counts too, so the fast pace lasts until it's gone from the screen, rather than the panel holding
+    it for up to an idle poll and refresh after its minute is up.
+    """
+    return bool((snapshot["github"] or {}).get("releases"))
 
 
 def stored(fetched_at: datetime, snapshot: dict) -> str:
@@ -94,14 +98,14 @@ def stored(fetched_at: datetime, snapshot: dict) -> str:
 
 
 class DeveloperProvider(ProviderLoop):
-    """Polls every wanted device's GitHub and plans each cycle, faster while one of them has a release running."""
+    """Polls every wanted device's GitHub and plans each cycle, faster while one of them shows a release."""
 
     label = "Developer"
 
     def __init__(self, app: Flask, store: redis.Redis, clock: Callable[[], float] = time.time) -> None:
         """See ProviderLoop."""
         super().__init__(app, store, clock)
-        # The devices whose last poll saw a release running. A device whose poll fails stays as it was, so one
+        # The devices whose last poll saw a release to show. A device whose poll fails stays as it was, so one
         # hiccup from GitHub doesn't slow the screen in the middle of a release.
         self._running: set[str] = set()
         # Device -> when its token may be used again, after GitHub rate-limited it. Per device rather than for the whole
@@ -109,7 +113,7 @@ class DeveloperProvider(ProviderLoop):
         self._backoff_until: dict[str, float] = {}
 
     def interval_s(self) -> float:
-        """Return BURST_INTERVAL_S while any device has a release running, else IDLE_INTERVAL_S."""
+        """Return BURST_INTERVAL_S while any device shows a release, else IDLE_INTERVAL_S."""
         return BURST_INTERVAL_S if self._running else IDLE_INTERVAL_S
 
     def run_cycle(self) -> int:
@@ -151,7 +155,7 @@ class DeveloperProvider(ProviderLoop):
             else:
                 self.logger.warning("Developer: GitHub for device %s: %s", want.device_id, e)
             return 0
-        running = release_running(snapshot)
+        running = release_shown(snapshot)
         if running:
             self._running.add(want.device_id)
         else:

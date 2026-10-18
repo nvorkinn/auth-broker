@@ -208,9 +208,9 @@ def test_a_release_started_by_hand_is_called_by_its_run_number():
     assert release["title"] == "#47"
 
 
-def test_a_finished_release_shows_for_a_few_minutes_then_not():
-    just = _release_run(status="completed", conclusion="success", updated=NOW - timedelta(minutes=2))
-    earlier = _release_run(status="completed", conclusion="failure", updated=NOW - timedelta(minutes=30))
+def test_a_finished_release_shows_for_a_minute_then_not():
+    just = _release_run(status="completed", conclusion="success", updated=NOW - timedelta(seconds=50))
+    earlier = _release_run(status="completed", conclusion="failure", updated=NOW - timedelta(seconds=70))
 
     with patch("requests.Session.get", side_effect=_releasing([just])):
         (release,) = github.summary("github_pat_abc")["releases"]

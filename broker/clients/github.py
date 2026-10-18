@@ -29,8 +29,9 @@ FAILED = {"failure", "timed_out", "startup_failure"}
 RELEASE = re.compile(r"release|deploy", re.IGNORECASE)
 # Runs started this recently are looked through for a release: one takes minutes, so this is plenty.
 RECENT_RUNS = timedelta(hours=6)
-# A finished release stays on the screen this long, so its result is seen.
-SHOWN_AFTER = timedelta(minutes=10)
+# A finished release stays on the screen this long, so its result is seen. The provider keeps the fast pace while it
+# shows (broker/developer_provider.py), so it goes within about BURST_INTERVAL_S of this.
+SHOWN_AFTER = timedelta(minutes=1)
 # How long to leave GitHub alone after a rate limit that doesn't say how long: GitHub asks for at least a minute.
 DEFAULT_BACKOFF_S = 60
 
@@ -164,7 +165,7 @@ def _failing(session: requests.Session, repo: dict) -> bool:
 
 
 def _releases(session: requests.Session, repos: list[dict]) -> list[dict]:
-    """Return each repo's release that's running or finished in the last few minutes, the latest started first.
+    """Return each repo's release that's running or finished in the last SHOWN_AFTER, the latest started first.
 
     A repo whose release can't be read is left out, so the rest of the panel still shows; but a rate limit is raised
     (requests.HTTPError), as every call after it would fail too and the panel would lose its releases for nothing.
