@@ -83,20 +83,19 @@ def test_the_stored_config_is_the_shape_the_renderer_reads(app, store):
     assert _stored(store, device_id) == FIXTURE["value"]
 
 
-def test_the_stored_config_is_what_get_api_config_answers_less_its_secrets(app, store, paired_client):
+def test_the_stored_config_is_what_get_api_config_answers(app, store, paired_client):
     client, device_id, secret = paired_client
     client.post("/device", data={"stops_order": "940GZZLUEUS,NSR:StopPlace:58366", "postcode": "SE17 3LL"})
 
     answered = _get_config(client, secret)
 
-    assert answered["weather"]["api_key"] == "test-weather-key"
-    assert answered["pairing_code"] is None  # paired
-    assert _stored(store, device_id) == answered | {"weather": answered["weather"] | {"api_key": ""}}
+    assert answered["pairing_code"] is None  # paired, so there's a copy, and it has no code to leave out
+    assert _stored(store, device_id) == answered
 
 
 def test_the_stored_config_carries_no_secret(app, store, paired_client, monkeypatch):
     client, device_id, _ = paired_client
-    app.config.update(TFL_APP_KEY="the-tfl-key", WEATHER_API_KEY="the-weather-key")
+    app.config.update(TFL_APP_KEY="the-tfl-key")
     client.post("/device", data={"glowmarkt_username": "me@example.com", "glowmarkt_password": "glow-password"})
     with app.app_context():
         db.session.add(GitHubToken(device_id=device_id, token="ghp_the-github-token"))
@@ -107,7 +106,7 @@ def test_the_stored_config_carries_no_secret(app, store, paired_client, monkeypa
     stored = store.get(config_store.key(device_id))
 
     assert json.loads(stored)["glowmarkt"] == {"enabled": True}
-    for secret in ("the-tfl-key", "the-weather-key", "glow-password", "ghp_the-github-token", "spotify-"):
+    for secret in ("the-tfl-key", "glow-password", "ghp_the-github-token", "spotify-"):
         assert secret not in stored
     assert "me@example.com" not in stored  # nor the account's name
 

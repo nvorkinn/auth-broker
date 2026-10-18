@@ -34,7 +34,6 @@ def load(app: Flask) -> None:
     # The name Apple's sign-in shows the listener.
     app.config["APPLE_MUSIC_APP_NAME"] = os.environ.get("APPLE_MUSIC_APP_NAME", "Countdown")
     app.config["TFL_APP_KEY"] = os.environ.get("TFL_APP_KEY", "")
-    app.config["WEATHER_API_KEY"] = os.environ.get("WEATHER_API_KEY", "")
     # Where the IP location data for suggesting a weather location is (see services/geoip.py). The image
     # has it in /app/geodata, which is the default.
     app.config["GEODATA_DIR"] = os.environ.get("GEODATA_DIR", str(Path(__file__).resolve().parent.parent / "geodata"))

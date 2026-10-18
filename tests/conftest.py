@@ -24,7 +24,6 @@ def _set_app_env(monkeypatch, db_path):
     monkeypatch.setenv("SPOTIFY_CLIENT_SECRET", "test-client-secret")
     monkeypatch.setenv("SPOTIFY_REDIRECT_URI", "https://auth.example.com/auth/spotify/callback")
     monkeypatch.setenv("TFL_APP_KEY", "test-tfl-key")
-    monkeypatch.setenv("WEATHER_API_KEY", "test-weather-key")
     monkeypatch.setenv("BROKER_DB_PATH", str(db_path))
 
     monkeypatch.setenv("CREDENTIAL_ENCRYPTION_KEY", Fernet.generate_key().decode())

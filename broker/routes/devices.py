@@ -105,12 +105,12 @@ def _update_device_name(device_id: str, name: str | None) -> None:
 def get_config(*, device_id: str, x_device_name: str | None = None) -> ConfigResponse:
     """Answer the renderer's config poll (GET /api/config in the contract, which also says that only its role may).
 
-    What's in it is services/renderer_config.py's: the device's settings and the weather API key. While the device
-    isn't paired this also issues the code it shows (pairing.current_code_for). A renderer reading the store reads
-    the same config from there, without the key or a code, and asks here only when the store has none for it.
+    What's in it is services/renderer_config.py's: the device's settings. While the device isn't paired this also
+    issues the code it shows (pairing.current_code_for). A renderer reading the store reads the same config from
+    there, without a code, and asks here only when the store has none for it.
     """
     _update_device_name(device_id, x_device_name)
     config = db.session.get(DeviceConfig, device_id)
     if config is None:
         raise ApiHTTPError(404, message="not found")
-    return renderer_config.build(config, pairing_code=pairing.current_code_for(device_id), api_key=True)
+    return renderer_config.build(config, pairing_code=pairing.current_code_for(device_id))
