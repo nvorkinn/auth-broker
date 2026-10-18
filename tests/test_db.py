@@ -8,7 +8,7 @@ from alembic.autogenerate import compare_metadata
 from alembic.migration import MigrationContext
 from alembic.script import ScriptDirectory
 from flask_migrate import downgrade, upgrade
-from sqlalchemy import inspect, select
+from sqlalchemy import inspect, select, text
 
 from broker import create_app
 from broker import db as db_module
@@ -131,6 +131,16 @@ def test_foreign_keys_are_enforced_after_migrating(app):
         )
         with pytest.raises(Exception, match="FOREIGN KEY"):
             db.session.commit()
+
+
+def test_the_database_stays_in_rollback_journal_mode(app):
+    """The providers read it with ./data mounted read-only, where a WAL database can't be read.
+
+    Every reader of a WAL database needs its -shm file, and can't create one on a read-only mount; in rollback-journal
+    mode a reader only takes shared locks on the file (see db.init_read_only_app).
+    """
+    with app.app_context():
+        assert db.session.execute(text("PRAGMA journal_mode")).scalar() == "delete"
 
 
 def test_session_is_reused_within_app_context(app):

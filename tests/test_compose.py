@@ -1,12 +1,15 @@
 import re
 from pathlib import Path
 
+import pytest
 import yaml
 
 ROOT = Path(__file__).parent.parent
 COMPOSE = yaml.safe_load((ROOT / "docker-compose.yml").read_text())
 # What broker.create_app() cannot start without: config.load() reads each of these with os.environ[...].
 REQUIRED = re.findall(r'os\.environ\["(\w+)"\]', (ROOT / "broker" / "config.py").read_text())
+# And what provider_loop.read_only_app() can't (CREDENTIAL_ENCRYPTION_KEY).
+REQUIRED_READ_ONLY = re.findall(r'os\.environ\["(\w+)"\]', (ROOT / "broker" / "provider_loop.py").read_text())
 
 
 def _env_file_names(service: dict) -> set[str]:
@@ -18,30 +21,52 @@ def _env_file_names(service: dict) -> set[str]:
     return names
 
 
-def _broker_apps() -> dict[str, dict]:
-    """Return the services that start the broker's own app: the broker, and the providers using broker.create_app()."""
-    apps = {}
+def _providers(*markers: str) -> dict[str, dict]:
+    """Return the services run with `python -m <module>` whose module's source has any of `markers`."""
+    found = {}
     for name, service in COMPOSE["services"].items():
         command = service.get("command") or []
         module = command[2] if command[:2] == ["python", "-m"] else None
         if module is None:
             continue
         source = (ROOT / f"{module.replace('.', '/')}.py").read_text()
-        # The music provider imports it; the others run in provider_loop, which does. (Glowmarkt's has its own app.)
-        if "from broker import create_app" in source or "provider_loop" in source:
-            apps[name] = service
-    return apps
+        if any(marker in source for marker in markers):
+            found[name] = service
+    return found
 
 
-def test_the_services_that_start_the_broker_app_are_found():
-    assert {"spotify-provider", "developer-provider"} <= set(_broker_apps())
+def _broker_apps() -> dict[str, dict]:
+    """Return the providers that start the broker's own app (broker.create_app()), which migrates the database."""
+    return _providers("from broker import create_app")
 
 
-def test_every_service_that_starts_the_broker_app_has_the_variables_it_needs():
+def _read_only_apps() -> dict[str, dict]:
+    """Return the providers that read the database in provider_loop.read_only_app().
+
+    The glow-provider's module names it; the others run in provider_loop.serve(), which uses it.
+    """
+    return _providers("read_only_app", "provider_loop.serve")
+
+
+def test_the_services_that_start_an_app_are_found():
+    assert {"spotify-provider"} <= set(_broker_apps())
+    assert {"glow-provider", "developer-provider"} <= set(_read_only_apps())
+    assert not set(_broker_apps()) & set(_read_only_apps())
+
+
+@pytest.mark.parametrize(("apps", "required"), [(_broker_apps, REQUIRED), (_read_only_apps, REQUIRED_READ_ONLY)])
+def test_every_service_that_starts_an_app_has_the_variables_it_needs(apps, required):
     """A provider copied from another without its `environment:` crash-loops on a KeyError once deployed."""
-    assert REQUIRED
+    assert required
     missing = {
-        name: sorted(set(REQUIRED) - set(service.get("environment", {})) - _env_file_names(service))
-        for name, service in _broker_apps().items()
+        name: sorted(set(required) - set(service.get("environment", {})) - _env_file_names(service))
+        for name, service in apps().items()
     }
     assert {name: names for name, names in missing.items() if names} == {}
+
+
+def test_the_providers_that_only_read_the_database_mount_it_read_only():
+    """So nothing in them can write to it, whatever the code does."""
+    apps = _read_only_apps()
+    mounts = {name: [v for v in s.get("volumes", []) if v.startswith("./data:")] for name, s in apps.items()}
+    assert mounts == {name: ["./data:/app/data:ro"] for name in apps}

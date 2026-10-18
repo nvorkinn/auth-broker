@@ -332,7 +332,8 @@ broker/
   providers/  long-running processes that fill the shared Redis store (the glow-provider)
   spotify_provider.py  the music provider, writing each screen's Spotify and Apple Music to Redis
   developer_provider.py  the developer provider, writing each screen's GitHub and AI plans to Redis, and the pace
-  provider_loop.py  the loop it runs in (the music and glow providers have their own, older copies)
+  provider_loop.py  the loop it runs in (the music and glow providers have their own, older copies), and the read-only
+                    app it and the glow-provider read the database in
 ```
 
 `tests/` mirrors this layout.
@@ -911,6 +912,14 @@ provider leaves that device alone for as long as GitHub says (`Retry-After`, or 
 left as they were meanwhile, so a long wait lets them lapse and the panel says it has no data rather than showing it
 stale. A rate limit part-way through a poll fails the whole poll (`developer.snapshot()` raises and nothing is
 written) instead of leaving out the releases or the Copilot usage it couldn't read.
+
+It only reads the database, like the glow-provider: it runs in `provider_loop.read_only_app()`, not the broker's
+`create_app()`, so it runs no migrations, needs only `CREDENTIAL_ENCRYPTION_KEY` of the broker's secrets (to decrypt the
+tokens), and opens the database with SQLite's `mode=ro`, where any write fails; compose mounts `./data` `:ro` as well.
+A GitHub token is never refreshed, so there's nothing to write back. A read-only mount works because the database is in
+SQLite's default rollback-journal mode, where a reader only takes shared locks on the file (`tests/test_db.py` pins
+it): in WAL mode every reader has to create a `-shm` file beside it, and can't. As it doesn't migrate, a cycle that runs
+while the broker is still migrating after a deploy can fail on the new schema; the next tick tries again.
 
 `tests/fixtures/developer.json` is the stored shape, copied into pi-dashboard's tests too, so a change to either side
 that breaks the other shows up in both. To see it on the host: `docker logs -f developer-provider`. Locally,
