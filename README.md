@@ -840,8 +840,7 @@ with an account straight from the database (opened read-only, `./data` mounted
 username), so the passwords never leave the broker and it needs no token of its
 own. `GET /api/config` carries only `glowmarkt.enabled`, true when the device
 has an account the provider signs in with (`GlowmarktCredentials.sign_in`, the
-rule both use); its `username` and `password` are always null, now that every
-renderer reads the store.
+rule both use), and nothing of the account itself.
 
 Every 15 minutes (on the epoch-aligned tick, or at once for an account that's
 new or changed when the broker publishes on `v1:sub:changed`) it asks Glowmarkt,
