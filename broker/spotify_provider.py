@@ -52,7 +52,7 @@ logger = logging.getLogger("broker.spotify_provider")
 # What's playing: fetched every minute. That's as often as a renderer's music panel moves on today (and it shows the
 # player only every other page), so the provider makes no more Spotify calls than the renderers it stands in for.
 INTERVAL_S = 60
-# Three missed cycles, then the player is gone (the renderer keeps its last panel).
+# Three missed cycles, then the player is gone (and the renderer's panel says it's not available).
 PLAYER_TTL_S = 3 * INTERVAL_S
 # The top lists change slowly: fetched every half hour, and kept for four missed fetches.
 TOP_INTERVAL_S = 30 * 60
