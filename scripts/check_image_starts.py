@@ -149,7 +149,8 @@ def wait_until_started(name: str, started: str) -> None:
     deadline = time.monotonic() + START_TIMEOUT_S
     while not has_started(name, started):
         if docker("inspect", "--format", "{{.State.Running}}", container(name)).strip() != "true":
-            msg = f"{name} exited before it started"
+            last_lines = [line for line in logs(name).splitlines() if line.strip()][-3:]
+            msg = f"{name} exited before it started: {' | '.join(last_lines)}"
             raise CheckFailedError(msg)
         if time.monotonic() > deadline:
             msg = f"{name} didn't start within {START_TIMEOUT_S}s (waiting for {started})"
