@@ -1,14 +1,17 @@
 """Jobs for the render pool: asking for a screen to be drawn now, rather than at the next minute's tick.
 
 pi-dashboard's render pool (its docs/stateless-renderers.md, "Config saves and bursts push jobs") draws a screen when a
-job for it is on `v1:render:jobs`. Its ticker queues every pooled screen on the minute; the broker queues one sooner
-when what it shows has just changed: its config is saved (services/config_store.py, beside the `v1:config:changed`
-nudge today's per-screen renderers listen for), or a pairing code is issued or spent (services/pairing.py).
+job for it is on `v1:render:jobs`. Its ticker queues every pooled screen on the minute; the broker and its providers
+queue one sooner when what it shows has just changed: the developer provider on each cycle of a release, so a pooled
+screen follows the release at the burst's pace; the broker when a screen's config is saved (services/config_store.py,
+beside the `v1:config:changed` nudge today's per-screen renderers listen for), or a pairing code is issued or spent
+(services/pairing.py).
 
 `enqueue` runs the pool's own enqueue script (countdown_core.store.render_queue's `_ENQUEUE`, copied here byte for
 byte): `SET v1:render:queued:<id> NX` with QUEUED_TTL_MS, and only if that set it, `LPUSH v1:render:jobs <id>`. So a
-screen is in the queue at most once however many ask. tests/fixtures/render_queue.json pins the script's SHA1, its keys
-and the TTL; pi-dashboard's tests check its own script against the same file.
+screen is in the queue at most once however many ask. tests/fixtures/render_enqueue.json is a copy of pi-dashboard's
+script text; tests/fixtures/render_queue.json pins its SHA1, its keys and the TTL, and pi-dashboard's tests check its
+own script against that same file.
 
 Only the screens the pool renders are queued: those in `v1:render:screens` (the orchestrator's hash of them), read
 first. The pool's worker would drop a job for any other (one that still has its own renderer), but until a pool runs
@@ -49,9 +52,10 @@ def queued_key(device_id: str) -> str:
     return f"v1:render:queued:{device_id}"
 
 
-# Copied byte for byte from pi-dashboard's countdown_core/store/render_queue.py (tests/services/test_render_jobs.py
-# checks its SHA1 against tests/fixtures/render_queue.json). Redis's clock, in Unix milliseconds, as a string: the
-# seconds and the milliseconds, put together as text so that the number doesn't go through Lua's floating point.
+# Copied byte for byte from pi-dashboard's countdown_core/store/render_queue.py (tests/services/test_render_jobs.py and
+# test_render_jobs_broker.py check it against tests/fixtures/render_enqueue.json and render_queue.json). Redis's clock,
+# in Unix milliseconds, as a string: the seconds and the milliseconds, put together as text so that the number doesn't
+# go through Lua's floating point.
 _NOW_MS = "local t = redis.call('TIME')\nlocal now_ms = t[1] .. string.format('%03d', math.floor(t[2] / 1000))\n"
 
 # KEYS: queued, jobs. ARGV: the device id, the queued flag's TTL. Returns 1 if it queued the screen, 0 if it was queued
