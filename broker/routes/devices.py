@@ -27,7 +27,7 @@ from broker.api import api
 from broker.auth import hash_secret, require_device_auth, with_retry_after
 from broker.db import db
 from broker.models import BASE_INTERVAL, Device, DeviceConfig, GlowmarktCredentials
-from broker.services import pairing, registration, stops
+from broker.services import pairing, registration, stops, weather_place
 
 from .pages import postcode_country
 
@@ -135,7 +135,12 @@ def get_config(*, device_id: str, x_device_name: str | None = None) -> ConfigRes
         language=config.language,
         timezone=_timezone(country, stop_ids),
         screen=Screen(orientation=config.orientation, width=config.width, height=config.height),
-        weather=Weather(api_key=current_app.config["WEATHER_API_KEY"], location=config.weather_location),
+        # The key is what the weather is subscribed under, so it's what the renderer reads (v1:weather:<key>).
+        weather=Weather(
+            api_key=current_app.config["WEATHER_API_KEY"],
+            location=config.weather_location,
+            key=weather_place.weather_key(config),
+        ),
         style=config.style,
         # The panels' own styles, for renderers that predate `style`, in the names they know.
         notice_board=NoticeBoard(postcode=config.postcode or None, country=country, style=config.style),

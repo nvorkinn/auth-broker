@@ -66,10 +66,13 @@ and how to run and deploy it.
    page posts the picked place's Open-Meteo id, and the broker looks that id up again rather than trusting
    the browser, storing its id, name, label, country code and coordinates (`device_config.weather_place_*`).
    Text that wasn't picked (a suggestion, or a browser without JavaScript) is saved as Open-Meteo's first
-   match for it, or refused if there's none. Renderers are still sent just the place's name, as
-   `weather.location`. `weather_key()` in `broker/services/weather_place.py` names a place readably and
-   uniquely (`london-gb-2643743`), for keeping weather in Redis by place later. Configs saved before the
-   picker have only their text until `flask weather backfill` (below) gives them a place.
+   match for it, or refused if there's none. `weather_key()` in `broker/services/weather_place.py` names a
+   place readably and uniquely (`london-gb-2643743`: its name, country and id), and the weather is subscribed
+   (`v1:sub:weather`) and kept in Redis (`v1:weather:<key>`) under that key, so screens that picked the same
+   place share one forecast however they typed it. Renderers are sent it as `weather.key`, beside the place's
+   name as `weather.location`. Configs saved before the picker have only their text until
+   `flask weather backfill` (below) gives them a place; until then they're subscribed under the text's slug
+   (`london`, `st-albans`), which the weather provider geocodes by name, so their screens keep their weather.
 3. **Spotify:** from `/device`, "Connect Spotify" kicks off the OAuth flow.
    The server exchanges the code for tokens and keeps them — the Pi never
    sees a Spotify token, only its own device secret.
@@ -386,6 +389,9 @@ docker exec auth-broker flask --app wsgi devices forget <device_id>            #
 but no picked place the place Open-Meteo finds first for its text (the one a renderer finds too), leaving
 the text itself alone. It reports each one, skips any it can't resolve, and is safe to run again; run it
 once after deploying the migration that added the place (0021), as a migration doesn't call the network.
+Then it rewrites the subscriptions, as a config save does, so the weather is fetched under the new keys
+straight away: run it again after deploying a broker that changes how they're keyed (as the switch to
+`weather.key` did), or if Redis has lost them.
 
 `unpair` keeps the device's identity, so the Pi just shows a new code on its
 next poll. After `forget`, also make the Pi register as a new device:

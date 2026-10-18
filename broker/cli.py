@@ -22,6 +22,7 @@ from sqlalchemy import select
 from .clients import weather as weather_client
 from .db import db
 from .models import Device, DeviceConfig
+from .routes.pages import _write_subscriptions_to_redis
 from .services import assignments, pairing, weather_place
 
 devices = AppGroup("devices", help="Manual device admin for development.")
@@ -124,9 +125,13 @@ def forget(device_id: str) -> None:
 def backfill() -> None:
     """Give every config with a weather location but no picked place the place Open-Meteo finds first for it.
 
-    That's the place a renderer looking the name up finds too. weather_location itself is left as it is, so what
-    renderers are sent doesn't change. Safe to run again: a config with a place is skipped. One Open-Meteo can't
-    find is reported and left without a place; if Open-Meteo can't be asked, run it again later.
+    That's the place a renderer looking the name up finds too. weather_location itself is left as it is. Safe to run
+    again: a config with a place is skipped. One Open-Meteo can't find is reported and left without a place; if
+    Open-Meteo can't be asked, run it again later.
+
+    Then it rewrites the subscriptions, as a config save does, since a place changes the key a screen's weather is
+    subscribed and read under (weather_place.weather_key); so running it also moves the store to the current keys
+    without waiting for someone to save a config.
     """
     configs = db.session.scalars(
         select(DeviceConfig)
@@ -151,6 +156,8 @@ def backfill() -> None:
         click.echo(f"{config.device_id}: {config.weather_location!r} is {results[0]['label']} ({key}).")
     db.session.commit()
     click.echo(f"{resolved} given a place, {not_found} not found, {unavailable} not checked.")
+    _write_subscriptions_to_redis()
+    click.echo("Rewrote the subscriptions (the log warns if Redis couldn't be reached).")
     if unavailable:
         msg = f"Open-Meteo couldn't be asked about {unavailable}; run it again later."
         raise click.ClickException(msg)

@@ -1,3 +1,5 @@
+import json
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
@@ -59,14 +61,33 @@ def test_weather_key_strips_accents_from_the_place_name():
     assert weather_key(config) == "tromso-no-3133880"
 
 
-def test_weather_key_does_without_a_country_code_open_meteo_didnt_give():
+def test_weather_key_says_no_country_when_open_meteo_didnt_give_one():
+    """A number after a two-letter country is how the weather provider knows a key has a place's id."""
     config = _config(weather_location="Atlantis", weather_place_id=42, weather_place_name="Atlantis")
-    assert weather_key(config) == "atlantis-42"
+    assert weather_key(config) == "atlantis-xx-42"
 
 
 def test_weather_key_falls_back_to_the_free_text_before_a_place_is_picked():
     assert weather_key(_config(weather_location="  Newcastle   upon TYNE ")) == "newcastle-upon-tyne"
     assert weather_key(_config(weather_location="Tromsø")) == "tromso"
+
+
+def test_weather_key_of_free_text_is_the_same_however_it_was_typed():
+    keys = {weather_key(_config(weather_location=text)) for text in ("London", "london", " LONDON ", "London.")}
+    assert keys == {"london"}
+
+
+def test_weather_key_of_free_text_with_nothing_to_slug_is_the_text_so_the_screen_keeps_its_weather():
+    assert weather_key(_config(weather_location="  東京  ")) == "東京"
+
+
+# The keys pi-dashboard's weather provider is written for: its tests read the same file.
+WEATHER_KEYS = json.loads((Path(__file__).parent.parent / "fixtures" / "weather_keys.json").read_text())["keys"]
+
+
+@pytest.mark.parametrize("example", WEATHER_KEYS, ids=[example["key"] for example in WEATHER_KEYS])
+def test_weather_key_makes_the_keys_the_weather_provider_reads(example):
+    assert weather_key(_config(**example["config"])) == example["key"]
 
 
 @pytest.mark.parametrize("location", ["", "   ", None])
