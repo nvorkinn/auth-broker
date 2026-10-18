@@ -84,7 +84,7 @@ def test_get_config_returns_defaults_and_shared_keys(client, register_device):
         "tfl": {"app_key": "test-tfl-key", "stop_ids": [], "style": "grouped"},
         "departures": {"stops": [], "style": "grouped"},
         "spotify": {"enabled": False, "style": "airy"},
-        "glowmarkt": {"enabled": False, "username": None, "password": None},
+        "glowmarkt": {"enabled": False},
         "developer": {"enabled": False},
         "apple_music": {"enabled": False},
         "pairing_code": body["pairing_code"],
@@ -308,8 +308,7 @@ def test_get_config_switches_glowmarkt_on_but_never_sends_its_credentials(paired
 
     response = client.get("/api/config", headers={"Authorization": f"Bearer {secret}"})
 
-    # The nulls are sent, not left out: renderers that predate `enabled` require the keys.
-    assert response.get_json()["glowmarkt"] == {"enabled": True, "username": None, "password": None}
+    assert response.get_json()["glowmarkt"] == {"enabled": True}
     assert b"someone@example.com" not in response.data
     assert b"hunter2" not in response.data
 
@@ -335,7 +334,7 @@ def test_get_config_leaves_glowmarkt_off_without_an_account_the_provider_can_use
     response = client.get("/api/config", headers={"Authorization": f"Bearer {secret}"})
 
     assert response.status_code == 200
-    assert response.get_json()["glowmarkt"] == {"enabled": False, "username": None, "password": None}
+    assert response.get_json()["glowmarkt"] == {"enabled": False}
 
 
 def test_get_config_issues_a_code_to_an_unpaired_device_and_keeps_it_stable(client, register_device):
