@@ -273,7 +273,10 @@ async function refreshProject(project) {
     if (project.loading || document.hidden) return;
     project.loading = true;
     try {
-        const data = await api(projectPath(project.repo.full_name));
+        // Runs shown last time are rechecked by ID, since GitHub's status lists can briefly miss one just approved.
+        const known = (project.data?.workflows || []).map(run => run.id);
+        const query = known.length ? `?runs=${known.slice(0, 20).join(",")}` : "";
+        const data = await api(`${projectPath(project.repo.full_name)}${query}`);
         project.data = data;
         project.errorText = "";
         project.error.hidden = true;
