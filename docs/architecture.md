@@ -15,7 +15,7 @@ this page is the map. [The database](database.md) has the tables.
 | Part | Where it lives | What it does |
 |---|---|---|
 | **ESP32 screen** | [countdown-esp32](https://github.com/nvorkinn/countdown-esp32), on the wall | Drives a Waveshare 7.5" e-paper panel (800x480, black and white). Registers with the broker, then polls it for finished frames and paints them. It draws nothing itself. |
-| **Renderer** | [pi-dashboard](https://github.com/nvorkinn/pi-dashboard) (`countdown-server` image), one container per screen | Reads the screen's config from the broker, calls TfL, Open-Meteo, Glowmarkt and the broker's Spotify proxy, draws the 1-bit frame, uploads it. |
+| **Renderer** | [pi-dashboard](https://github.com/nvorkinn/pi-dashboard) (`countdown-server` image), one container per screen | Reads the screen's config from the broker and its panels' data (TfL's departures and disruptions, the weather, energy, music) from Redis, which the providers fill, so it needs no TfL key or Glowmarkt or Spotify credentials. Draws the 1-bit frame, uploads it. |
 | **Orchestrator** | pi-dashboard (`countdown-orchestrator`), one container, mounts `docker.sock` | Polls the broker for *assignments* and starts, stops and removes the renderer containers to match. |
 | **auth-broker** | this repository, gunicorn on `127.0.0.1:5000` | The hub: device identities, pairing, each screen's settings, the latest frame, renderer assignments, the Spotify proxy. State is one SQLite file. |
 | **Caddy** | this repository (`caddy/`), the host's ports 80 and 443 | TLS, routing, the sign-in gate for browser pages, and the `X-Authentik-*` headers. |
@@ -121,7 +121,7 @@ Several different things get called a token or a secret here, and they are not i
 | **Outpost cookie** | The outpost, after sign-in, on the broker's host | the browser | cookie, browser to Caddy | authentik's session settings (its defaults: none are set in this repository) |
 | **Flask session cookie** | The broker, only while someone connects Spotify | the browser, signed with `FLASK_SECRET_KEY`, not encrypted | cookie | the browser session. Holds the Spotify `state` and the target device id, nothing else |
 | **Spotify tokens, per device** | Spotify, via `/auth/spotify/callback` | `spotify_tokens`, **plaintext** | never leave the broker | refreshed lazily when they expire. Deleted by Disconnect, `unpair --config` and `forget` |
-| **Third-party keys** | The operator: `SPOTIFY_CLIENT_ID` and `_SECRET`, `TFL_APP_KEY`, `WEATHER_API_KEY` | environment | Spotify's as HTTP Basic to Spotify. `TFL_APP_KEY` and `WEATHER_API_KEY` are returned **in plaintext** in `GET /api/config`, so a key rotation reaches every screen without a re-flash | the operator rotates them |
+| **Third-party keys** | The operator: `SPOTIFY_CLIENT_ID` and `_SECRET`, `TFL_APP_KEY`, `WEATHER_API_KEY` | environment | Spotify's as HTTP Basic to Spotify. `WEATHER_API_KEY` is returned **in plaintext** in `GET /api/config`, so a key rotation reaches every screen without a re-flash. `TFL_APP_KEY` never leaves the broker: it's only for TfL's stop lookups (the settings page's stop search and saved stops' names); pi-dashboard's TfL providers have their own, from its deploy's `TFL_APP_KEY` secret | the operator rotates them |
 | **Glowmarkt credentials** | The owner, on `/device` | `glowmarkt_credentials`: the username as is, the password Fernet-encrypted with `CREDENTIAL_ENCRYPTION_KEY` | never sent: `GET /api/config` carries only `glowmarkt.enabled`; the glow-provider decrypts them, to sign in itself, and writes only the readings to Redis | cleared by `unpair --config` and `forget`. Changing the key makes stored passwords unreadable |
 | **GitHub token, per device** | The owner, on `/device`: a fine-grained, read-only personal access token | `github_tokens`, Fernet-encrypted with `CREDENTIAL_ENCRYPTION_KEY` | never leaves the broker: the developer-provider makes the GitHub calls with it and writes only the panel's data to Redis | deleted by "Remove token", `unpair --config` and `forget`. GitHub expires it as the owner chose |
 | **MusicKit key** | The operator: `APPLE_MUSIC_TEAM_ID`, `APPLE_MUSIC_KEY_ID` and `APPLE_MUSIC_PRIVATE_KEY` (the .p8), from an Apple Developer Program account | environment | never leaves the broker: it signs 12-hour developer tokens, which go to Apple and to the config page for MusicKit JS | the operator revokes and replaces it in Apple's developer portal. Unset: no Apple Music |
@@ -308,7 +308,7 @@ sequenceDiagram
     loop every pace seconds (renderer: 60 s, faster while a provider's data is bursty)
         R->>B: GET /api/config (X-Device-Name)<br/>Bearer renderer secret
         B-->>R: 200 config JSON (pairing_code is null for a paired device, unless a code was just requested)
-        Note over R: Polls whichever APIs are due. TfL, Open-Meteo, postcodes.io and Glowmarkt are called directly. Spotify goes through the broker (GET /api/spotify/...)
+        Note over R: Reads whichever panels are due from Redis, which the providers fill (TfL, Entur, weather, energy, music, developer). The notice board still looks its postcode up on postcodes.io itself
         R->>B: PUT /api/frame (48,000 bytes, only if the picture changed)<br/>Bearer renderer secret
         B-->>R: 204
         Note right of B: DB: +frames

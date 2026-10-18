@@ -77,7 +77,8 @@ and how to run and deploy it.
    The server exchanges the code for tokens and keeps them — the Pi never
    sees a Spotify token, only its own device secret.
 4. **Ongoing:** the Pi polls `GET /api/config` (device settings +
-   shared app-level API keys like the TfL/weather ones) and `GET
+   the shared weather API key; never TfL's, which only the broker's stop
+   lookups use, and pi-dashboard's providers have their own) and `GET
    /api/spotify/now-playing` (server refreshes the Spotify token
    server-side and proxies back just the now-playing payload, shaped to match
    `SpotifyClient.get_current_track()` in `countdown` so the Pi-side swap is a
