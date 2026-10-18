@@ -81,6 +81,10 @@ def claim(secret_hash: str, claim_token: str) -> Registered | None:
         return None
     device.renderer_secret_hash = secret_hash
     assignment.claim_token = None
+    # The name the orchestrator starts the renderer with (DEVICE_NAME), which its config polls used to report: a
+    # renderer that reads its config from the store may never poll.
+    if not device.device_name:
+        device.device_name = assignment.slug
     db.session.commit()
     return Registered(device_id=device.device_id, created=True)
 

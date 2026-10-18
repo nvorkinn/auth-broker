@@ -1,3 +1,4 @@
+import fnmatch
 import secrets
 import shutil
 
@@ -63,15 +64,33 @@ def app(tmp_path, monkeypatch, migrated_db):
 
 
 class FakeRedis:
-    """Just enough of Redis to see what a config save writes: sets, and what was published."""
+    """Just enough of Redis to see what a config save writes: sets, strings (the configs), and what was published."""
 
     def __init__(self):
         self.sets: dict[str, set[str]] = {}
+        self.strings: dict[str, str] = {}
         self.published: list[tuple[str, str]] = []
         self.fail = False
 
+    def _check(self):
+        if self.fail:
+            msg = "redis is down"
+            raise redis.ConnectionError(msg)
+
     def pipeline(self, *, transaction=True):  # noqa: ARG002
         return FakePipeline(self)
+
+    def get(self, key):
+        self._check()
+        return self.strings.get(key)
+
+    def mget(self, keys):
+        self._check()
+        return [self.strings.get(key) for key in keys]
+
+    def scan_iter(self, match, count=None):  # noqa: ARG002
+        self._check()
+        return [key for key in [*self.strings, *self.sets] if fnmatch.fnmatchcase(key, match)]
 
 
 class FakePipeline:
@@ -88,6 +107,9 @@ class FakePipeline:
     def delete(self, key):
         self.ops.append(("delete", key))
 
+    def set(self, key, value):
+        self.ops.append(("set", key, value))
+
     def sadd(self, key, *members):
         self.ops.append(("sadd", key, members))
 
@@ -95,12 +117,13 @@ class FakePipeline:
         self.ops.append(("publish", channel, message))
 
     def execute(self):
-        if self.server.fail:
-            msg = "redis is down"
-            raise redis.ConnectionError(msg)
+        self.server._check()
         for op, key, *rest in self.ops:
             if op == "delete":
                 self.server.sets.pop(key, None)
+                self.server.strings.pop(key, None)
+            elif op == "set":
+                self.server.strings[key] = rest[0]
             elif op == "sadd":
                 self.server.sets.setdefault(key, set()).update(rest[0])
             else:

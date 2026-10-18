@@ -298,13 +298,13 @@ def test_get_config_stores_device_name_from_header(app, client, register_device)
     assert device_name == "camilla"
 
 
-def test_get_config_without_device_name_header_leaves_it_unset(app, client, register_device):
+def test_get_config_without_device_name_header_keeps_the_name_it_has(app, client, register_device):
     device_id, secret = register_device()
     client.get("/api/config", headers={"Authorization": f"Bearer {secret}"})
 
     with app.app_context():
-        device_name = db.session.get(Device, device_id).device_name
-    assert device_name is None
+        device = db.session.get(Device, device_id)
+        assert device.device_name == device.assignment.slug  # given when its renderer claimed it
 
 
 def test_get_config_device_name_self_heals_on_rename(app, client, register_device):

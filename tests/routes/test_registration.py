@@ -168,6 +168,27 @@ def test_a_renderer_claims_its_screens_device(app, split_device):
     )
 
 
+def test_a_claim_names_the_device_after_its_renderer(app, split_device):
+    """Its slug: the DEVICE_NAME the orchestrator starts it with, which a renderer reading the store never sends."""
+    device_id, _, _ = split_device
+
+    with app.app_context():
+        device = db.session.get(Device, device_id)
+        assert device.device_name == device.assignment.slug
+
+
+def test_a_claim_keeps_a_name_the_device_already_has(app, client, register_device, claim_renderer):
+    screen = client.post("/api/devices/register", json={"secret": "display-secret-0123456789", "width": 1, "height": 1})
+    device_id = screen.get_json()["device_id"]
+    with app.app_context():
+        db.session.get(Device, device_id).device_name = "camilla"
+        db.session.commit()
+
+    claim_renderer("display-secret-0123456789", "renderer-secret-0123456789")
+
+    assert _device(app, device_id).device_name == "camilla"
+
+
 def test_claiming_again_returns_the_same_device_without_a_token(client, split_device):
     device_id, renderer_secret, _ = split_device
 
@@ -335,13 +356,15 @@ def test_an_unknown_spotify_top_type_is_not_found(client, split_device):
     ("method", "path"),
     [("get", "/api/config"), ("put", "/api/frame"), ("get", "/api/spotify/now-playing")],
 )
-def test_id_less_requests_are_logged_with_the_device_id(client, split_device, caplog, method, path):
+def test_id_less_requests_are_logged_with_the_device_id(app, client, split_device, caplog, method, path):
     device_id, renderer_secret, _ = split_device
+    with app.app_context():
+        slug = db.session.get(Device, device_id).assignment.slug
 
     with caplog.at_level("INFO"):
         getattr(client, method)(path, data=bytes(FRAME_BYTES), headers=_auth(renderer_secret))
 
-    assert f"{method.upper()} {path} device=unnamed ({device_id}) role=renderer" in caplog.messages
+    assert f"{method.upper()} {path} device={slug} ({device_id}) role=renderer" in caplog.messages
 
 
 # --- Retry-After: how often to poll -----------------------------------------------------------------

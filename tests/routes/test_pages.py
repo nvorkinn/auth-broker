@@ -6,8 +6,8 @@ import pytest
 from broker.clients import weather
 from broker.db import db
 from broker.models import Device, DeviceConfig, GitHubToken, GlowmarktCredentials, SpotifyToken
-from broker.routes.pages import normalize_postcode, postcode_country
 from broker.services import weather_place
+from broker.services.postcodes import normalize_postcode, postcode_country
 
 
 def _place(name, place_id=1, **fields):
@@ -782,7 +782,8 @@ def test_saving_the_config_publishes_subscriptions_to_redis(paired_client, fake_
         "weather": {"london-gb-2643743"},
         "spotify": {device_id},
     }
-    assert fake_redis.published == [("v1:sub:changed", "")]
+    # Then the screen's config, which changed: its renderer is nudged (tests/services/test_config_store.py).
+    assert fake_redis.published == [("v1:sub:changed", ""), ("v1:config:changed", device_id)]
 
 
 def _give_another_screen_weather(app, register_device, location, place=None):
@@ -852,7 +853,7 @@ def test_saving_the_config_drops_what_the_device_no_longer_wants(paired_client, 
     client.post("/device", data={"interval": "20"})
 
     assert _subscriptions(fake_redis) == {}
-    assert len(fake_redis.published) == 2
+    assert [channel for channel, _ in fake_redis.published].count("v1:sub:changed") == 2
 
 
 def test_a_rejected_config_save_publishes_nothing(paired_client, fake_redis):

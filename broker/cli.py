@@ -8,6 +8,7 @@ docker exec auth-broker flask --app wsgi devices owner <device_id> <user id>
 docker exec auth-broker flask --app wsgi devices unpair <device_id> [--config]
 docker exec auth-broker flask --app wsgi devices forget <device_id>
 docker exec auth-broker flask --app wsgi weather backfill
+docker exec auth-broker flask --app wsgi config publish
 
 Like any `flask` command it loads the app, so it needs the app's env vars (the container has them).
 """
@@ -23,10 +24,21 @@ from .clients import weather as weather_client
 from .db import db
 from .models import Device, DeviceConfig
 from .routes.pages import _write_subscriptions_to_redis
-from .services import assignments, pairing, weather_place
+from .services import assignments, config_store, pairing, weather_place
 
 devices = AppGroup("devices", help="Manual device admin for development.")
 weather = AppGroup("weather", help="The screens' weather places.")
+config = AppGroup("config", help="The screens' configs in the store.")
+
+
+def publish_store() -> None:
+    """Write what the broker keeps in the store from the database: the subscriptions and every screen's config.
+
+    Redis keeps nothing on disk, so the broker does this as it starts (gunicorn.conf.py), and `flask config publish`
+    on demand. Needs an app context; an unreachable Redis is logged, not raised.
+    """
+    _write_subscriptions_to_redis()
+    config_store.publish_all()
 
 
 def _get_device(device_id: str) -> Device:
@@ -66,6 +78,8 @@ def code(device_id: str) -> None:
     """Issue a fresh pairing code, e.g. to hand a device to a different user."""
     _get_device(device_id)
     new_code = pairing.issue_code(device_id)
+    # Its renderer shows the code: without its config in the store, it asks the broker, which sends the code.
+    config_store.publish(device_id)
     minutes = int(pairing.CODE_TTL.total_seconds() // 60)
     click.echo(f"{new_code}: enter it at /pair within {minutes} minutes (the device shows it too).")
 
@@ -80,6 +94,7 @@ def owner(device_id: str, user: str) -> None:
     if device.paired_at is None:
         device.paired_at = datetime.now(UTC)
     db.session.commit()
+    config_store.publish(device_id)
     click.echo(f"{device_id} now belongs to {user}.")
 
 
@@ -105,6 +120,8 @@ def unpair(device_id: str, *, wipe_config: bool) -> None:
         device.apple_music_plays = []
         device.frame = None
     db.session.commit()
+    # An unpaired device has no config in the store, so its renderer asks the broker, which gives it a code.
+    config_store.publish(device_id)
     click.echo(f"{device_id} is unpaired; it will show a new pairing code on its next poll.")
 
 
@@ -118,6 +135,7 @@ def forget(device_id: str) -> None:
     # The relationships cascade, so the device's codes, config, tokens and frame go with it.
     db.session.delete(device)
     db.session.commit()
+    config_store.publish(device_id)
     click.echo(f"{device_id} forgotten; delete its credentials file so it registers again.")
 
 
@@ -129,9 +147,9 @@ def backfill() -> None:
     again: a config with a place is skipped. One Open-Meteo can't find is reported and left without a place; if
     Open-Meteo can't be asked, run it again later.
 
-    Then it rewrites the subscriptions, as a config save does, since a place changes the key a screen's weather is
-    subscribed and read under (weather_place.weather_key); so running it also moves the store to the current keys
-    without waiting for someone to save a config.
+    Then it rewrites the subscriptions and the configs in the store, as a config save does, since a place changes the
+    key a screen's weather is subscribed and read under (weather_place.weather_key, the config's weather.key); so
+    running it also moves the store to the current keys without waiting for someone to save a config.
     """
     configs = db.session.scalars(
         select(DeviceConfig)
@@ -156,8 +174,20 @@ def backfill() -> None:
         click.echo(f"{config.device_id}: {config.weather_location!r} is {results[0]['label']} ({key}).")
     db.session.commit()
     click.echo(f"{resolved} given a place, {not_found} not found, {unavailable} not checked.")
-    _write_subscriptions_to_redis()
-    click.echo("Rewrote the subscriptions (the log warns if Redis couldn't be reached).")
+    publish_store()
+    click.echo("Rewrote the subscriptions and the configs in the store (the log warns if Redis couldn't be reached).")
     if unavailable:
         msg = f"Open-Meteo couldn't be asked about {unavailable}; run it again later."
         raise click.ClickException(msg)
+
+
+@config.command()
+def publish() -> None:
+    """Write every screen's config, and the subscriptions, to the store from the database.
+
+    The broker does this on every config save and as it starts; this is for when Redis has lost them (it keeps
+    nothing on disk) and the broker hasn't restarted since. Safe to run at any time: only what changed is written,
+    and only the renderers whose config changed are nudged.
+    """
+    publish_store()
+    click.echo("Wrote the configs and the subscriptions to the store (the log warns if Redis couldn't be reached).")

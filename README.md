@@ -76,8 +76,9 @@ and how to run and deploy it.
 3. **Spotify:** from `/device`, "Connect Spotify" kicks off the OAuth flow.
    The server exchanges the code for tokens and keeps them — the Pi never
    sees a Spotify token, only its own device secret.
-4. **Ongoing:** the Pi polls `GET /api/config` (device settings +
-   shared app-level API keys like the TfL/weather ones) and `GET
+4. **Ongoing:** the renderer reads its config from Redis (see
+   [Configs in the store](#configs-in-the-store)), or polls `GET /api/config` (device settings +
+   shared app-level API keys like the TfL/weather ones) without it, and `GET
    /api/spotify/now-playing` (server refreshes the Spotify token
    server-side and proxies back just the now-playing payload, shaped to match
    `SpotifyClient.get_current_track()` in `countdown` so the Pi-side swap is a
@@ -164,8 +165,9 @@ A screen therefore needs no logic beyond:
 `/api/renderers/claim` answers 201 / 200 `{device_id}`, 400 for a bad secret or no `claim_token`,
 403 for an unknown or spent token, and 409 for a secret already registered as a screen.
 
-A renderer polls `GET /api/config`, which carries its `device_id` and a `pairing_code` to draw. From
-then on it can use the ID-less routes for everything (`PUT /api/frame`, `/api/spotify/...`), so it
+A renderer reads its config from Redis, where the broker keeps a copy of each paired screen's (see
+[Configs in the store](#configs-in-the-store)), and polls `GET /api/config`, which carries its `device_id` and a
+`pairing_code` to draw, only when there's none there. From then on it can use the ID-less routes for everything (`PUT /api/frame`, `/api/spotify/...`), so it
 never has to handle its `device_id`. The broker still logs each request with
 the `device_id` it found from the secret. A screen can also ask for a pairing code
 (`POST /api/devices/pairing-code`), which a screen with no renderer yet has nothing
@@ -383,14 +385,18 @@ docker exec auth-broker flask --app wsgi devices owner <device_id> <user id>   #
 docker exec auth-broker flask --app wsgi devices unpair <device_id>            # show a pairing code again
 docker exec auth-broker flask --app wsgi devices unpair <device_id> --config   # ...and reset its settings and linked accounts
 docker exec auth-broker flask --app wsgi devices forget <device_id>            # delete it; it must register again
+docker exec auth-broker flask --app wsgi config publish                         # rewrite the store's configs and subscriptions
 ```
+
+Each of these that changes a device's pairing also updates its config in the store and nudges its renderer
+(see [Configs in the store](#configs-in-the-store)), so `unpair` and `code` show on its screen at once.
 
 `docker exec auth-broker flask --app wsgi weather backfill` gives every config with a weather location
 but no picked place the place Open-Meteo finds first for its text (the one a renderer finds too), leaving
 the text itself alone. It reports each one, skips any it can't resolve, and is safe to run again; run it
 once after deploying the migration that added the place (0021), as a migration doesn't call the network.
-Then it rewrites the subscriptions, as a config save does, so the weather is fetched under the new keys
-straight away: run it again after deploying a broker that changes how they're keyed (as the switch to
+Then it rewrites the subscriptions and the configs in the store, as a config save does, so the weather is
+fetched and read under the new keys straight away: run it again after deploying a broker that changes how they're keyed (as the switch to
 `weather.key` did), or if Redis has lost them.
 
 `unpair` keeps the device's identity, so the Pi just shows a new code on its
@@ -818,11 +824,13 @@ The `redis` compose service is upstream's `redis:8.10-alpine`, pinned in
 `docker-compose.yml` (bump it there). It is the store in the middle of the
 renderers: the broker records which stops and locations screens want, one
 provider per API fetches them and writes the latest data under a key per stop
-or location, and the renderers read it. The broker writes the subscriptions,
-and [the energy provider](#the-energy-provider) is the first provider here.
+or location, and the renderers read it. The broker writes the subscriptions and
+each screen's config ([Configs in the store](#configs-in-the-store)), and
+[the energy provider](#the-energy-provider) is the first provider here.
 
 It is a cache only, so it keeps nothing on disk: provider data comes back
-within minutes and the subscriptions are rebuilt from the broker's database.
+within minutes, and the subscriptions and configs are rebuilt from the broker's
+database (as it starts, on every config save, and by `flask config publish`).
 It listens on `127.0.0.1:6379` only (host networking, like the Victoria
 services), needs `REDIS_PASSWORD` from `secrets/redis.env`, and is capped at
 128 MB; when full it evicts only keys with a TTL. The `deploy-config` job
@@ -895,6 +903,36 @@ docker exec -it redis sh -c 'REDISCLI_AUTH="$REDIS_PASSWORD" redis-cli --scan --
 
 The renderers read it once pi-dashboard's orchestrator is given
 `RENDERER_REDIS_URL` (see its providers README).
+## Configs in the store
+
+SQLite stays the source of truth for each screen's settings, and Redis holds a copy of what `GET /api/config` answers
+its renderer, `v1:config:<device id>`, so the renderers read their config there (pi-dashboard's README, "The config")
+and don't need the broker to be up, and a save reaches the screen at once
+(`broker/services/config_store.py`; `services/renderer_config.py` makes it, and the route's answer, the same way):
+
+- **The value** is exactly `GET /api/config`'s JSON for the device (the contract's `ConfigResponse`), less its
+  secrets: `tfl.app_key` and `weather.api_key` empty, which the renderers no longer use, and `pairing_code` null.
+  `tests/fixtures/config_store.json` is an example; pi-dashboard's tests read the same file, so change both together.
+- **Written** for every device on every config save, as the broker starts (gunicorn's `post_worker_init`, in
+  `gunicorn.conf.py`, which writes the subscriptions too), by `flask weather backfill` and by
+  `flask config publish`; and for one device when its pairing changes. Only what changed is written, and after each
+  change the broker publishes the device id on `v1:config:changed`, which its renderer listens for and redraws on.
+- **No key** while a device isn't paired, or has a live pairing code: only `GET /api/config` gives the code (and
+  issues it, while the device is unpaired), so its renderer asks there. Pairing writes the key back.
+- **No TTL**, since it's rebuilt from the database, so `volatile-lru` never evicts it: about 1 KB a screen in Redis.
+- If Redis can't be written during a save, the save still works and the log says "Couldn't write the screens'
+  configs to Redis"; the screen keeps its old config until the next save or `flask config publish`.
+
+[The config in the store](docs/architecture.md#the-config-in-the-store) has the details: the events, the failure
+modes, and how to roll back past this (delete the keys first, or the renderers keep reading them). Deploy this before
+the renderers that read it (they ask `GET /api/config` until the keys are there); to check, on the host:
+
+```sh
+docker exec redis sh -c 'REDISCLI_AUTH="$REDIS_PASSWORD" redis-cli -h 127.0.0.1 --scan --pattern "v1:config:*"'
+```
+
+lists one key per paired screen.
+
 ## Developer in the store
 
 `broker/developer_provider.py` is the developer provider, run from the broker's image like the music one. For as long
