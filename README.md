@@ -133,7 +133,8 @@ times out, check GitHub's releases before reloading to try again: GitHub might h
    The server exchanges the code for tokens and keeps them — the Pi never
    sees a Spotify token, only its own device secret.
 4. **Ongoing:** the renderer polls `GET /api/config` (device settings +
-   shared app-level API keys like the TfL/weather ones) and reads its panels'
+   the shared weather API key, never TfL's: only the broker's stop lookups
+   use it, and pi-dashboard's providers have their own) and reads its panels'
    data from Redis. With Spotify or Apple Music on, the music provider fetches
    what's playing and the top lists with the tokens only the broker holds
    (refreshing Spotify's itself) and writes them there (see "Music in the

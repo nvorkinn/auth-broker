@@ -116,8 +116,10 @@ def _update_device_name(device_id: str, name: str | None) -> None:
 def get_config(*, device_id: str, x_device_name: str | None = None) -> ConfigResponse:
     """Answer the renderer's config poll (GET /api/config in the contract, which also says that only its role may).
 
-    Bundles the device's own settings together with the shared app-level API keys, so a key rotation doesn't require
-    re-flashing every gifted device. Carries the device_id, so a renderer needn't keep it.
+    Bundles the device's own settings together with the shared weather API key, so a key rotation doesn't require
+    re-flashing every gifted device. Never TfL's key: the renderer reads TfL's departures and disruptions from the
+    store, whose providers have their own, and the broker's is only for its stop lookups. Carries the device_id, so a
+    renderer needn't keep it.
     """
     _update_device_name(device_id, x_device_name)
     config = db.session.get(DeviceConfig, device_id)
@@ -146,7 +148,6 @@ def get_config(*, device_id: str, x_device_name: str | None = None) -> ConfigRes
         notice_board=NoticeBoard(postcode=config.postcode or None, country=country, style=config.style),
         # For renderers that predate `departures`: only the stops they can show.
         tfl=Tfl(
-            app_key=current_app.config["TFL_APP_KEY"],
             stop_ids=[s for s in stop_ids if stops.source_of(s) == "tfl"],
             style=_departures_style(config.style),
         ),
