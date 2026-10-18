@@ -3,10 +3,9 @@
 Logs go to stdout as JSON, whatever the command line says about --access-logfile / --error-logfile.
 """
 
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from gunicorn.workers.base import Worker
+# At run time, not under TYPE_CHECKING: gunicorn checks each hook's arity with inspect.signature, which on Python 3.14
+# evaluates the hook's annotations, so a name only imported for type checkers makes the broker fail to start.
+from gunicorn.workers.base import Worker  # noqa: TC002
 
 logger_class = "broker.log_format.GunicornLogger"
 logconfig_dict = {
