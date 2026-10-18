@@ -5,6 +5,13 @@ name: All checks
 # whatever else was triggered for its head commit, and fails if any of it failed.
 on:
   pull_request:
+  workflow_call:
+    inputs:
+      auto-approve-workflow-name:
+        description: Name of the dedicated auto-approval caller workflow to exclude.
+        required: false
+        type: string
+        default: Auto-approve PRs
 
 permissions:
   actions: read
@@ -17,15 +24,21 @@ jobs:
     timeout-minutes: 90
     steps:
       - name: Wait for the PR's other checks
+        shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
           SHA: ${{ github.event.pull_request.head.sha }}
           RUN_ID: ${{ github.run_id }}
+          WORKFLOW_NAME: ${{ github.workflow }}
           # auto-approve waits for every check, this one included, so waiting on it would deadlock.
           IGNORED_CHECKS: '["all-checks","auto-approve"]'
-          IGNORED_WORKFLOWS: '["All checks","Auto-approve PRs"]'
+          AUTO_APPROVE_WORKFLOW: ${{ inputs.auto-approve-workflow-name || 'Auto-approve PRs' }}
         run: |
+          if [ -z "$SHA" ]; then
+            echo "::error::All checks must be called from a pull_request workflow."
+            exit 1
+          fi
           # Workflows triggered by the same push start together, but a workflow's later jobs (and
           # matrix entries) only get check runs once the jobs before them finish. So "done" means
           # every workflow run for the commit has finished as well as every check run, seen on two
@@ -34,12 +47,17 @@ jobs:
           settled=0
           sleep 20
           while true; do
-            runs=$(gh api --paginate "repos/$REPO/actions/runs?head_sha=$SHA&per_page=100" \
-              --jq ".workflow_runs[] | select(.id != $RUN_ID and (.name | IN($IGNORED_WORKFLOWS[]) | not))
-                    | {name, status, conclusion, url: .html_url}" | jq -s .)
-            checks=$(gh api --paginate "repos/$REPO/commits/$SHA/check-runs?filter=latest&per_page=100" \
-              --jq ".check_runs[] | select(.name | IN($IGNORED_CHECKS[]) | not)
-                    | {name, status, conclusion, url: .html_url}" | jq -s .)
+            runs=$(gh api --paginate "repos/$REPO/actions/runs?head_sha=$SHA&per_page=100" |
+              jq -s --argjson run_id "$RUN_ID" --arg workflow "$WORKFLOW_NAME" --arg approval "$AUTO_APPROVE_WORKFLOW" '
+                [.[].workflow_runs[]
+                 | select(.id != $run_id and .name != $workflow and .name != $approval)]
+                | group_by([.workflow_id, .event]) | map(max_by(.id))
+                | map({name, status, conclusion, url: .html_url})')
+            checks=$(gh api --paginate "repos/$REPO/commits/$SHA/check-runs?filter=latest&per_page=100" |
+              jq -s --argjson ignored "$IGNORED_CHECKS" '
+                [.[].check_runs[] | select(.name | split(" / ")[-1] | IN($ignored[]) | not)]
+                | group_by(.name) | map(max_by(.id))
+                | map({name, status, conclusion, url: .html_url})')
 
             failed=$(jq -n --argjson ok "$ok" --argjson runs "$runs" --argjson checks "$checks" \
               '[$runs[], $checks[] | select(.status == "completed" and (.conclusion | IN($ok[]) | not))]')

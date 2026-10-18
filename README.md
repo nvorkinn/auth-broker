@@ -570,6 +570,70 @@ stop cleanly (`scripts/check_image_starts.py`, which also runs on any Linux
 Docker host after `docker build -t auth-broker-broker .`: the services use
 host networking, as on the server).
 
+## Reusable PR workflows
+
+[`all-checks.yml`](.github/workflows/all-checks.yml) and
+[`auto_approve.yml`](.github/workflows/auto_approve.yml) also accept `workflow_call`.
+They still run automatically on this repository's PRs. Other repositories can use
+thin callers instead of copying the implementations:
+
+```yaml
+# .github/workflows/all-checks.yml in the caller repository
+name: All checks
+on:
+  pull_request:
+permissions:
+  actions: read
+  checks: read
+jobs:
+  all-checks:
+    uses: nvorkinn/auth-broker/.github/workflows/all-checks.yml@main
+```
+
+```yaml
+# .github/workflows/auto_approve.yml in the caller repository
+name: Auto-approve PRs
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+permissions:
+  contents: read
+  pull-requests: write
+  checks: read
+  actions: read
+jobs:
+  auto-approve:
+    uses: nvorkinn/auth-broker/.github/workflows/auto_approve.yml@main
+```
+
+Replace `@main` with a full commit SHA containing these changes for a stable pin;
+older commits/releases without `workflow_call` are not callable. Neither workflow
+requires custom secrets or `secrets: inherit`: GitHub supplies the caller's
+`GITHUB_TOKEN`, repository and PR context. Called workflows cannot elevate token
+permissions, so grant the permissions shown in each caller.
+
+Keep the aggregate caller unfiltered by paths so it always provides a branch
+protection check. Its called job is `all-checks`; reusable check names can be
+prefixed, for example `all-checks / all-checks`, so select the actual emitted
+check name in branch protection. The gate checks the PR's head SHA, follows API
+pagination, keeps the latest run for each workflow/event and latest attempt of
+each named check, and requires two settled polls. Only `success`, `skipped` and
+`neutral` count as passing. It ignores aggregate and approval check names even
+with nested caller prefixes.
+
+Keep approval in its own caller named `Auto-approve PRs`: it waits for the gate,
+so the gate must not wait for that workflow. If its caller has a different name,
+pass `with: {auto-approve-workflow-name: "Your approval workflow name"}` to the
+all-checks call. This optional string input defaults to `Auto-approve PRs`.
+Auto-approval has no inputs. Both workflows require a `pull_request` caller;
+do not use `pull_request_target` to bypass fork token restrictions.
+
+Approval uses no checkout and only approves the checked head commit; it does not
+enable auto-merge. Drafts, fork PRs, Dependabot PRs/runs and PRs authored by
+`github-actions[bot]` are skipped. The caller repository must enable **Allow GitHub
+Actions to create and approve pull requests** in its Actions settings; otherwise
+the approval API fails even with `pull-requests: write`.
+
 ## Deploying
 
 To release, run the Release workflow from the Actions tab (Run workflow, on
