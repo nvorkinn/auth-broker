@@ -24,9 +24,6 @@ if TYPE_CHECKING:
 bp = Blueprint("frames", __name__, url_prefix="/api")
 
 FRAME_BYTES = 800 * 480 // 8  # 1-bit packed; better to share this via the protocol package
-# Retry-After, in seconds, on a GET before the renderer's first frame: it's expected soon, but a screen
-# never polls more often than every 20 seconds.
-NO_FRAME_RETRY_AFTER = 20
 
 # Where a screen's reports go. Logs: VictoriaLogs' JSON lines endpoint, with the fields the dashboards
 # group by (see the README's Logs section). Telemetry: VictoriaMetrics' InfluxDB line protocol endpoint.
@@ -76,8 +73,8 @@ def get_frame(device_id: str) -> ResponseReturnValue:
     """Serve the screen its current frame.
 
     The screen polls this. Every answer it should keep polling after carries Retry-After, so its loop is
-    just "handle the status, sleep Retry-After": the refresh interval once there's a frame (BASE_INTERVAL, or what the
-    renderer asked for while a provider's data is bursty; see services/pace.py), a few seconds before the first one.
+    just "handle the status, sleep Retry-After": until just after the next render, before the first frame too (see
+    services/pace.py, the only place a sleep is worked out).
     """
     return _frame_response(device_id)
 
@@ -161,11 +158,13 @@ def _frame_response(device_id: str, *, use_record: bool = True) -> ResponseRetur
     row = db.session.get(Frame, device_id)
     # The renderer's record in Redis when it's the current picture, else the row (services/frame_record.py).
     shown = frame_record.current(frame_record.head(device_id) if use_record else None, row)
+    # How long the screen sleeps before its next poll, on every answer: the pacing function (services/pace.py).
+    retry_after = str(pace.retry_after(device_id, row))
     if shown is None:
-        return jsonify(error="no frame yet"), 404, {"Retry-After": str(NO_FRAME_RETRY_AFTER)}
+        return jsonify(error="no frame yet"), 404, {"Retry-After": retry_after}
     resp = Response(mimetype="application/octet-stream")
     resp.set_etag(shown.etag)
-    resp.headers["Retry-After"] = str(pace.effective_interval(row))
+    resp.headers["Retry-After"] = retry_after
     if request.method == "POST":
         # make_conditional only looks at GET and HEAD, so a POST has to answer 304 itself.
         if request.if_none_match.contains_weak(shown.etag):

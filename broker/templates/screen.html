@@ -87,7 +87,7 @@
     <div class="card-header screen-links">
         <div>
             <h2 class="card-title">On the screen now</h2>
-            <p class="card-subtitle">The picture the screen paints, checked every {{ interval }} seconds as the screen does.</p>
+            <p class="card-subtitle">The picture the screen paints, checked every {{ '%g' | format(interval) }} seconds as the screen does.</p>
         </div>
         <a href="{{ url_for('pages.device_config', device_id=device_id) }}">Settings ›</a>
     </div>
@@ -110,7 +110,7 @@
 <script>
 (() => {
     const url = {{ url_for('pages.screen_frame', device_id=device_id) | tojson }};
-    const intervalMs = {{ interval }} * 1000;
+    const intervalMs = {{ '%g' | format(interval) }} * 1000;
     const picture = document.getElementById('screenPicture');
     const empty = document.getElementById('screenEmpty');
     const status = document.getElementById('screenStatus');
