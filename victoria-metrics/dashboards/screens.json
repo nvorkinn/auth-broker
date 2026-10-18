@@ -1,0 +1,153 @@
+{
+  "title": "Screens",
+  "rows": [
+    {
+      "title": "Each screen, on the render pool and on its own container",
+      "panels": [
+        {
+          "title": "Problem (1 = something is wrong)",
+          "description": "By screen (its slug), whether the render pool draws it (the device attribute) or its own renderer container (the device attribute too, or else its host.name), so a screen reads the same either way. Own containers that report neither share one series, \"own containers, screen not known\". 1 when an API is in error, or (pool) the last render failed. countdown.problem.",
+          "width": 4,
+          "expr": [
+            "max by (device) (last_over_time(countdown.problem{device!=\"\"}[5m]))",
+            "label_replace(label_move(max by (host.name, host_name) (last_over_time(countdown.problem{device=\"\"}[5m])), \"host.name\", \"device\", \"host_name\", \"device\"), \"device\", \"own containers, screen not known\", \"device\", \"\")"
+          ],
+          "alias": [
+            "{{device}}",
+            "{{device}}"
+          ]
+        },
+        {
+          "title": "APIs in error",
+          "description": "By screen (its slug), whether the render pool draws it (the device attribute) or its own renderer container (the device attribute too, or else its host.name), so a screen reads the same either way. Own containers that report neither share one series, \"own containers, screen not known\". Each API whose status is error or fatal. countdown.api.status.",
+          "width": 4,
+          "expr": [
+            "max by (device, api, status) (last_over_time(countdown.api.status{device!=\"\", status=~\"error|fatal\"}[5m]))",
+            "label_replace(label_move(max by (host.name, host_name, api, status) (last_over_time(countdown.api.status{device=\"\", status=~\"error|fatal\"}[5m])), \"host.name\", \"device\", \"host_name\", \"device\"), \"device\", \"own containers, screen not known\", \"device\", \"\")"
+          ],
+          "alias": [
+            "{{device}} {{api}} {{status}}",
+            "{{device}} {{api}} {{status}}"
+          ]
+        },
+        {
+          "title": "Stage",
+          "description": "By screen (its slug), whether the render pool draws it (the device attribute) or its own renderer container (the device attribute too, or else its host.name), so a screen reads the same either way. Own containers that report neither share one series, \"own containers, screen not known\". What the screen shows: pairing or running. countdown.stage.",
+          "width": 4,
+          "expr": [
+            "max by (device, stage) (last_over_time(countdown.stage{device!=\"\"}[5m]))",
+            "label_replace(label_move(max by (host.name, host_name, stage) (last_over_time(countdown.stage{device=\"\"}[5m])), \"host.name\", \"device\", \"host_name\", \"device\"), \"device\", \"own containers, screen not known\", \"device\", \"\")"
+          ],
+          "alias": [
+            "{{device}} {{stage}}",
+            "{{device}} {{stage}}"
+          ]
+        }
+      ]
+    },
+    {
+      "title": "Render pool",
+      "panels": [
+        {
+          "title": "Time since the last good frame, by screen",
+          "description": "Now minus countdown.render.last_success, the highest across workers. Climbs for a screen that's stuck while the rest of the pool carries on; a few minutes is too long.",
+          "unit": "s",
+          "width": 6,
+          "expr": [
+            "time() - max by (device) (max_over_time(countdown.render.last_success[5m]))"
+          ],
+          "alias": [
+            "{{device}}"
+          ]
+        },
+        {
+          "title": "Failed renders per minute, by screen",
+          "description": "countdown.render.count{outcome=\"failed\"}, summed across workers.",
+          "unit": "renders/min",
+          "width": 6,
+          "expr": [
+            "sum by (device) (rate(countdown.render.count{outcome=\"failed\"}[5m])) * 60"
+          ],
+          "alias": [
+            "{{device}}"
+          ]
+        },
+        {
+          "title": "Renders per minute, by outcome",
+          "description": "countdown.render.count for the whole pool: written (a new frame), unchanged (skipped: nothing changed) or failed.",
+          "unit": "renders/min",
+          "width": 4,
+          "expr": [
+            "sum by (outcome) (rate(countdown.render.count[5m])) * 60"
+          ],
+          "alias": [
+            "{{outcome}}"
+          ]
+        },
+        {
+          "title": "Render time, whole pool",
+          "description": "countdown.render.duration, p50 and p95 over every screen. A warm render takes about 50 ms; the deadline is 20 s.",
+          "unit": "s",
+          "width": 4,
+          "expr": [
+            "histogram_quantile(0.5, sum by (le) (rate(countdown.render.duration_bucket[5m])))",
+            "histogram_quantile(0.95, sum by (le) (rate(countdown.render.duration_bucket[5m])))"
+          ],
+          "alias": [
+            "p50",
+            "p95"
+          ]
+        },
+        {
+          "title": "Render time p95, by screen",
+          "description": "countdown.render.duration, p95 for each screen.",
+          "unit": "s",
+          "width": 4,
+          "expr": [
+            "histogram_quantile(0.95, sum by (le, device) (rate(countdown.render.duration_bucket[5m])))"
+          ],
+          "alias": [
+            "{{device}}"
+          ]
+        },
+        {
+          "title": "Queue wait",
+          "description": "countdown.render.lag, p50 and p95: how long jobs wait before a worker takes them. The minute's frames should land within 3 s of it.",
+          "unit": "s",
+          "width": 4,
+          "expr": [
+            "histogram_quantile(0.5, sum by (le) (rate(countdown.render.lag_bucket[5m])))",
+            "histogram_quantile(0.95, sum by (le) (rate(countdown.render.lag_bucket[5m])))"
+          ],
+          "alias": [
+            "p50",
+            "p95"
+          ]
+        },
+        {
+          "title": "Jobs queued",
+          "description": "countdown.render.queued: jobs waiting for a worker. Persistently above zero means the pool needs another worker.",
+          "unit": "jobs",
+          "width": 4,
+          "expr": [
+            "max(max_over_time(countdown.render.queued[2m]))"
+          ],
+          "alias": [
+            "queued"
+          ]
+        },
+        {
+          "title": "Panels drawn \"Not available\", by screen",
+          "description": "countdown.render.expired_panels: panels whose key had expired at the screen's last render (its provider is behind or down). Empty while every panel has its data.",
+          "width": 4,
+          "expr": [
+            "max by (device, panel) (last_over_time(countdown.render.expired_panels[5m])) > 0"
+          ],
+          "alias": [
+            "{{device}} {{panel}}"
+          ]
+        }
+      ]
+    }
+  ]
+}

@@ -80,6 +80,9 @@ jobs:
             check: validate --config /etc/caddy/Caddyfile --adapter caddyfile
           - image: fluent-bit
             check: --dry-run --config /fluent-bit/etc/fluent-bit.yaml
+          # Its flags; the step below starts it as compose does and checks the vmui dashboards baked into it.
+          - image: victoria-metrics
+            check: -dryRun
           # The broker itself: its CMD is overridden, and importing the submodule's code checks it was copied in and installed.
           - image: broker
             context: .
@@ -101,3 +104,15 @@ jobs:
       - name: Start its services
         if: matrix.image == 'broker'
         run: python3 scripts/check_image_starts.py auth-broker-broker
+
+      # With the image's own CMD (loopback, host networking as in compose): every dashboard is served and every
+      # query in it parses.
+      - name: Check the vmui dashboards
+        if: matrix.image == 'victoria-metrics'
+        run: |
+          docker run --detach --name check-victoria-metrics --network host auth-broker-victoria-metrics
+          status=0
+          python3 scripts/check_vmui_dashboards.py http://127.0.0.1:8428 || status=$?
+          if [ "$status" -ne 0 ]; then docker logs check-victoria-metrics; fi
+          docker rm --force check-victoria-metrics > /dev/null
+          exit $status
