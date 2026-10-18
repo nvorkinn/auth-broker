@@ -1,0 +1,64 @@
+:root {
+    color-scheme: dark;
+    --page: #0b1018;
+    --card: #121a26;
+    --border: #2b3748;
+    --text: #e8eef6;
+    --muted: #a0aec0;
+    --green: #77dfad;
+    --blue: #8abaff;
+    --amber: #f2cb78;
+    --red: #ff9a9a;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--page); color: var(--text); font: 15px/1.5 system-ui, sans-serif; }
+main { max-width: 1440px; margin: auto; padding: 40px 28px; }
+h1, h2, h3, p { margin: 0; }
+h1 { font-size: clamp(28px, 4vw, 38px); letter-spacing: -1px; }
+h2 { font-size: 21px; }
+h3 { font-size: 16px; margin: 24px 0 12px; }
+a { color: var(--blue); text-decoration: none; overflow-wrap: anywhere; }
+a:hover { text-decoration: underline; }
+button { color: var(--text); background: #223047; border: 1px solid #405475; border-radius: 7px; padding: 9px 15px; font: inherit; cursor: pointer; }
+button:hover { background: #304361; }
+button:disabled { cursor: wait; opacity: .6; }
+button:focus-visible, a:focus-visible, summary:focus-visible { outline: 2px solid var(--blue); outline-offset: 4px; }
+.page-header, .toolbar, .project-header, .row-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+.page-header { margin-bottom: 32px; }
+.eyebrow { color: var(--green); font-size: 12px; letter-spacing: 2px; font-weight: 700; margin-bottom: 8px; }
+.identity, .hint, .muted, .page-header p:not(.eyebrow) { color: var(--muted); }
+.identity { border: 1px solid var(--border); padding: 8px 12px; border-radius: 30px; }
+.hint { font-size: 13px; margin: 12px 0 24px; }
+.project { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 24px; margin-bottom: 22px; }
+.project-description { color: var(--muted); margin-top: 6px; }
+.updated { color: var(--muted); font-size: 12px; margin-top: 12px; }
+.pull, .workflow { border-top: 1px solid var(--border); padding: 16px 0; }
+.row-heading { justify-content: flex-start; gap: 10px; }
+.pull-title { font-weight: 600; }
+.badge { border: 1px solid currentColor; border-radius: 20px; padding: 2px 9px; font-size: 12px; white-space: nowrap; }
+.done, .success, .neutral { color: var(--green); }
+.running, .in_progress { color: var(--blue); }
+.approve, .waiting, .pending, .queued, .requested, .action_required { color: var(--amber); }
+.failed, .failure, .timed_out, .cancelled, .error, .startup_failure { color: var(--red); }
+.skipped { color: var(--muted); }
+.error { padding: 12px 0; }
+.checks { display: flex; gap: 8px 16px; flex-wrap: wrap; list-style: none; margin: 10px 0; padding: 0; font-size: 13px; }
+.checks li { border-left: 3px solid currentColor; padding-left: 8px; }
+.release-result { margin-top: 12px; }
+.graph-scroll { overflow: auto; padding: 16px 0; }
+.graph { position: relative; isolation: isolate; }
+.graph svg { position: absolute; inset: 0; z-index: -1; }
+.graph path { fill: none; stroke: #68809d; stroke-width: 1.5; }
+.node { position: absolute; width: 210px; min-height: 76px; border: 1px solid currentColor; background: #182332; border-radius: 8px; padding: 10px 12px; }
+.node strong { display: block; color: var(--text); font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.node span { font-size: 12px; }
+.legend { display: flex; gap: 16px; flex-wrap: wrap; font-size: 12px; }
+details { margin: 10px 0; }
+summary { cursor: pointer; color: var(--muted); }
+.job { padding: 8px 12px; border-left: 2px solid var(--border); margin: 12px 0; }
+.steps { margin: 8px 0 0; padding-left: 24px; font-size: 13px; }
+@media (max-width: 600px) {
+    main { padding: 24px 14px; }
+    .project { padding: 16px; }
+    .identity { font-size: 12px; }
+}

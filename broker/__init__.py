@@ -16,6 +16,7 @@ from .routes import (
     apple_music_proxy,
     devices,
     frames,
+    github_dashboard,
     orchestrator,
     pages,
     place_search,
@@ -68,6 +69,7 @@ def create_app() -> Flask:
     app.register_blueprint(apple_music_proxy.bp)
     app.register_blueprint(apple_music_link.bp)
     app.register_blueprint(pages.bp)
+    app.register_blueprint(github_dashboard.bp)
     app.register_blueprint(stop_search.bp)
     app.register_blueprint(place_search.bp)
     app.register_blueprint(frames.bp)
