@@ -33,9 +33,12 @@ from broker.provider_loop import SUB_CHANGED, next_tick
 FIXTURE = json.loads((Path(__file__).parent / "fixtures" / "developer.json").read_text())
 FETCHED_AT = datetime.fromisoformat(FIXTURE["fetched_at"]).timestamp()
 GITHUB = FIXTURE["github"]
-IDLE_GITHUB = GITHUB | {
+# A release that just finished, still on the panel for github.SHOWN_AFTER.
+JUST_DONE_GITHUB = GITHUB | {
     "releases": [{**GITHUB["releases"][0], "state": "done", "finished": "2026-10-17T11:59:00+00:00"}]
 }
+# No release on the panel: none running, and none finished within github.SHOWN_AFTER.
+IDLE_GITHUB = GITHUB | {"releases": []}
 
 
 @pytest.fixture
@@ -100,18 +103,19 @@ def test_a_running_release_asks_for_a_faster_refresh_that_lapses(provider, store
     assert 0 < store.ttl(pace_key(device_id)) <= PACE_TTL_S
 
 
-def test_the_pace_is_withdrawn_once_the_release_is_over(provider, store, device):
+def test_a_release_just_finished_keeps_the_pace_while_it_shows(provider, store, device):
     device_id = device()
     _run(provider)
 
-    _run(provider, IDLE_GITHUB)
+    _run(provider, JUST_DONE_GITHUB)
 
-    assert store.get(pace_key(device_id)) is None
+    assert store.get(pace_key(device_id)) == str(PACE_S)
     assert _stored(store, stored_key(device_id))["github"]["releases"][0]["state"] == "done"
 
 
-def test_a_release_just_finished_asks_for_nothing(provider, store, device):
+def test_the_pace_is_withdrawn_once_the_release_is_off_the_panel(provider, store, device):
     device_id = device()
+    _run(provider, JUST_DONE_GITHUB)
 
     _run(provider, IDLE_GITHUB)
 
@@ -123,6 +127,9 @@ def test_it_polls_faster_while_a_release_runs_and_goes_back_after(provider, devi
     assert provider.interval_s() == IDLE_INTERVAL_S
 
     _run(provider)
+    assert provider.interval_s() == BURST_INTERVAL_S
+
+    _run(provider, JUST_DONE_GITHUB)
     assert provider.interval_s() == BURST_INTERVAL_S
 
     _run(provider, IDLE_GITHUB)
