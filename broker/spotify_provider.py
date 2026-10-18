@@ -3,10 +3,10 @@
     python -m broker.spotify_provider
 
 It runs from the broker's image with the broker's settings and database, and calls Spotify and Apple Music with the
-same code the proxy routes do (broker/clients/spotify.py, broker/services/music.py), so the tokens never leave the
-broker and a refreshed token is stored exactly as the proxy stores it. The renderers on the server then read the
-store instead of calling /api/spotify and /api/apple-music; standalone Pis, which can't reach Redis, keep calling the
-routes. See "Music in the store" in the README for the keys and what they hold.
+broker's own clients (broker/clients/spotify.py, broker/services/music.py), so the tokens never leave the broker, and
+a refreshed Spotify token is stored back in the database. The renderers get the music area only from the store. Reading
+Apple Music also logs its new plays, which its top lists are counted from (apple_music.record_plays); nothing else logs
+them. See "Music in the store" in the README for the keys and what they hold.
 
 The playing track's cover is stored too, once per image however many screens show it (broker/album_art.py), so the
 renderers never call Spotify's or Apple's image hosts either.
@@ -102,8 +102,8 @@ class Wanted:
 def wanted_devices() -> list[Wanted]:
     """Return the devices to fetch: Spotify switched on and linked, or Apple Music switched on.
 
-    Spotify switched on but not linked has nothing to fetch (the proxy has no answer the screen can read either).
-    Apple Music switched on but not connected is still fetched, as "nothing playing", as the proxy answers it.
+    Spotify switched on but not linked has nothing to fetch. Apple Music switched on but not connected is still
+    fetched, as "nothing playing".
     """
     rows = db.session.execute(
         select(
@@ -125,13 +125,13 @@ def wanted_devices() -> list[Wanted]:
 
 
 def spotify_queue(device_id: str) -> dict[str, object]:
-    """Return the device's Spotify queue, as /api/spotify/queue does; nothing playing (Spotify's 204) as such."""
+    """Return the device's Spotify queue, as Spotify's /me/player/queue answers it; nothing playing (204) as such."""
     # get_queue hands over [] for a 204, which the screen can't read as a queue; the store says what it means.
     return spotify.get_queue(device_id) or music.nothing_playing()
 
 
 def spotify_top(device_id: str) -> dict[str, dict[str, object]]:
-    """Return the device's Spotify top tracks and artists over each of TIME_RANGES, as /api/spotify/top returns them.
+    """Return the device's Spotify top tracks and artists over each of TIME_RANGES, as Spotify's /me/top answers them.
 
     Empty lists for a 204, rather than its [].
     """
@@ -146,7 +146,7 @@ def spotify_top(device_id: str) -> dict[str, dict[str, object]]:
 
 
 def apple_music_top(device_id: str) -> dict[str, dict[str, object]]:
-    """Return the device's Apple Music top tracks and artists over each of TIME_RANGES, as the proxy returns them."""
+    """Return the device's Apple Music top tracks and artists over each of TIME_RANGES, in Spotify's /me/top shape."""
     return {
         time_range: {type_: music.apple_music_top(device_id, type_, time_range, TOP_LIMIT) for type_ in TOP_TYPES}
         for time_range in TIME_RANGES

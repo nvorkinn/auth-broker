@@ -109,7 +109,7 @@ class DeviceConfig(db.Model):
     # A UK postcode ("SW1A 1AA") or a Norwegian one ("0150"); see pages.normalize_postcode.
     postcode: Mapped[str] = mapped_column(String, default="", server_default=text("''"))
     spotify_enabled: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("0"))
-    # Apple Music in the Spotify area, beside Spotify or instead of it (see routes/apple_music_proxy.py).
+    # Apple Music in the Spotify area, beside Spotify or instead of it (see clients/apple_music.py).
     apple_music_enabled: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("0"))
     # The developer panel: GitHub pull requests and builds, and AI plans (see developer_provider.py).
     developer_enabled: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("0"))

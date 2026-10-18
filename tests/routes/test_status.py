@@ -98,15 +98,7 @@ def test_last_seen_at_is_unset_until_the_device_authenticates(app, client, regis
     assert _last_seen(app, device_id) is None
 
 
-@pytest.mark.parametrize(
-    "path",
-    [
-        "/api/config",
-        "/api/spotify/now-playing",
-        "/api/spotify/queue",
-        "/api/frame",
-    ],
-)
+@pytest.mark.parametrize("path", ["/api/config", "/api/frame"])
 def test_any_authenticated_device_request_sets_last_seen_at(app, client, register_device, path):
     device_id, secret = register_device()
     before = datetime.now(UTC)

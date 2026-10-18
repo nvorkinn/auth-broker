@@ -159,7 +159,8 @@ def get_config(*, device_id: str, x_device_name: str | None = None) -> ConfigRes
         glowmarkt=Glowmarkt(enabled=_glowmarkt_enabled(creds)),
         # Only the switch: the GitHub token stays here, and the developer provider fills the store the screen reads.
         developer=Developer(enabled=config.developer_enabled),
-        # Only the switch, like the developer panel's: the screen gets Apple Music from /api/apple-music.
+        # Only the switch, like the developer panel's: the Apple token stays here, and the music provider fills the
+        # store the screen reads.
         apple_music=AppleMusic(enabled=config.apple_music_enabled),
         pairing_code=pairing.current_code_for(device_id),
     )

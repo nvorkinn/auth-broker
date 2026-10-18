@@ -5,7 +5,7 @@
 It runs from the broker's image and reads the broker's database, read-only. For every device in `v1:sub:developer`'s
 terms (the developer panel switched on) it polls everything the panel shows (the owner's GitHub, with the token only
 the broker holds, and their AI plans) on its own, whether or not a renderer is looking, and writes it to
-`v1:developer:<device id>`. The renderers on the server read that instead of calling /api/developer.
+`v1:developer:<device id>`, which is where the renderers get the panel from.
 
 It also sets the pace. While the panel shows a release (running, or finished in the last github.SHOWN_AFTER), its stages
 change by the minute, so the provider polls every BURST_INTERVAL_S and asks for the screen to refresh as fast, with
