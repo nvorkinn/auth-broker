@@ -15,15 +15,14 @@ this page is the map. [The database](database.md) has the tables.
 | Part | Where it lives | What it does |
 |---|---|---|
 | **ESP32 screen** | [countdown-esp32](https://github.com/nvorkinn/countdown-esp32), on the wall | Drives a Waveshare 7.5" e-paper panel (800x480, black and white). Registers with the broker, then polls it for finished frames and paints them. It draws nothing itself. |
-| **Renderer** | [pi-dashboard](https://github.com/nvorkinn/pi-dashboard) (`countdown-server` image), one container per screen | Reads the screen's config from the broker and its panels' data from Redis, draws the 1-bit frame, uploads it. |
+| **Renderer** | [pi-dashboard](https://github.com/nvorkinn/pi-dashboard) (`countdown-server` image), one container per screen | Reads the screen's config from Redis (the broker's copy, see [the config in the store](#the-config-in-the-store)), or from the broker without one, and its panels' data from Redis, draws the 1-bit frame, uploads it. |
 | **Orchestrator** | pi-dashboard (`countdown-orchestrator`), one container, mounts `docker.sock` | Polls the broker for *assignments* and starts, stops and removes the renderer containers to match. |
 | **auth-broker** | this repository, gunicorn on `127.0.0.1:5000` | The hub: device identities, pairing, each screen's settings and its Spotify and Apple Music links, the latest frame, renderer assignments. State is one SQLite file. |
 | **Caddy** | this repository (`caddy/`), the host's ports 80 and 443 | TLS, routing, the sign-in gate for browser pages, and the `X-Authentik-*` headers. |
 | **authentik** | this repository (`terraform/`), behind the `sso.` host | Sign-in, sign-up, passkeys and authenticator apps, Google login. Its embedded outpost answers Caddy's forward_auth. |
 | **Fluent Bit, VictoriaLogs, VictoriaMetrics** | this repository | Where the screens' and renderers' logs and metrics end up. |
-| **Redis** | this repository, `127.0.0.1:6379` | The store between one provider per API (writing the latest data per stop or location) and the renderers (reading it). The broker writes the subscriptions; the glow-provider below is the first provider here. A cache only: nothing on disk. |
+| **Redis** | this repository, `127.0.0.1:6379` | The store between one provider per API (writing the latest data per stop or location) and the renderers (reading it). The broker writes the subscriptions and a copy of each screen's config; the glow-provider below is the first provider here. A cache only: nothing on disk. |
 | **glow-provider** | this repository (`broker/providers/glow.py`), the broker's image, deployed with the broker | Reads the devices' Glowmarkt accounts from the database (read-only), fetches their readings from Glowmarkt and writes them to Redis (`v1:energy:<device id>`), so the passwords never leave the broker. See [the energy provider](../README.md#the-energy-provider). |
-| **Redis** | this repository, `127.0.0.1:6379` | Not used yet. The planned store between one provider per API (writing the latest data per stop or location) and the renderers (reading it). A cache only: nothing on disk. |
 | **spotify-provider** | this repository (`broker/spotify_provider.py`), the broker's image with another command | Fetches each screen's Spotify and Apple Music with the broker's own tokens and code, and writes them to Redis for the renderers, with the playing tracks' covers (one copy per image, so the renderers never call the image hosts; see "Music in the store" in the README). Deployed with the broker. |
 | **developer-provider** | this repository (`broker/developer_provider.py`), the broker's image with another command | Reads the devices and their GitHub tokens from the database (read-only, like the glow-provider). Polls each screen's GitHub and AI plans for as long as its developer panel is on, writes them to Redis for the renderers, and asks for a faster screen refresh (`v1:pace:developer:<device id>`) while a release runs. Deployed with the broker. See [Pace](#pace). |
 | **countdown-api** | [countdown-api](https://github.com/nvorkinn/countdown-api), the `vendor/countdown-api` submodule | The OpenAPI contract between renderer and broker (so far `GET /api/config`) and the code generated from it. |
@@ -95,7 +94,7 @@ public URL (`BROKER_URL`).
 | Caller | Calls | Authenticates with |
 |---|---|---|
 | **ESP32 screen** | `POST /api/devices/register` (5 a minute per IP, then 429), `POST /api/frame` (the same answer as `GET`, plus a metrics and logs report), `POST /api/devices/pairing-code` | nothing for register (the secret is in the body), otherwise the **display secret** |
-| **Renderer** | `POST /api/renderers/claim`, `GET /api/config`, `PUT /api/frame`, `POST /api/devices/pairing-code` | the **claim token** (claim only), otherwise the **renderer secret** |
+| **Renderer** | `POST /api/renderers/claim`, `GET /api/config` (only when Redis has no copy of its config), `PUT /api/frame`, `POST /api/devices/pairing-code` | the **claim token** (claim only), otherwise the **renderer secret** |
 | **Orchestrator** | `GET /api/orchestrator/assignments`, `POST /api/orchestrator/assignments/{id}/status` | `ORCHESTRATOR_TOKEN` |
 | **Home Assistant** | `GET /api/status/devices` | `STATUS_TOKEN` |
 | **Signed-in user** | `/pair`, `POST /pair/token`, `/device[/{id}]` and `/name`, `POST /api/displays/{id}/renderer`, Spotify connect and disconnect, `POST /device[/{id}]/display/unlink`, `GET /api/stops/search` (and its old name, `/api/tfl/search`), `GET /api/places/search` | `X-Authentik-Uid` from Caddy |
@@ -121,7 +120,7 @@ Several different things get called a token or a secret here, and they are not i
 | **Outpost cookie** | The outpost, after sign-in, on the broker's host | the browser | cookie, browser to Caddy | authentik's session settings (its defaults: none are set in this repository) |
 | **Flask session cookie** | The broker, only while someone connects Spotify | the browser, signed with `FLASK_SECRET_KEY`, not encrypted | cookie | the browser session. Holds the Spotify `state` and the target device id, nothing else |
 | **Spotify tokens, per device** | Spotify, via `/auth/spotify/callback` | `spotify_tokens`, **plaintext** | never leave the broker | refreshed lazily when they expire. Deleted by Disconnect, `unpair --config` and `forget` |
-| **Third-party keys** | The operator: `SPOTIFY_CLIENT_ID` and `_SECRET`, `TFL_APP_KEY`, `WEATHER_API_KEY` | environment | Spotify's as HTTP Basic to Spotify. `WEATHER_API_KEY` is returned **in plaintext** in `GET /api/config`, so a key rotation reaches every screen without a re-flash. `TFL_APP_KEY` never leaves the broker: it's only for TfL's stop lookups (the settings page's stop search and saved stops' names); pi-dashboard's TfL providers have their own, from its deploy's `TFL_APP_KEY` secret | the operator rotates them |
+| **Third-party keys** | The operator: `SPOTIFY_CLIENT_ID` and `_SECRET`, `TFL_APP_KEY`, `WEATHER_API_KEY` | environment | Spotify's as HTTP Basic to Spotify. `WEATHER_API_KEY` is returned **in plaintext** in `GET /api/config`, so a key rotation reaches every screen without a re-flash; never in the copy of the config in Redis, where it's empty. `TFL_APP_KEY` never leaves the broker: it's only for TfL's stop lookups (the settings page's stop search and saved stops' names); pi-dashboard's TfL providers have their own, from its deploy's `TFL_APP_KEY` secret | the operator rotates them |
 | **Glowmarkt credentials** | The owner, on `/device` | `glowmarkt_credentials`: the username as is, the password Fernet-encrypted with `CREDENTIAL_ENCRYPTION_KEY` | never sent: `GET /api/config` carries only `glowmarkt.enabled`; the glow-provider decrypts them, to sign in itself, and writes only the readings to Redis | cleared by `unpair --config` and `forget`. Changing the key makes stored passwords unreadable |
 | **GitHub token, per device** | The owner, on `/device`: a fine-grained, read-only personal access token | `github_tokens`, Fernet-encrypted with `CREDENTIAL_ENCRYPTION_KEY` | never leaves the broker: the developer-provider makes the GitHub calls with it and writes only the panel's data to Redis | deleted by "Remove token", `unpair --config` and `forget`. GitHub expires it as the owner chose |
 | **MusicKit key** | The operator: `APPLE_MUSIC_TEAM_ID`, `APPLE_MUSIC_KEY_ID` and `APPLE_MUSIC_PRIVATE_KEY` (the .p8), from an Apple Developer Program account | environment | never leaves the broker: it signs 12-hour developer tokens, which go to Apple and to the config page for MusicKit JS | the operator revokes and replaces it in Apple's developer portal. Unset: no Apple Music |
@@ -280,12 +279,10 @@ sequenceDiagram
     Note over R: Makes its own secret (24 random bytes), keeps it Fernet-encrypted in /data, key in /keys
     R->>B: POST /api/renderers/claim {secret, claim_token}<br/>claim token in the body
     B-->>R: 201 {device_id}
-    Note right of B: DB: devices: renderer_secret_hash, renderer_assignments: claim_token
+    Note right of B: DB: devices: renderer_secret_hash, device_name (the slug, if it had none), renderer_assignments: claim_token
     R->>B: POST /api/renderers/claim (every restart)<br/>claim token in the body
     B-->>R: 200 {device_id}, the token is ignored
-    R->>B: GET /api/config (X-Device-Name)<br/>Bearer renderer secret
-    B-->>R: 200 config JSON
-    Note right of B: DB: devices: device_name
+    Note over R,B: Reads its config from Redis (v1:config:DEVICE_ID, written when the screen was paired); GET /api/config only without it
 ```
 
 - A new screen's owner is sent to the naming page before anything else works. The slug is
@@ -303,11 +300,12 @@ sequenceDiagram
     autonumber
     participant S as ESP32 screen
     participant B as auth-broker
+    participant D as Redis
     participant R as Renderer
     participant O as Orchestrator
-    loop every pace seconds (renderer: 60 s, faster while a provider's data is bursty)
-        R->>B: GET /api/config (X-Device-Name)<br/>Bearer renderer secret
-        B-->>R: 200 config JSON (pairing_code is null for a paired device, unless a code was just requested)
+    loop every pace seconds (renderer: 60 s, faster while a provider's data is bursty), or at once on v1:config:changed
+        R->>D: GET v1:config:DEVICE_ID
+        D-->>R: the config JSON, the broker's copy (without one: GET /api/config to the broker, which has the pairing code)
         Note over R: Draws its panels from Redis, where the providers keep their data (Spotify and Apple Music: the broker's spotify-provider)
         R->>B: PUT /api/frame (48,000 bytes, only if the picture changed)<br/>Bearer renderer secret
         B-->>R: 204
@@ -470,3 +468,56 @@ panels' keys, sleeps that long between cycles, and sends it as `X-Refresh-Hint` 
 The broker keeps it on the frame row for 3 minutes (`frames.pace`, `pace_until`; `services/pace.py`) and answers the
 screen's polls with it as `Retry-After`, kept between 20 s and the 60 s base. Every upload restates the hint, so a
 frame without one ends it, and a renderer that stops asking or dies lapses back to 60 s on its own.
+
+## The config in the store
+
+SQLite is the source of truth for each screen's settings; Redis holds a copy of what `GET /api/config` answers each
+renderer, so a renderer needn't reach the broker to draw, and a save reaches it at once
+(`broker/services/config_store.py`, made by `services/renderer_config.py` as the route's answer is).
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant P as Phone / browser
+    participant B as auth-broker
+    participant D as Redis
+    participant R as Renderer
+    R->>D: SUBSCRIBE v1:config:changed (once, at start)
+    P->>B: POST /device/ID (the settings page)<br/>signed in
+    Note right of B: DB: device_config, glowmarkt_credentials, github_tokens
+    B->>D: v1:sub:* (MULTI: DEL, SADD), PUBLISH v1:sub:changed
+    B->>D: MGET v1:config:* , then MULTI: SET v1:config:ID (only those that changed), PUBLISH v1:config:changed ID
+    B-->>P: 302 /device/ID
+    D-->>R: message: ID (its own; other screens' ids are ignored)
+    R->>D: GET v1:config:ID
+    Note over R: Redraws with the new config, without waiting for its 60 s
+```
+
+- **What's stored.** `v1:config:<device id>` holds exactly `GET /api/config`'s JSON for the device, the contract's
+  `ConfigResponse`, less what mustn't be in Redis, which every provider and renderer can read: `weather.api_key` is
+  empty (the renderers no longer use it), and `pairing_code` is null. No Glowmarkt, GitHub,
+  Spotify or Apple Music credential is in the config at all. `tests/fixtures/config_store.json` pins the shape, and
+  pi-dashboard's tests read the same file.
+- **When.** The whole set is rebuilt from the database on every config save, as the broker starts (gunicorn's
+  `post_worker_init`, in `gunicorn.conf.py`), by `flask weather backfill` and by `flask config publish`; one device's
+  key when its pairing changes (`/pair`, `POST /pair/token`, `POST /api/devices/pairing-code`, `flask devices code`,
+  `owner`, `unpair`, `forget`). Only keys whose value changed are written, and only their devices are nudged on
+  `v1:config:changed` (payload: the device id), in the same transaction, after the write.
+- **No key** for a device that isn't paired, has a live pairing code, or is gone: its renderer then asks
+  `GET /api/config`, which gives (and, while unpaired, issues) the code. Redeeming the code writes the key back and
+  nudges. A code that lapses unused leaves the renderer on `GET /api/config` (which then has no code) until the next
+  rebuild: any config save, a restart, or `flask config publish`.
+- **No TTL**, as it's rebuilt from the database. `maxmemory-policy volatile-lru` evicts only keys with a TTL, so these
+  are never evicted, and they count against `maxmemory 128mb` for good: about 700 bytes of JSON each, about 1 KB with
+  Redis's own overhead, so a thousand screens take about 1 MB.
+- **When Redis can't be written** during a save, the save still succeeds, the broker logs "Couldn't write the
+  screens' configs to Redis", and a renderer keeps reading the copy that was there (or asks the broker, with none)
+  until the next rebuild; `flask config publish` puts it right. Redis restarting loses the keys (it keeps nothing on
+  disk): the renderers ask the broker until it restarts, someone saves, or `flask config publish` runs.
+- **Rolling back** to a broker from before this leaves the keys in Redis, unrefreshed, and the renderers would keep
+  reading them. Delete them first, on the host:
+  `docker exec redis sh -c 'REDISCLI_AUTH="$REDIS_PASSWORD" redis-cli -h 127.0.0.1 --scan --pattern "v1:config:*" | xargs -r redis-cli -h 127.0.0.1 DEL'`
+  (inside the same `sh -c`, so `REDISCLI_AUTH` applies to both).
+- **device_name.** A renderer used to report it (its `DEVICE_NAME`, the slug) as `X-Device-Name` on every config poll.
+  One reading the store may never poll, so the claim now names the device after its assignment's slug, if it has no
+  name; a poll that sends the header still renames it.

@@ -56,6 +56,7 @@ def test_status_lists_every_device(app, client, register_device):
         config.weather_location, config.postcode = "London", "SW1A 1AA"
         db.session.get(Device, paired_id).device_name = "camilla"
         db.session.commit()
+        new_slug = db.session.get(Device, new_id).assignment.slug
         paired = db.session.get(Device, paired_id)
         created_at, paired_at, last_seen_at = paired.created_at, paired.paired_at, paired.last_seen_at
 
@@ -70,7 +71,7 @@ def test_status_lists_every_device(app, client, register_device):
             "last_seen_at": last_seen_at.isoformat(),
         },
         new_id: {
-            "device_name": None,
+            "device_name": new_slug,  # its renderer's, given when it claimed the device
             "created_at": response.get_json()[new_id]["created_at"],
             "paired_at": None,
             "last_seen_at": None,

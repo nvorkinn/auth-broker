@@ -30,7 +30,8 @@ from broker.models import (
     GlowmarktCredentials,
     SpotifyToken,
 )
-from broker.services import assignments, frame_image, geoip, pace, pairing, stops, weather_place
+from broker.services import assignments, config_store, frame_image, geoip, pace, pairing, stops, weather_place
+from broker.services.postcodes import normalize_postcode
 
 if TYPE_CHECKING:
     from flask.typing import ResponseReturnValue
@@ -38,32 +39,6 @@ if TYPE_CHECKING:
 bp = Blueprint("pages", __name__)
 
 PAIRING_TOKEN_RE = re.compile(r"^[0-9a-f]{64}$")
-
-# UK postcode shape: outward code (e.g. SW1A, N1, EC2V) then inward code (digit + two letters).
-UK_POSTCODE_RE = re.compile(r"^([A-Z]{1,2}[0-9][A-Z0-9]?)([0-9][A-Z]{2})$")
-# A Norwegian postcode is four digits ("0150"); a UK one always has letters, so the two can't be confused.
-NORWEGIAN_POSTCODE_RE = re.compile(r"^[0-9]{4}$")
-
-
-def normalize_postcode(value: str) -> str | None:
-    """Return the postcode in canonical form ("SW1A 1AA", "0150").
-
-    Return "" if it is blank, or None if it is neither a UK nor a Norwegian postcode.
-    """
-    compact = re.sub(r"\s+", "", value).upper()
-    if not compact:
-        return ""
-    if NORWEGIAN_POSTCODE_RE.match(compact):
-        return compact
-    match = UK_POSTCODE_RE.match(compact)
-    return f"{match[1]} {match[2]}" if match else None
-
-
-def postcode_country(postcode: str) -> str | None:
-    """Return the country of a normalized postcode: "NO", "GB", or None for none."""
-    if not postcode:
-        return None
-    return "NO" if NORWEGIAN_POSTCODE_RE.match(postcode) else "GB"
 
 
 def _write_subscriptions_to_redis() -> None:
@@ -165,6 +140,8 @@ def pair() -> ResponseReturnValue:
             return _too_many_attempts(lockout)
         return render_template("pair.html", error="That code is invalid or has expired.", token="")
 
+    # Paired, and the code spent: its renderer reads its config from the store again.
+    config_store.publish(device_id)
     return redirect(url_for("pages.device_config"))
 
 
@@ -187,6 +164,9 @@ def pair_by_token() -> ResponseReturnValue:
     if not isinstance(token, str) or not PAIRING_TOKEN_RE.match(token):
         return jsonify(status="invalid"), 400
     status = pairing.pair_by_token(current_user(), token)
+    if status == "paired":
+        # A paired screen's config goes in the store (all of them: this one is known here only by its token).
+        config_store.publish_all()
     return jsonify(status=status), {"paired": 200, "waiting": 202, "taken": 409}[status]
 
 
@@ -255,6 +235,8 @@ def _save_device_config(device_id: str) -> ResponseReturnValue:
 
     db.session.commit()
     _write_subscriptions_to_redis()
+    # Every screen's, not just this one's: it costs little, and puts back any copy the store lost.
+    config_store.publish_all()
     return redirect(url_for("pages.device_config", device_id=device_id))
 
 

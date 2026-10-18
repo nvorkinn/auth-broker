@@ -41,8 +41,8 @@ from broker.db import db
 from broker.log_format import JsonFormatter
 from broker.models import DeviceConfig, GlowmarktCredentials
 from broker.provider_loop import read_only_app
-from broker.routes.devices import _timezone
-from broker.routes.pages import postcode_country
+from broker.services.postcodes import postcode_country
+from broker.services.renderer_config import timezone
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -104,7 +104,7 @@ def accounts() -> list[Account]:
                 continue
             if sign_in is None:
                 continue
-            zone = _timezone(postcode_country(config.postcode), config.tfl_stop_ids) if config else DEFAULT_ZONE
+            zone = timezone(postcode_country(config.postcode), config.tfl_stop_ids) if config else DEFAULT_ZONE
             found.append(Account(creds.device_id, *sign_in, zone))
         return found
     finally:

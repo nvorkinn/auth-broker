@@ -46,7 +46,9 @@ def test_list_with_no_devices(cli):
 def test_list_shows_device_name_when_set_and_unnamed_otherwise(client, register_device, cli):
     named_id, secret = register_device()
     client.get("/api/config", headers={**_headers(secret), "X-Device-Name": "camilla"})
-    unnamed_id, _ = register_device("another-very-long-device-secret")
+    # A screen with no renderer yet, which is all that has no name (a renderer is named by its slug when it claims).
+    screen = {"secret": "a-screen-with-no-renderer-yet", "width": 800, "height": 480}
+    unnamed_id = client.post("/api/devices/register", json=screen).get_json()["device_id"]
 
     result = cli("list")
 

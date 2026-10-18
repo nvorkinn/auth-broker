@@ -6,30 +6,17 @@ Everything but /register needs one of the device's secrets.
 from typing import TYPE_CHECKING
 
 from countdown_api.blueprints import ApiHTTPError
-from countdown_api.models import (
-    AppleMusic,
-    ConfigResponse,
-    Departures,
-    DepartureStop,
-    Developer,
-    Glowmarkt,
-    NoticeBoard,
-    Screen,
-    Spotify,
-    Tfl,
-    Weather,
-)
-from cryptography.fernet import InvalidToken
+
+# At run time: the API registry reads get_config's signature, return annotation included, when it registers it.
+from countdown_api.models import ConfigResponse  # noqa: TC002
 from flask import Blueprint, current_app, jsonify, request
 from sqlalchemy.exc import IntegrityError
 
 from broker.api import api
 from broker.auth import hash_secret, require_device_auth, with_retry_after
 from broker.db import db
-from broker.models import BASE_INTERVAL, Device, DeviceConfig, GlowmarktCredentials
-from broker.services import pairing, registration, stops, weather_place
-
-from .pages import postcode_country
+from broker.models import Device, DeviceConfig
+from broker.services import config_store, pairing, registration, renderer_config
 
 if TYPE_CHECKING:
     from flask.typing import ResponseReturnValue
@@ -96,6 +83,8 @@ def create_pairing_code(device_id: str) -> ResponseReturnValue:
     A screen can ask too, since a device that has no renderer yet has nothing else to show one.
     """
     code = pairing.issue_code(device_id)
+    # The renderer has a code to show now, which only GET /api/config gives it: take its config out of the store.
+    config_store.publish(device_id)
     return jsonify(code=code, expires_in_seconds=int(pairing.CODE_TTL.total_seconds()))
 
 
@@ -116,76 +105,12 @@ def _update_device_name(device_id: str, name: str | None) -> None:
 def get_config(*, device_id: str, x_device_name: str | None = None) -> ConfigResponse:
     """Answer the renderer's config poll (GET /api/config in the contract, which also says that only its role may).
 
-    Bundles the device's own settings together with the shared weather API key, so a key rotation doesn't require
-    re-flashing every gifted device. Never TfL's key: the renderer reads TfL's departures and disruptions from the
-    store, whose providers have their own, and the broker's is only for its stop lookups. Carries the device_id, so a
-    renderer needn't keep it.
+    What's in it is services/renderer_config.py's: the device's settings and the weather API key. While the device
+    isn't paired this also issues the code it shows (pairing.current_code_for). A renderer reading the store reads
+    the same config from there, without the key or a code, and asks here only when the store has none for it.
     """
     _update_device_name(device_id, x_device_name)
     config = db.session.get(DeviceConfig, device_id)
     if config is None:
         raise ApiHTTPError(404, message="not found")
-
-    creds = db.session.get(GlowmarktCredentials, device_id)
-    country = postcode_country(config.postcode)
-    stop_ids = config.tfl_stop_ids
-    return ConfigResponse(
-        device_id=device_id,
-        # Renderers that predate the pace still read it; they sleep this, and a faster refresh comes from the frames.
-        interval=BASE_INTERVAL,
-        clock_format=config.clock_format,
-        language=config.language,
-        timezone=_timezone(country, stop_ids),
-        screen=Screen(orientation=config.orientation, width=config.width, height=config.height),
-        # The key is what the weather is subscribed under, so it's what the renderer reads (v1:weather:<key>).
-        weather=Weather(
-            api_key=current_app.config["WEATHER_API_KEY"],
-            location=config.weather_location,
-            key=weather_place.weather_key(config),
-        ),
-        style=config.style,
-        # The panels' own styles, for renderers that predate `style`, in the names they know.
-        notice_board=NoticeBoard(postcode=config.postcode or None, country=country, style=config.style),
-        # For renderers that predate `departures`: only the stops they can show.
-        tfl=Tfl(
-            stop_ids=[s for s in stop_ids if stops.source_of(s) == "tfl"],
-            style=_departures_style(config.style),
-        ),
-        departures=Departures(
-            stops=[DepartureStop(source=stops.source_of(s), id=s) for s in stop_ids],
-            style=_departures_style(config.style),
-        ),
-        spotify=Spotify(enabled=config.spotify_enabled, style=config.style),
-        # Only the switch: the Glowmarkt provider signs in and fills the store, which the screen reads.
-        glowmarkt=Glowmarkt(enabled=_glowmarkt_enabled(creds)),
-        # Only the switch: the GitHub token stays here, and the developer provider fills the store the screen reads.
-        developer=Developer(enabled=config.developer_enabled),
-        # Only the switch, like the developer panel's: the Apple token stays here, and the music provider fills the
-        # store the screen reads.
-        apple_music=AppleMusic(enabled=config.apple_music_enabled),
-        pairing_code=pairing.current_code_for(device_id),
-    )
-
-
-def _glowmarkt_enabled(creds: GlowmarktCredentials | None) -> bool:
-    """Return whether the device has a Glowmarkt account the provider signs in with (GlowmarktCredentials.sign_in)."""
-    if creds is None:
-        return False
-    try:
-        return creds.sign_in() is not None
-    except InvalidToken:
-        # The provider skips it too, so there would be nothing in the store to show.
-        current_app.logger.warning("Can't decrypt the Glowmarkt password of device %s", creds.device_id)
-        return False
-
-
-def _departures_style(style: str) -> str:
-    """Return `style` as the departures' own field names it: airy was called grouped there."""
-    return "grouped" if style == "airy" else style
-
-
-def _timezone(country: str | None, stop_ids: list[str]) -> str:
-    """Return the screen's time zone: its postcode's country's, or, without a postcode, its first stop's."""
-    if country is None and stop_ids:
-        country = "NO" if stops.source_of(stop_ids[0]) == "entur" else "GB"
-    return "Europe/Oslo" if country == "NO" else "Europe/London"
+    return renderer_config.build(config, pairing_code=pairing.current_code_for(device_id), api_key=True)
