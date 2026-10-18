@@ -93,7 +93,8 @@ class ProviderLoop(ABC):
         try:
             self.run_cycle()
         except RedisError as e:
-            self.logger.warning("%s: couldn't reach Redis (%s); trying again next tick", self.label, e)
+            # The error's type, not its text: a failed pipeline's quotes every command, keys and values.
+            self.logger.warning("%s: couldn't reach Redis (%s); trying again next tick", self.label, type(e).__name__)
         except Exception:
             # The database, say: a provider that stops would have to be restarted by hand.
             self.logger.exception("%s: the cycle failed; trying again next tick", self.label)
@@ -127,7 +128,11 @@ class ProviderLoop(ABC):
         except RedisError as e:
             if self._resubscribe_at is None:
                 self.logger.warning(
-                    "%s: lost %s (%s); subscribing again every %ss", self.label, SUB_CHANGED, e, RESUBSCRIBE_S
+                    "%s: lost %s (%s); subscribing again every %ss",
+                    self.label,
+                    SUB_CHANGED,
+                    type(e).__name__,
+                    RESUBSCRIBE_S,
                 )
             self._resubscribe_at = self.clock() + RESUBSCRIBE_S
             self._close_pubsub()

@@ -2,6 +2,6 @@
 pytest
 pytest-cov
 pytest-xdist
-fakeredis
+fakeredis[lua]
 responses
 ruff==0.17.0

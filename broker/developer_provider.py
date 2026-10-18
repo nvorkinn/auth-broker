@@ -12,6 +12,13 @@ change by the minute, so the provider polls every BURST_INTERVAL_S and asks for 
 `v1:pace:developer:<device id>` (a TTL of PACE_TTL_S, renewed each cycle it still holds). Once none shows, the key is
 deleted (or lapses), and the screen goes back to its usual pace. See "The pace" in pi-dashboard's countdown README.
 
+On each of those cycles it also queues a render of the device's screen for the render pool (services/render_jobs.py,
+pi-dashboard's docs/stateless-renderers.md, "Config saves and bursts push jobs"), once its new data is written, so a
+pooled screen follows the release at the burst's pace rather than the ticker's minute; and once more on the cycle that
+finds the release gone, so it leaves the screen as soon as it would have with the pace. Outside a release it queues
+nothing: the minute's tick draws the screen. Only a screen the pool renders is queued (one with its own renderer
+isn't), and a job that can't be queued is logged (by its error's type) and left to the tick.
+
 A device whose GitHub rate-limits its token (403/429, see github.rate_limit_wait) isn't polled again until GitHub says
 it may be (Retry-After, or X-RateLimit-Reset), and its keys are left as they are meanwhile.
 
@@ -34,7 +41,7 @@ from broker.clients import github
 from broker.db import db
 from broker.models import DeviceConfig, GitHubToken
 from broker.provider_loop import ProviderLoop
-from broker.services import developer
+from broker.services import developer, render_jobs
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -160,6 +167,8 @@ class DeveloperProvider(ProviderLoop):
                 self.logger.warning("Developer: GitHub for device %s: %s", want.device_id, e)
             return 0
         running = release_shown(snapshot)
+        # The cycle that finds the release gone ends the burst: one last render takes it off the screen.
+        bursting = running or want.device_id in self._running
         if running:
             self._running.add(want.device_id)
         else:
@@ -171,6 +180,9 @@ class DeveloperProvider(ProviderLoop):
             else:
                 pipe.delete(pace_key(want.device_id))
             pipe.execute()
+        if bursting:
+            # After the write, so the render reads the new data. Never raises: the tick draws the screen anyway.
+            render_jobs.enqueue(self.store, [want.device_id])
         return 1 + running
 
 
