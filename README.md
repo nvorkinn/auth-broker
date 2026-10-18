@@ -81,12 +81,12 @@ and how to run and deploy it.
    drop-in). `GET /api/spotify/queue` works the same way and returns the
    upcoming Spotify queue as a JSON list of the same track shape.
    `GET /api/spotify/top/<artists|tracks>` is served the same way. With the
-   developer panel on, `GET /api/developer` returns the owner's GitHub at a
+   developer panel on, the developer provider fetches the owner's GitHub at a
    glance (open PRs, reviews waiting, repos failing on their default branch,
    and a Release or Deploy workflow running or just finished, with its jobs as
    GitHub's graph: `broker/clients/workflow_graph.py`) and their AI plans,
-   called with the GitHub token saved on `/device` (renderers on the server read the same data from Redis instead, see
-   "Developer in the store"). The
+   with the GitHub token saved on `/device`, and writes them to Redis for the
+   renderers (see "Developer in the store"). The
    Claude and Gemini plans are placeholders until there's an API to ask
    (`broker/clients/ai_plans.py`).
 
@@ -212,7 +212,6 @@ hasn't made a request (`devices.display_last_seen_at`) for 24 hours becomes `sus
 |---|---|
 | `GET /api/config` | renderer |
 | `GET /api/spotify/<now-playing \| queue \| top/<artists\|tracks>>` | renderer |
-| `GET /api/developer` | renderer |
 | `POST /api/devices/pairing-code` | renderer, display |
 | `PUT /api/frame` (raw 800x480 1-bit, 48000 bytes) | renderer |
 | `GET /api/frame` (ETag / `If-None-Match` → 304) | renderer, display |
@@ -895,10 +894,9 @@ The renderers read it once pi-dashboard's orchestrator is given
 `broker/developer_provider.py` is the developer provider, run from the broker's image like the music one. For as long
 as a screen's developer panel is on (`v1:sub:developer` holds its device id) it polls everything the panel shows on its
 own, whether or not a renderer is looking: the owner's GitHub, with the token only the broker holds, and their AI plans
-(`broker/services/developer.py`, the same code `GET /api/developer` answers with), and writes it to
-`v1:developer:<device id>` with `fetched_at` (TTL 15 minutes). The renderers read that instead of calling the route,
-which stays for the ones that read no store. A poll costs GitHub about 25 calls, so it polls every 2 minutes
-(`IDLE_INTERVAL_S`).
+(`broker/services/developer.py`), and writes it to `v1:developer:<device id>` with `fetched_at` (TTL 15 minutes). That
+key is the only way the renderers get the panel: the broker has no route for it. A poll costs GitHub about 25 calls, so
+it polls every 2 minutes (`IDLE_INTERVAL_S`).
 
 It also sets the screen's pace. While one of a device's releases is running its stages change by the minute, so it polls
 every 20 seconds (`BURST_INTERVAL_S`) and writes `v1:pace:developer:<device id>` = 20 with a one-minute TTL, renewed each
@@ -912,8 +910,8 @@ If GitHub rate-limits a device's token anyway (a 429, or a 403 that is a rate li
 provider leaves that device alone for as long as GitHub says (`Retry-After`, or until `X-RateLimit-Reset` when
 `X-RateLimit-Remaining` is 0; a minute if it says neither), and polls the other devices as usual. The device's keys are
 left as they were meanwhile, so a long wait lets them lapse and the panel says it has no data rather than showing it
-stale. A rate limit part-way through a poll fails the whole poll (`GET /api/developer` answers 502) instead of leaving
-out the releases or the Copilot usage it couldn't read.
+stale. A rate limit part-way through a poll fails the whole poll (`developer.snapshot()` raises and nothing is
+written) instead of leaving out the releases or the Copilot usage it couldn't read.
 
 `tests/fixtures/developer.json` is the stored shape, copied into pi-dashboard's tests too, so a change to either side
 that breaks the other shows up in both. To see it on the host: `docker logs -f developer-provider`. Locally,

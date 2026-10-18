@@ -37,7 +37,7 @@ DEFAULT_BACKOFF_S = 60
 
 
 def summary(token: str) -> dict:
-    """Return the owner's GitHub at a glance, as /api/developer's `github`.
+    """Return the owner's GitHub at a glance, the developer panel's `github`.
 
     Raises requests.HTTPError if GitHub refuses the token or fails.
     """

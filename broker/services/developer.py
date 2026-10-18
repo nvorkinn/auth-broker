@@ -1,7 +1,6 @@
 """The developer panel's data: the owner's GitHub at a glance and their AI plans.
 
-One answer for both of its readers: the `/api/developer` route (for renderers that don't read the store) and the
-developer provider (which writes it there).
+The developer provider (broker/developer_provider.py) polls it and writes it to the store, where the renderers read it.
 """
 
 from typing import TYPE_CHECKING

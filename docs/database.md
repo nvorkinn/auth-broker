@@ -118,7 +118,7 @@ Things the diagram can't say:
 | `pairing_codes` | live code | `POST /api/devices/pairing-code`, `flask devices code`, `GET /api/config` while unpaired; deleted on use, on expiry (swept on each new code) and by `unpair` | `POST /pair`, `GET /api/config` |
 | `spotify_tokens` | device that connected Spotify | `/auth/spotify/callback`, lazy refresh in the proxy | the Spotify proxy; deleted by Disconnect, `unpair --config`, `forget` |
 | `glowmarkt_credentials` | device | `POST /device` | `GET /api/config`, `/device` |
-| `github_tokens` | device given a GitHub token | `POST /device`; deleted by "Remove token", `unpair --config`, `forget` | `GET /api/developer`, `/device` |
+| `github_tokens` | device given a GitHub token | `POST /device`; deleted by "Remove token", `unpair --config`, `forget` | the developer-provider, `/device` |
 | `frames` | device | `PUT /api/frame` | `GET` and `POST /api/frame` |
 | `renderer_assignments` | named screen | the naming page and `POST /api/displays/{id}/renderer` (insert), `POST /api/renderers/claim` (`claim_token` to NULL), the orchestrator's list (**suspension and un-suspension happen here**), its status reports, `forget` (`deleting`) | the orchestrator's list, the pages |
 
