@@ -817,7 +817,8 @@ fields itself, as one JSON object per line (stream fields are `service,host`):
 | `_time` | When Docker saw the line. A screen has no clock, so the broker dates its lines by their uptime relative to the newest in the report |
 
 The broker's JSON comes from `gunicorn.conf.py` and `broker/log_format.py` (the access log has the
-method, path without query string, status, bytes and duration as fields). The renderers and orchestrator
+method, path without query string, status, bytes and duration as fields); a `flask` command writes the
+same lines to stderr, as its stdout is its output. The renderers and orchestrator
 use `countdown_core.core.log_format` and `countdown_orchestrator.log_format` in the pi-dashboard repo; a
 renderer's lines also carry `device` (its name). Screens' logs are posted by the broker straight to
 VictoriaLogs, tagged `service=countdown-esp32` and `host=<device id>`; `VICTORIA_LOGS_URL` overrides the

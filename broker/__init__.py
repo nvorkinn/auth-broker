@@ -1,6 +1,5 @@
 """The auth broker: a Flask app that pairs screens with their owners and serves them config and frames."""
 
-import logging
 import os
 
 import redis
@@ -8,7 +7,7 @@ from flask import Flask
 from werkzeug.middleware.proxy_fix import ProxyFix
 
 from . import api as api_module
-from . import cli, config, request_log
+from . import cli, config, log_format, request_log
 from . import db as db_module
 from .auth import current_username
 from .routes import (
@@ -29,12 +28,10 @@ from .services.pair_throttle import MAX_REGISTRATION_LOCKOUT_SECONDS, REGISTRATI
 
 def create_app() -> Flask:
     """Build the app: logging, config, database, throttles, blueprints and the CLI."""
+    # Before app.logger is first used, as Flask gives it a plain-text handler of its own if nothing else would write
+    # its records. Under gunicorn and in a provider, logging is set up already, and this leaves it as it is.
+    log_format.configure_logging()
     app = Flask(__name__)
-    # Route app.logger through gunicorn's handlers so it lands in `docker logs`.
-    gunicorn_logger = logging.getLogger("gunicorn.error")
-    if gunicorn_logger.handlers:
-        app.logger.handlers = gunicorn_logger.handlers
-        app.logger.setLevel(gunicorn_logger.level)
 
     # Caddy, on the same host, is the only thing that reaches the app (the port is published on
     # 127.0.0.1 only), so trust the one X-Forwarded-For hop it adds: request.remote_addr is then the
