@@ -65,10 +65,12 @@ def redis_server():
 def redis_client(request):
     """Return a client decoding values as text, as the broker's does, on fakeredis or on the real Redis (emptied)."""
     if request.param == "fakeredis":
-        return fakeredis.FakeRedis(decode_responses=True)
-    real = redis.Redis(port=request.getfixturevalue("redis_server"), password="pw", decode_responses=True)
-    real.flushall()
-    return real
+        client = fakeredis.FakeRedis(decode_responses=True)
+    else:
+        client = redis.Redis(port=request.getfixturevalue("redis_server"), password="pw", decode_responses=True)
+        client.flushall()
+    _pool(client, DEVICE, OTHER)
+    return client
 
 
 @pytest.fixture
@@ -77,6 +79,11 @@ def store(app):
     client = fakeredis.FakeRedis(decode_responses=True)
     app.extensions["redis"] = client
     return client
+
+
+def _pool(store, *device_ids):
+    """Put the screens in the pool, as the orchestrator does."""
+    store.hset(render_jobs.SCREENS, mapping=dict.fromkeys(device_ids, "nvorkinn-test"))
 
 
 def _jobs(store) -> list[str]:
@@ -99,7 +106,7 @@ def _headers(secret):
 
 
 def test_the_script_is_the_pools():
-    assert hashlib.sha1(render_jobs.ENQUEUE.encode(), usedforsecurity=False).hexdigest() == FIXTURE["enqueue_sha1"]
+    assert hashlib.sha1(render_jobs._ENQUEUE.encode(), usedforsecurity=False).hexdigest() == FIXTURE["enqueue_sha1"]
 
 
 def test_the_keys_and_ttl_are_the_pools():
@@ -140,6 +147,22 @@ def test_a_screen_is_queued_again_once_its_job_is_claimed(redis_client):
     assert render_jobs.enqueue(redis_client, [DEVICE]) == 1
 
 
+def test_a_screen_the_pool_doesnt_render_is_not_queued(redis_client):
+    # Nothing takes jobs off the list until a pool runs, and it has no TTL: so nothing is written for such a screen.
+    assert render_jobs.enqueue(redis_client, ["not-pooled", DEVICE]) == 1
+
+    assert redis_client.lrange(FIXTURE["jobs_key"], 0, -1) == [DEVICE]
+    assert redis_client.exists(render_jobs.queued_key("not-pooled")) == 0
+
+
+def test_with_no_pool_nothing_is_written():
+    client = fakeredis.FakeRedis(decode_responses=True)
+
+    assert render_jobs.enqueue(client, [DEVICE, OTHER]) == 0
+
+    assert client.keys("*") == []
+
+
 def test_enqueue_with_no_screens_asks_nothing():
     client = fakeredis.FakeRedis()
     with patch.object(client, "register_script") as register:
@@ -152,6 +175,7 @@ def test_enqueue_with_no_screens_asks_nothing():
 
 def test_a_config_save_queues_the_screen_and_still_nudges_it(store, paired_client):
     client, device_id, _ = paired_client
+    _pool(store, device_id)
     _take_jobs(store)
     pubsub = store.pubsub()
     pubsub.subscribe(config_store.CHANGED)
@@ -167,6 +191,7 @@ def test_a_config_save_queues_the_screen_and_still_nudges_it(store, paired_clien
 
 def test_a_save_that_changes_no_copy_still_queues_the_screen(store, paired_client):
     client, device_id, _ = paired_client
+    _pool(store, device_id)
     client.post("/device", data={"style": "card"})
     _take_jobs(store)
 
@@ -178,6 +203,7 @@ def test_a_save_that_changes_no_copy_still_queues_the_screen(store, paired_clien
 def test_a_rebuild_queues_only_the_screens_whose_copy_changed(app, store, paired_client, register_device):
     _client, device_id, _ = paired_client
     other_id, _ = register_device("another-very-long-device-secret")
+    _pool(store, device_id, other_id)
     with app.app_context():
         db.session.get(Device, other_id).paired_at = datetime.now(UTC)
         db.session.commit()
@@ -191,8 +217,19 @@ def test_a_rebuild_queues_only_the_screens_whose_copy_changed(app, store, paired
     assert _jobs(store) == [device_id]
 
 
+def test_a_save_of_a_screen_with_its_own_renderer_queues_nothing(store, paired_client):
+    client, device_id, _ = paired_client
+    _pool(store, "another-screen")
+
+    client.post("/device", data={"style": "card"})
+
+    assert json.loads(store.get(config_store.key(device_id)))["style"] == "card"
+    assert _jobs(store) == []
+
+
 def test_a_rejected_save_queues_nothing(store, paired_client):
-    client, _, _ = paired_client
+    client, device_id, _ = paired_client
+    _pool(store, device_id)
     _take_jobs(store)
 
     assert client.post("/device", data={"postcode": "not a postcode", "style": "card"}).status_code == 400
@@ -205,6 +242,7 @@ def test_a_rejected_save_queues_nothing(store, paired_client):
 
 def test_issuing_a_code_queues_the_screen_after_writing_its_key(app, store, paired_client):
     client, device_id, secret = paired_client
+    _pool(store, device_id)
     _take_jobs(store)
     seen = []
     request = render_jobs.request
@@ -222,6 +260,7 @@ def test_issuing_a_code_queues_the_screen_after_writing_its_key(app, store, pair
 
 def test_a_code_issued_by_get_api_config_queues_the_screen(store, client, register_device):
     device_id, secret = register_device()
+    _pool(store, device_id)
 
     client.get("/api/config", headers=_headers(secret))  # unpaired, so this issues the code
 
@@ -231,6 +270,7 @@ def test_a_code_issued_by_get_api_config_queues_the_screen(store, client, regist
 
 def test_using_the_code_queues_the_screen_after_deleting_its_key(store, paired_client):
     client, device_id, secret = paired_client
+    _pool(store, device_id)
     code = client.post("/api/devices/pairing-code", headers=_headers(secret)).get_json()["code"]
     _take_jobs(store)
     seen = []
@@ -251,6 +291,7 @@ def test_pairing_by_token_queues_the_screen(app, store, client):
     device_id = client.post(
         "/api/devices/register", json={"secret": "display-secret-for-a-token-pairing", "width": 800, "height": 480}
     ).get_json()["device_id"]
+    _pool(store, device_id)
     with app.app_context():
         pairing.issue_code(device_id)
         token = db.session.get(Device, device_id).pairing_token
@@ -264,6 +305,7 @@ def test_pairing_by_token_queues_the_screen(app, store, client):
 
 def test_the_code_command_queues_the_screen(store, paired_client, cli):
     _client, device_id, _ = paired_client
+    _pool(store, device_id)
     _take_jobs(store)
 
     assert cli("code", device_id).exit_code == 0
@@ -301,12 +343,13 @@ def test_redis_down_never_fails_a_save_or_a_code(app, client, register_device):
     assert saved.status_code == 302
     assert logger.warning.call_count == 4  # the two codes issued, the one spent and the save
     for call in logger.warning.call_args_list:
-        assert call.args[1:] == ("ConnectionError",)
+        assert call.args[1:] == (1, "ConnectionError")
         assert code not in str(call)
         assert asked.get_json()["code"] not in str(call)
 
 
 def test_a_redis_error_from_the_script_itself_is_logged_not_raised(app, store):
+    _pool(store, DEVICE)
     with (
         app.app_context(),
         patch.object(store, "register_script", side_effect=redis.ResponseError("NOSCRIPT quoting a1b2c3")),
@@ -315,4 +358,4 @@ def test_a_redis_error_from_the_script_itself_is_logged_not_raised(app, store):
         render_jobs.request(DEVICE)
 
     logger.warning.assert_called_once()
-    assert logger.warning.call_args.args[1:] == ("ResponseError",)
+    assert logger.warning.call_args.args[1:] == (1, "ResponseError")

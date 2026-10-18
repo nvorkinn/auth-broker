@@ -70,7 +70,8 @@ class FakeRedis:
     """Just enough of Redis to see what a config save writes: sets, strings (configs, pairing keys), what's published.
 
     And the render jobs queued (services/render_jobs.py): `jobs`, oldest first, a device at most once, as the queue's
-    script does (its flag never lapses here). A TTL is ignored. tests/services/test_render_jobs.py runs the real script.
+    script does (its flag never lapses here), for the screens in `pooled` (v1:render:screens). A TTL is ignored.
+    tests/services/test_render_jobs.py runs the real script.
     """
 
     def __init__(self):
@@ -78,6 +79,7 @@ class FakeRedis:
         self.strings: dict[str, str] = {}
         self.published: list[tuple[str, str]] = []
         self.jobs: list[str] = []
+        self.pooled: set[str] = set()
         self.fail = False
 
     def _check(self):
@@ -110,8 +112,13 @@ class FakeRedis:
         self._check()
         return [key for key in [*self.strings, *self.sets] if fnmatch.fnmatchcase(key, match)]
 
+    def hmget(self, key, fields):
+        self._check()
+        assert key == render_jobs.SCREENS
+        return ["slug" if field in self.pooled else None for field in fields]
+
     def register_script(self, script):
-        assert script == render_jobs.ENQUEUE, "only the render queue's enqueue is faked"
+        assert script == render_jobs._ENQUEUE, "only the render queue's enqueue is faked"
         return FakeEnqueue(self)
 
     def _enqueue(self, device_id) -> int:
