@@ -1,12 +1,20 @@
 import json
 import logging
+import runpy
 import sys
+from contextlib import contextmanager
 from datetime import timedelta
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from gunicorn.config import Config
 
+from broker import create_app, spotify_provider
 from broker.log_format import GunicornLogger, JsonFormatter
+from broker.routes import frames
+
+ROOT = Path(__file__).resolve().parent.parent
 
 
 def _format(level=logging.INFO, msg="hello %s", args=("world",), exc_info=None, **extra):
@@ -94,3 +102,71 @@ def test_the_access_log_has_the_request_as_fields_without_the_query_string():
 
 def test_a_server_error_in_the_access_log_is_an_error():
     assert _access(503)[1]["level"] == "error"
+
+
+# --- Each record once: logging as each process sets it up, then create_app() -------------------------------------
+
+
+def _loggers():
+    return [logging.root, *(lg for lg in logging.Logger.manager.loggerDict.values() if isinstance(lg, logging.Logger))]
+
+
+@contextmanager
+def _logging_as_a_new_process():
+    """Make logging as a process has it before anything sets it up, then put it back as it was.
+
+    pytest's handlers come off the root logger, and every logger is enabled again: the migration tests' alembic
+    fileConfig disables each logger it doesn't name, which the broker's own start doesn't do (db.upgrade_db).
+    """
+    saved = {lg: (list(lg.handlers), lg.level, lg.propagate, lg.disabled) for lg in _loggers()}
+    logging.root.handlers = []
+    for lg in _loggers():
+        lg.disabled = False
+    try:
+        yield
+    finally:
+        for lg in _loggers():
+            handlers, level, propagate, disabled = saved.get(lg, ([], logging.NOTSET, True, False))
+            lg.handlers, lg.propagate, lg.disabled = handlers, propagate, disabled
+            lg.setLevel(level)  # which also empties the loggers' cached levels
+
+
+def _gunicorn():
+    """Set logging up as gunicorn does before it loads the app.
+
+    That is gunicorn.conf.py's logger_class, which applies the file's logconfig_dict with dictConfig.
+    """
+    config = Config()
+    for name, value in runpy.run_path(str(ROOT / "gunicorn.conf.py")).items():
+        if name in config.settings:
+            config.set(name, value)
+    config.logger_class(config)
+
+
+def _flask_command():
+    """`flask --app wsgi ...`: nothing sets logging up before wsgi.py calls create_app()."""
+
+
+@pytest.mark.parametrize(
+    ("set_up", "stream"),
+    [(_gunicorn, "out"), (_flask_command, "err"), (spotify_provider._configure_logging, "out")],
+    ids=["gunicorn", "flask-command", "spotify-provider"],
+)
+def test_each_broker_record_is_written_once_as_json_at_info(app, capsys, monkeypatch, set_up, stream):
+    # `app` only sets up the environment and database that this second create_app() reads.
+    monkeypatch.delenv("LOG_LEVEL", raising=False)
+    with _logging_as_a_new_process():
+        set_up()
+        started = create_app()
+        started.logger.debug("below the level")
+        started.logger.info("from app.logger")
+        frames.logger.info("from a module's logger")
+
+    out, err = capsys.readouterr()
+    written, other = (out, err) if stream == "out" else (err, out)
+    entries = [json.loads(line) for line in written.splitlines()]  # every line JSON, alembic's too
+    assert [entry for entry in entries if entry["logger"].startswith("broker")] == [
+        {"level": "info", "_msg": "from app.logger", "logger": "broker"},
+        {"level": "info", "_msg": "from a module's logger", "logger": "broker.routes.frames"},
+    ]
+    assert other == ""
