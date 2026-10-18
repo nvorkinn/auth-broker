@@ -135,6 +135,12 @@ def test_a_job_with_no_runs_yet_is_queued_and_a_job_all_skipped_is_skipped():
     assert (nodes["images"]["done"], nodes["images"]["total"]) == (0, 2)
 
 
+def test_a_matrix_is_not_done_while_known_jobs_have_not_started():
+    jobs = workflow_graph.workflow_jobs(WORKFLOW)
+    nodes = _by_key(workflow_graph.nodes(jobs, [_run("image broker")]))
+    assert (nodes["images"]["state"], nodes["images"]["done"], nodes["images"]["total"]) == ("running", 1, 2)
+
+
 def test_a_run_the_file_doesnt_name_is_a_node_of_its_own():
     nodes = workflow_graph.nodes(workflow_graph.workflow_jobs(WORKFLOW), [_run("cleanup", "in_progress", None)])
 

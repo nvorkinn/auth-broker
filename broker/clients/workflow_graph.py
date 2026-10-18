@@ -150,10 +150,13 @@ def _node(key: str, name: str, needs: list[str], runs: list[dict], size: int | N
     # A count only for a node of several jobs (a matrix, or a reusable workflow's), as one job is done or it isn't.
     total = max(len(runs), size or 0)
     counted = total > 1
+    state = _state(runs)
+    if len(runs) < total and state in {"done", "skipped"}:
+        state = "running"
     return {
         "key": key,
         "name": name,
-        "state": _state(runs),
+        "state": state,
         "needs": needs,
         "done": sum(run["status"] == "completed" for run in runs) if counted else None,
         "total": total if counted else None,

@@ -16,6 +16,62 @@ orchestrator and the renderers), which token or secret exists when, and what eac
 [docs/database.md](docs/database.md) shows the tables and how they fit in. The sections below say how each part works
 and how to run and deploy it.
 
+## Personal GitHub dashboard
+
+The dashboard is served at **https://auth.nikolaivorkinn.com/github**, in the broker's existing image.
+Caddy already puts `/github`, its JSON endpoints and its static assets behind authentik forward auth.
+It requires no additional hostname, container or authentik provider, and does not change the screen
+configuration site's landing page.
+
+Enable it by adding these settings with `sops secrets/broker.env`, then deploying/recreating the broker:
+
+```dotenv
+GITHUB_DASHBOARD_USER_ID=<your authentik X-Authentik-Uid>
+GITHUB_DASHBOARD_TOKEN=<your fine-grained GitHub personal access token>
+```
+
+Use the authentik UID forwarded by the broker's login proxy, not the username, email or numeric database
+primary key. This is the same identity stored as a screen's owner. The dashboard refuses other signed-in
+users; with either setting absent, it stays disabled. Keep the PAT in the encrypted secrets file: it is
+used server-side only, never sent to the browser. As with the broker's other pages, only the trusted
+proxy may reach the broker's loopback listener; do not expose its port directly.
+
+Create a fine-grained PAT for your GitHub account with access to the desired repositories. Repository
+permissions: **Actions: read**, **Checks: read**, **Commit statuses: read**, **Pull requests: read** and
+**Contents: read and write** (for workflow YAML, generated notes, tags and releases); Metadata read is
+implicit. Organization-owned repositories are intentionally excluded: discovery includes every
+non-archived repository **owned by the token's user**, not just recently active projects. All result
+lists are paginated. Repository permission or PAT expiry failures are displayed explicitly.
+
+Each project shows all open PRs, individual check results (Checks API and legacy commit statuses),
+remaining pending checks and merge conflicts. Unknown mergeability is labelled as such, not as clear.
+Projects with pending checks, unknown mergeability or unfinished workflows refresh automatically every
+10 seconds after the previous fetch; idle projects and repository discovery refresh every minute.
+Requests are limited to three projects at once, stop in hidden tabs, and respect GitHub rate-limit
+backoff. ETags are shared through Redis and revalidated on every read: authenticated unchanged
+responses do not consume GitHub's primary rate limit. Cached data is scoped to the PAT and expires
+after an hour; it is never returned without revalidation. With many active repositories, fetching
+can take longer than the refresh interval.
+
+Actions includes every queued, requested, pending, running and **waiting-for-approval** run, with no
+age cutoff. The dependency diagram uses the workflow YAML **at the run's commit** so jobs that have
+not started are present too. Nodes distinguish done, running, waiting for approval, not started,
+failed and skipped. Matrix and reusable-workflow jobs are grouped into their parent stage, with
+completion counts; expand **All jobs and steps** for every runtime job and step from the current
+attempt. Dynamic matrices and reusable-workflow internals cannot be expanded before GitHub returns
+their jobs. A workflow that cannot be read is an explicit error, not a misleading edgeless graph.
+
+**New Release publishes immediately**, with no confirmation dialog. It rechecks repository ownership,
+reads all published releases **including prereleases** (excluding drafts), and bumps the highest
+semantic version's minor number, resetting patch to zero: `1.19.0` becomes `1.20.0`,
+`v1.20.0-rc.1` becomes `v1.21.0`. The optional `v` prefix is preserved. With no releases the first tag
+is `1.0.0`; if releases exist but none has a semantic version tag, publication is refused.
+The broker calls `POST /repos/{owner}/{repo}/releases/generate-notes` with the previous tag and
+default branch, then creates a non-draft, non-prerelease release with those notes on that branch.
+An already-existing target tag is refused rather than reused. Release actions require a session
+CSRF token, are never automatically retried, and disable the button once requested. If a write
+times out, check GitHub's releases before reloading to try again: GitHub might have accepted it.
+
 ## How a device gets set up
 
 1. **First boot:** the Pi generates its own secret and calls

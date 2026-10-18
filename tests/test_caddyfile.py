@@ -26,3 +26,11 @@ def test_device_routes_are_not_behind_the_browser_login(app):
         route for route in device_routes if not any(fnmatchcase(re.sub(r"<[^>]+>", "x", route), path) for path in paths)
     ]
     assert behind_login == []
+
+
+def test_dashboard_and_its_assets_are_behind_authentik(app):
+    paths = _paths_without_login()
+    routes = [rule.rule for rule in app.url_map.iter_rules() if rule.endpoint.startswith("github_dashboard.")]
+    routes += ["/static/github_dashboard.js", "/static/github_dashboard.css"]
+    assert routes
+    assert not any(fnmatchcase(route, pattern) for route in routes for pattern in paths)
