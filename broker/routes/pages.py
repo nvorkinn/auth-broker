@@ -30,7 +30,17 @@ from broker.models import (
     GlowmarktCredentials,
     SpotifyToken,
 )
-from broker.services import assignments, config_store, frame_image, geoip, pace, pairing, stops, weather_place
+from broker.services import (
+    assignments,
+    config_store,
+    frame_image,
+    frame_record,
+    geoip,
+    pace,
+    pairing,
+    stops,
+    weather_place,
+)
 from broker.services.postcodes import normalize_postcode
 
 if TYPE_CHECKING:
@@ -327,13 +337,15 @@ def screen_view() -> ResponseReturnValue:
     """Show what a screen shows, as its latest frame, and keep it current as the screen does."""
     config = db.session.get(DeviceConfig, g.device_id)
     frame = db.session.get(Frame, g.device_id)
+    # What the screen is served: the renderer's record in Redis, or this row (services/frame_record.py).
+    shown = frame_record.current(frame_record.head(g.device_id), frame)
     upright = config.orientation != "horizontal"
     width, height = (frame_image.HEIGHT, frame_image.WIDTH) if upright else (frame_image.WIDTH, frame_image.HEIGHT)
     return render_template(
         "screen.html",
         device_id=g.device_id,
-        has_frame=frame is not None,
-        rendered_at=frame.rendered_at if frame else None,
+        has_frame=shown is not None,
+        rendered_at=shown.rendered_at if shown else None,
         interval=pace.effective_interval(frame),
         width=width,
         height=height,
@@ -346,11 +358,12 @@ def screen_view() -> ResponseReturnValue:
 def screen_frame() -> ResponseReturnValue:
     """Serve a screen's latest frame as a PNG, the right way up for how the screen is hung.
 
+    The same frame as the screen is served: the renderer's record in Redis, or the row (services/frame_record.py).
     Conditional on the frame's ETag (and the orientation, which changes the picture), so a page polling it only
-    downloads a frame that changed. rendered_at moves on every upload, frame changed or not, so it rides along in a
-    header for the page to say how fresh the picture is.
+    downloads a frame that changed. When it was drawn rides along in a header for the page to say: the record's time
+    is when the renderer first drew the picture, and the row's moves on every upload, frame changed or not.
     """
-    frame = db.session.get(Frame, g.device_id)
+    frame = frame_record.current(frame_record.read(g.device_id), db.session.get(Frame, g.device_id))
     if frame is None:
         return jsonify(error="no frame yet"), 404
     upright = db.session.get(DeviceConfig, g.device_id).orientation != "horizontal"

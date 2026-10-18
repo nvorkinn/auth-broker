@@ -56,6 +56,14 @@ def create_app() -> Flask:
         socket_timeout=1,  # a dead Redis can't hang a config save
         socket_connect_timeout=1,
     )
+    # The same Redis, for the values that are bytes, not text: the screens' frames (services/frame_record.py). A client
+    # of its own, as redis-py decodes per client, not per call.
+    app.extensions["redis_bytes"] = redis.Redis.from_url(
+        os.environ.get("REDIS_URL", "redis://127.0.0.1:6379/0"),
+        password=os.environ.get("REDIS_PASSWORD"),
+        socket_timeout=1,  # a dead Redis can't hang a screen's poll for long: it gets the database's frame
+        socket_connect_timeout=1,
+    )
 
     app.register_blueprint(devices.bp)
     app.register_blueprint(renderers.bp)

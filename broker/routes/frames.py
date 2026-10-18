@@ -6,6 +6,7 @@ import os
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 from hashlib import blake2b
+from http import HTTPStatus
 from typing import TYPE_CHECKING
 
 import requests
@@ -15,7 +16,7 @@ from sqlalchemy.dialects.sqlite import insert
 from broker.auth import require_device_auth
 from broker.db import db
 from broker.models import Frame
-from broker.services import pace
+from broker.services import frame_record, pace
 
 if TYPE_CHECKING:
     from flask.typing import ResponseReturnValue
@@ -156,18 +157,29 @@ def _post(url: str, request_kwargs: dict[str, object]) -> None:
         logger.warning("could not forward to %s", url, exc_info=True)
 
 
-def _frame_response(device_id: str) -> ResponseReturnValue:
+def _frame_response(device_id: str, *, use_record: bool = True) -> ResponseReturnValue:
     row = db.session.get(Frame, device_id)
-    if not row:
+    # The renderer's record in Redis when it's the current picture, else the row (services/frame_record.py).
+    shown = frame_record.current(frame_record.head(device_id) if use_record else None, row)
+    if shown is None:
         return jsonify(error="no frame yet"), 404, {"Retry-After": str(NO_FRAME_RETRY_AFTER)}
-    resp = Response(row.frame, mimetype="application/octet-stream")
-    resp.set_etag(row.etag)
+    resp = Response(mimetype="application/octet-stream")
+    resp.set_etag(shown.etag)
     resp.headers["Retry-After"] = str(pace.effective_interval(row))
     if request.method == "POST":
         # make_conditional only looks at GET and HEAD, so a POST has to answer 304 itself.
-        if request.if_none_match.contains_weak(row.etag):
-            resp = Response(
+        if request.if_none_match.contains_weak(shown.etag):
+            return Response(
                 status=304, headers={"ETag": resp.headers["ETag"], "Retry-After": resp.headers["Retry-After"]}
             )
-        return resp
-    return resp.make_conditional(request)
+    else:
+        resp = resp.make_conditional(request)
+        if resp.status_code != HTTPStatus.OK:  # a 304 needs no frame
+            return resp
+    # Only now the 48 KB: a screen that has the picture already never costs reading the record's.
+    frame = shown.frame if shown is row else frame_record.frame_of(device_id, shown.etag)
+    if frame is None:
+        # The record went, or changed, since its etag was read: answer as if there had been none.
+        return _frame_response(device_id, use_record=False)
+    resp.set_data(frame)
+    return resp

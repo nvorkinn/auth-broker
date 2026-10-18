@@ -1003,6 +1003,39 @@ docker exec redis sh -c 'REDISCLI_AUTH="$REDIS_PASSWORD" redis-cli -h 127.0.0.1 
 
 lists one key per paired screen.
 
+## Frames in the store
+
+pi-dashboard's renderers hand each screen's frame over through Redis as well as `PUT /api/frame`: each new picture
+goes to the screen's record, `v1:frame:<device id>` (pi-dashboard's `store/frame_record.py`), and the broker serves
+the screen from it (`broker/services/frame_record.py`). It's one latest value per screen, like the providers' keys:
+
+- **The record** is a hash: `frame`, the 48,000 raw bytes (read with `app.extensions["redis_bytes"]`, a client that
+  doesn't decode values); `etag`, the frame's BLAKE2b in hex, the same ETag as the database's copy; `rendered_at`,
+  when the renderer first wrote the picture. `tests/fixtures/frame_record.json` (with `frame_record.bin`) pins it;
+  pi-dashboard's tests read the same files, so change both together.
+- **Served** to the screen, and on the config page's preview and its "Drawn" time, when it's there and newer than the
+  `frames` row, or holds the same picture; the row otherwise (no record, one that can't be read, or a newer row with
+  another picture: a renderer that only PUTs). A screen with the picture already gets its 304 from `etag` without the
+  48 KB being read. The ETag, `Retry-After` and 304s are as before, whichever is served, so the firmware sees nothing
+  new.
+- **TTL a day** from the picture's last change, set by the renderer, so `volatile-lru` can evict it; the row is
+  served meanwhile, and the renderer writes it again on its next cycle. The broker deletes a device's record with its
+  row (`flask devices forget`, `unpair --config`).
+- If Redis can't be asked, the screen is served the row and the log says "Couldn't read a screen's frame from Redis",
+  with the error's type.
+
+Either side can be deployed first: renderers that don't write records leave the row served, and a broker that
+doesn't read them never sees them. To check, on the host, once both are deployed:
+
+```sh
+docker exec redis sh -c 'REDISCLI_AUTH="$REDIS_PASSWORD" redis-cli -h 127.0.0.1 --scan --pattern "v1:frame:*"'
+docker exec redis sh -c 'REDISCLI_AUTH="$REDIS_PASSWORD" redis-cli -h 127.0.0.1 HMGET v1:frame:<device id> etag rendered_at'
+docker exec redis sh -c 'REDISCLI_AUTH="$REDIS_PASSWORD" redis-cli -h 127.0.0.1 TTL v1:frame:<device id>'
+```
+
+lists one key per screen with a running renderer, each with a TTL under a day; a record's `rendered_at` is the
+"Drawn" time on its screen's page.
+
 ## Developer in the store
 
 `broker/developer_provider.py` is the developer provider, run from the broker's image like the music one. For as long

@@ -24,7 +24,7 @@ from .clients import weather as weather_client
 from .db import db
 from .models import Device, DeviceConfig
 from .routes.pages import _write_subscriptions_to_redis
-from .services import assignments, config_store, pairing, weather_place
+from .services import assignments, config_store, frame_record, pairing, weather_place
 
 devices = AppGroup("devices", help="Manual device admin for development.")
 weather = AppGroup("weather", help="The screens' weather places.")
@@ -120,6 +120,9 @@ def unpair(device_id: str, *, wipe_config: bool) -> None:
         device.apple_music_plays = []
         device.frame = None
     db.session.commit()
+    if wipe_config:
+        # The renderer's copy of the frame too, so the next owner never sees the last one's screen.
+        frame_record.forget(device_id)
     # An unpaired device has no config in the store, so its renderer asks the broker, which gives it a code.
     config_store.publish(device_id)
     click.echo(f"{device_id} is unpaired; it will show a new pairing code on its next poll.")
@@ -135,6 +138,7 @@ def forget(device_id: str) -> None:
     # The relationships cascade, so the device's codes, config, tokens and frame go with it.
     db.session.delete(device)
     db.session.commit()
+    frame_record.forget(device_id)  # and the frame the renderer keeps in Redis
     config_store.publish(device_id)
     click.echo(f"{device_id} forgotten; delete its credentials file so it registers again.")
 
