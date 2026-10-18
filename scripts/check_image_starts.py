@@ -12,8 +12,8 @@ error level. There's no Redis: what they write is lost and logged, as on a host 
 So a service that can't start fails the job, as v1.34.0's broker would have: gunicorn refused gunicorn.conf.py
 ("Invalid value for post_worker_init"), and nothing else in CI ran gunicorn.
 
-Standard library only, as it runs on the CI runner's own Python (3.12 on ubuntu-latest, which evaluates annotations
-as it defines a function, so none here may name a TYPE_CHECKING import); the image reads docker-compose.yml for it.
+Standard library only, as it runs on the CI runner's own Python: 3.12 on Ubuntu 24.04, which evaluates annotations as
+it defines a function, so none here may name a TYPE_CHECKING import. The image reads docker-compose.yml for it.
 """
 
 import base64
