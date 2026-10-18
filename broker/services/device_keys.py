@@ -8,13 +8,16 @@ The providers write each device's data under keys of its own (pi-dashboard's sto
     v1:developer:<device id>      the developer provider's GitHub summary and AI plans (15 min)
     v1:pace:developer:<device id> its faster-refresh hint, while a release runs (1 min)
 
-Two other keys are the device's, and are looked after where they're written:
+Three other keys are the device's, and are looked after where they're written:
 
 - `v1:config:<device id>` is config_store's: publish() removes it for a device that's unpaired or gone;
 - `v1:frame:<device id>`, the screen's latest picture, follows the frames table's row (services/frame_record.py):
   frame_record.forget() deletes it wherever the row is deleted (a device forgotten, or unpaired with its config).
   Where the row stays, deleting the record would only have the broker serve the row's copy of the same picture,
-  until the renderer, nudged by the config's change, draws the next.
+  until the renderer, nudged by the config's change, draws the next;
+- `v1:pairing:<device id>`, its live pairing code, is services/pairing_key.py's: it lapses with the code, goes when
+  the code is used or the device paired, and forget() deletes it too (a device unpaired, handed on or gone has no code
+  left: its codes go with the change).
 
 Left alone, each key lasts until its TTL, so an account unlinked, or a screen handed to someone else, could still show
 the old account's data until then. So whenever the broker removes or replaces an account it deletes the keys made from
@@ -30,6 +33,8 @@ import logging
 
 from flask import current_app
 from redis import Redis, RedisError
+
+from broker.services import pairing_key
 
 logger = logging.getLogger(__name__)
 
@@ -62,5 +67,5 @@ def delete(keys: list[str]) -> None:
 
 
 def forget(device_id: str) -> None:
-    """Delete every key the providers write for the device: for one unpaired, handed to another owner, or gone."""
-    delete(energy(device_id) + music(device_id) + developer(device_id))
+    """Delete the providers' keys for the device, and its pairing code's: for one unpaired, handed on or gone."""
+    delete([*energy(device_id), *music(device_id), *developer(device_id), pairing_key.key(device_id)])

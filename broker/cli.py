@@ -24,7 +24,7 @@ from .clients import weather as weather_client
 from .db import db
 from .models import Device, DeviceConfig
 from .routes.pages import _write_subscriptions_to_redis
-from .services import assignments, config_store, device_keys, frame_record, pairing, weather_place
+from .services import assignments, config_store, device_keys, frame_record, pairing, pairing_key, weather_place
 
 devices = AppGroup("devices", help="Manual device admin for development.")
 weather = AppGroup("weather", help="The screens' weather places.")
@@ -94,10 +94,14 @@ def owner(device_id: str, user: str) -> None:
     device.owner = user
     if device.paired_at is None:
         device.paired_at = datetime.now(UTC)
+    # It has its owner, so no code to show (as pairing does).
+    device.pairing_codes.clear()
     db.session.commit()
     if previous != user:
-        # Nothing the store has from before is the new owner's to see.
+        # Nothing the store has from before is the new owner's to see (its pairing code's key included).
         device_keys.forget(device_id)
+    else:
+        pairing_key.delete(device_id)
     config_store.publish(device_id)
     click.echo(f"{device_id} now belongs to {user}.")
 

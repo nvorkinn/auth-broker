@@ -18,7 +18,7 @@ from sqlalchemy import delete, or_, select
 
 from broker.db import db
 from broker.models import Device, PairingCode
-from broker.services import device_keys
+from broker.services import device_keys, pairing_key
 
 # Excludes visually ambiguous characters (0/O, 1/I/L) since this gets typed in by hand.
 CODE_ALPHABET = "".join(c for c in string.ascii_uppercase + string.digits if c not in "0O1IL")
@@ -49,12 +49,17 @@ def pair_by_token(user: str, token: str) -> str:
         return "taken"
     previous = _pair(device, user)
     db.session.commit()
-    _forget_the_last_owners_data(device.device_id, previous, user)
+    _after_pairing(device.device_id, previous, user)
     return "paired"
 
 
 def _pair(device: Device, user: str) -> str | None:
-    """Make `user` the device's owner (not committed); return the owner it had."""
+    """Make `user` the device's owner and drop its codes (not committed); return the owner it had.
+
+    A code is only for handing the device to an owner, so once it has one there's none left to show: without this a
+    code issued before pairing by token stayed on the screen until it expired.
+    """
+    db.session.execute(delete(PairingCode).where(PairingCode.device_id == device.device_id))
     previous = device.owner
     device.owner = user
     if device.paired_at is None:
@@ -62,13 +67,16 @@ def _pair(device: Device, user: str) -> str | None:
     return previous
 
 
-def _forget_the_last_owners_data(device_id: str, previous: str | None, user: str) -> None:
-    """After the commit: if the device had no owner or someone else, delete what the store has from before.
+def _after_pairing(device_id: str, previous: str | None, user: str) -> None:
+    """After the commit: take the device's code out of the store, and what it has from before a change of owner.
 
-    So nothing written for its last owner (or before it was unpaired) shows on the new owner's screen.
+    So nothing written for its last owner (or before it was unpaired) shows on the new owner's screen, and a pooled
+    screen stops showing its code.
     """
     if previous != user:
-        device_keys.forget(device_id)
+        device_keys.forget(device_id)  # its pairing key too
+    else:
+        pairing_key.delete(device_id)
 
 
 def issue_code(device_id: str) -> str:
@@ -84,6 +92,8 @@ def issue_code(device_id: str) -> str:
     expires_at = now + CODE_TTL
     db.session.add(PairingCode(code=code, device_id=device_id, expires_at=expires_at))
     db.session.commit()
+    # For a screen the pool draws, which reads only the store; over the key of any code this one replaces.
+    pairing_key.write(device_id, code, expires_at)
     return code
 
 
@@ -114,8 +124,9 @@ def redeem_code(code: str, user: str) -> str | None:
         return None
 
     device_id = pairing_code.device_id
+    # By itself first, so a second redeem of the same code racing this one fails at the commit rather than pairing too.
     db.session.delete(pairing_code)
-    previous = _pair(db.session.get(Device, device_id), user)
+    previous = _pair(db.session.get(Device, device_id), user)  # and the device's other codes
     db.session.commit()
-    _forget_the_last_owners_data(device_id, previous, user)
+    _after_pairing(device_id, previous, user)
     return device_id
