@@ -570,7 +570,9 @@ The same workflow builds each image. The broker's is then started the way
 `docker-compose.yml` runs it, broker and providers, which have to start and
 stop cleanly (`scripts/check_image_starts.py`, which also runs on any Linux
 Docker host after `docker build -t auth-broker-broker .`: the services use
-host networking, as on the server).
+host networking, as on the server). VictoriaMetrics' is started with its own
+command and must serve the [vmui dashboards](#dashboards) and parse every query
+in them (`scripts/check_vmui_dashboards.py`).
 
 ## Reusable PR workflows
 
@@ -973,6 +975,42 @@ the logs site: the push endpoints (`/api/v1/write`, `/api/v1/import/*`,
 token as logs, and everything else (the UI at `/vmui` and the query API)
 needs the Authentik admin login. The `deploy-config` job deploys it, pinning
 `VICTORIA_METRICS_VERSION` in `.env`.
+
+#### Dashboards
+
+vmui's Dashboards tab (`https://metrics.nikolaivorkinn.com/vmui/`, then
+Dashboards) shows the JSON files in `victoria-metrics/dashboards/`, baked into
+the image and read with `-vmui.customDashboardsPath` each time the page loads
+(the format is vmui's own, "Predefined dashboards" in its README). There's no
+Grafana: it was taken back out. **Screens** has:
+
+- **Each screen**: `countdown.problem`, the APIs in error (`countdown.api.status`)
+  and `countdown.stage`, by the `device` label (the slug), which the render pool
+  sets and, from pi-dashboard #225, a screen's own renderer container too, so a
+  screen looks the same either way. Beside it, the same gauge from an own
+  container that doesn't set `device` yet. A series that doesn't exist draws
+  nothing.
+- **Render pool** (pi-dashboard's `countdown_server/pool_metrics.py`): the time
+  since each screen's last good frame (`countdown.render.last_success`, the
+  highest across workers), failed renders by screen, renders by `outcome`,
+  render time p50/p95 (`countdown.render.duration`), queue wait p50/p95
+  (`countdown.render.lag`), jobs queued, and the panels drawn "Not available"
+  (`countdown.render.expired_panels`).
+
+The names are the OpenTelemetry ones, dots and all: Fluent Bit's OTLP input
+passes them to VictoriaMetrics unchanged, with no unit suffix and no `_total`
+(a histogram is `<name>_bucket`, `_sum` and `_count`). Data point attributes
+(`device`, `outcome`, `panel`, `api`, `status`, `stage`) become labels. The
+resource's attributes (`host.name`, `service.name`) are not labels: Fluent Bit
+keeps them as metadata that remote write doesn't send. That's why pi-dashboard
+puts the screen (`device`) and the pool's worker (`worker`) on the data points.
+An own container from before that has no screen label: its gauges share one
+series, "own containers, screen not known" (the panels would group them by a
+`host.name` or `host_name` label, were there one). The pool's queries sum
+across workers, so `worker` changes nothing in them, but until it's there the
+two workers' counters share one series and their rates read high. To change a
+dashboard, edit its JSON and try every query in vmui's query tab first;
+`tests/test_vmui_dashboards.py` pins the shape.
 
 ### Redis
 
