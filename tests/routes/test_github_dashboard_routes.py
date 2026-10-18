@@ -55,13 +55,15 @@ def test_release_requires_csrf(client, dashboard, headers):
 
 
 def test_release_rechecks_owner_and_publishes(client, dashboard):
-    dashboard.owned_repository.return_value = {"full_name": "alice/project"}
+    repo = {"full_name": "alice/project", "html_url": "https://github.com/alice/project"}
+    dashboard.owned_repository.return_value = repo
     dashboard.publish_release.return_value = {"tag_name": "v1.20.0", "html_url": "https://github.com/release"}
     response = client.post("/github/repositories/alice/project/release", headers=csrf(client))
     assert response.status_code == 201
     assert response.json["tag"] == "v1.20.0"
+    assert response.json["url"] == "https://github.com/alice/project/actions?query=branch%3Av1.20.0"
     dashboard.owned_repository.assert_called_once_with("alice", "project")
-    dashboard.publish_release.assert_called_once_with({"full_name": "alice/project"})
+    dashboard.publish_release.assert_called_once_with(repo)
 
 
 def test_rate_limit_is_explicit_and_preserves_backoff(client, dashboard):
@@ -100,3 +102,58 @@ def test_dashboard_returns_public_message_not_exception_diagnostics(client, dash
     assert response.json == {"error": "The workflow file could not be parsed."}
     assert "private-workflow-content" not in response.get_data(as_text=True)
     assert "private-workflow-content" in caplog.text
+
+
+def test_approve_requires_login_personal_identity_and_csrf(client, anonymous_client, dashboard):
+    path = "/github/repositories/alice/project/runs/4/approve"
+    assert anonymous_client.post(path, json={"environment_id": 10}).status_code == 401
+    assert client.post(path, headers={"X-Authentik-Uid": "other"}, json={"environment_id": 10}).status_code == 403
+    assert client.post(path, json={"environment_id": 10}).status_code == 403
+    dashboard.approve_deployment.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "payload", [None, [], {}, {"environment_id": True}, {"environment_id": -1}, {"environment_id": "10"}]
+)
+def test_approve_validates_environment_id(client, dashboard, payload):
+    response = client.post("/github/repositories/alice/project/runs/4/approve", json=payload, headers=csrf(client))
+    assert response.status_code == 400
+    dashboard.approve_deployment.assert_not_called()
+
+
+@pytest.mark.parametrize("run_id", ["0", "-1", "abc"])
+def test_approve_validates_run_id(client, dashboard, run_id):
+    response = client.post(
+        f"/github/repositories/alice/project/runs/{run_id}/approve",
+        json={"environment_id": 10},
+        headers=csrf(client),
+    )
+    assert response.status_code == 400
+    dashboard.approve_deployment.assert_not_called()
+
+
+def test_approve_rechecks_ownership_and_calls_github(client, dashboard):
+    repo = {"full_name": "alice/project"}
+    dashboard.owned_repository.return_value = repo
+    response = client.post(
+        "/github/repositories/alice/project/runs/4/approve",
+        json={"environment_id": 10},
+        headers=csrf(client),
+    )
+    assert response.status_code == 200
+    assert response.json == {"approved": True}
+    dashboard.owned_repository.assert_called_once_with("alice", "project")
+    dashboard.approve_deployment.assert_called_once_with(repo, 4, 10)
+    dashboard.close.assert_called_once()
+
+
+def test_approval_timeout_has_action_specific_warning(client, dashboard):
+    dashboard.approve_deployment.side_effect = requests.Timeout()
+    response = client.post(
+        "/github/repositories/alice/project/runs/4/approve",
+        json={"environment_id": 10},
+        headers=csrf(client),
+    )
+    assert response.status_code == 502
+    assert "action may have succeeded" in response.json["error"]
+    assert "GitHub Actions" in response.json["error"]

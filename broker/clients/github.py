@@ -413,6 +413,7 @@ class Dashboard:
             "branch": run["head_branch"],
             "status": run["status"],
             "url": run["html_url"],
+            "pending_deployments": self.pending_deployments(repo, run["id"]),
             "nodes": workflow_graph.nodes(definitions, jobs),
             "jobs": [
                 {
@@ -429,6 +430,42 @@ class Dashboard:
             ],
         }
 
+    def pending_deployments(self, repo: dict, run_id: int) -> list[dict]:
+        """Return approval gates and whether the PAT's user is allowed to release each gate."""
+        return [
+            {
+                "id": deployment["environment"]["id"],
+                "name": deployment["environment"]["name"],
+                "can_approve": deployment["current_user_can_approve"],
+                "wait_timer": deployment["wait_timer"],
+            }
+            for deployment in self.pages(f"/repos/{repo['full_name']}/actions/runs/{run_id}/pending_deployments")
+        ]
+
+    def approve_deployment(self, repo: dict, run_id: int, environment_id: int) -> None:
+        """Recheck the release run and reviewer eligibility, then approve only the requested environment."""
+        path = f"/repos/{repo['full_name']}/actions/runs/{run_id}"
+        run = self.get(path)
+        if run["status"] == "completed" or "release" not in (run["name"] or "").casefold():
+            msg = "Only unfinished release workflows can be approved from this dashboard."
+            raise DashboardError(msg)
+        pending = self.pending_deployments(repo, run_id)
+        deployment = next((item for item in pending if item["id"] == environment_id), None)
+        if deployment is None:
+            msg = "This deployment is no longer waiting for approval. Refresh the dashboard."
+            raise DashboardError(msg)
+        if not deployment["can_approve"]:
+            msg = "Your GitHub account cannot approve this environment. Check its required-reviewer rules."
+            raise DashboardError(msg)
+        self.post(
+            f"{path}/pending_deployments",
+            {
+                "environment_ids": [environment_id],
+                "state": "approved",
+                "comment": "Approved from the personal GitHub dashboard.",
+            },
+        )
+
     def publish_release(self, repo: dict) -> dict:
         """Generate notes and immediately publish the next minor release on the default branch."""
         path = f"/repos/{repo['full_name']}"
@@ -443,7 +480,7 @@ class Dashboard:
         payload = {"tag_name": tag, "target_commitish": repo["default_branch"]}
         if previous:
             payload["previous_tag_name"] = previous
-        notes = self.post(f"{path}/releases/generate-notes", payload)
+        notes = self.post(f"{path}/releases/generate-notes", payload).json()
         return self.post(
             f"{path}/releases",
             {
@@ -454,13 +491,13 @@ class Dashboard:
                 "draft": False,
                 "prerelease": False,
             },
-        )
+        ).json()
 
-    def post(self, path: str, payload: dict) -> dict:
-        """Send a GitHub write, never retrying a potentially completed release creation."""
+    def post(self, path: str, payload: dict) -> requests.Response:
+        """Send a GitHub write, never retrying a potentially completed action."""
         response = self.session.post(f"{API_URL}{path}", json=payload, timeout=TIMEOUT)
         response.raise_for_status()
-        return response.json()
+        return response
 
 
 SEMVER = re.compile(

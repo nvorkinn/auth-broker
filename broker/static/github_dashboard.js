@@ -50,7 +50,7 @@ async function api(path, options = {}) {
         throw new Error("GitHub rate limit reached. Waiting before the next request.");
     }
     const response = await fetch(path, {
-        ...options, credentials: "same-origin", headers: { "X-CSRF-Token": csrf },
+        ...options, credentials: "same-origin", headers: { "X-CSRF-Token": csrf, "Content-Type": "application/json" },
     });
     if (!response.headers.get("content-type")?.includes("application/json")) {
         throw new Error("Your SSO session may have expired. Reload the dashboard to sign in.");
@@ -195,6 +195,26 @@ function renderWorkflow(run, project) {
     if (project.errorText) heading.append(badge("Stale data", "failed"));
     section.append(element("p", `${project.repo.full_name} · ${run.branch}`, "repo-label"),
         heading, renderGraph(run.nodes));
+    for (const deployment of run.pending_deployments || []) {
+        const key = `${run.id}:${run.attempt}:${deployment.id}`;
+        const state = project.approvals.get(key);
+        const controls = element("div", undefined, "deployment-controls");
+        const button = element("button", state?.busy ? "Approving..." : state?.approved
+            ? "Approved" : `Approve ${deployment.name}`);
+        button.type = "button";
+        button.disabled = !deployment.can_approve || !!state?.busy || !!state?.approved;
+        button.addEventListener("click", () => approveDeployment(project, run, deployment));
+        controls.append(button);
+        if (!deployment.can_approve) {
+            controls.append(element("span", `Required reviewer approval${deployment.wait_timer ? ` · ${deployment.wait_timer}-minute wait timer` : ""}`, "muted"));
+        }
+        if (state?.message) {
+            const message = element("span", state.message, state.approved ? "done" : "error");
+            message.setAttribute("role", state.approved ? "status" : "alert");
+            controls.append(message);
+        }
+        section.append(controls);
+    }
     const details = element("details");
     details.dataset.detailKey = `jobs:${project.repo.full_name}:${run.id}`;
     details.append(element("summary", `All jobs and steps · attempt ${run.attempt}`));
@@ -258,6 +278,10 @@ async function refreshProject(project) {
         project.errorText = "";
         project.error.hidden = true;
         project.active = data.active;
+        if (project.publishedTag) {
+            const run = data.workflows.find(run => run.branch === project.publishedTag);
+            if (run) project.result.replaceChildren(link(`Published ${project.publishedTag} — view workflow`, run.url));
+        }
         project.card.title = `${project.repo.description || project.repo.full_name} · Updated ${new Date().toLocaleTimeString()}`;
     } catch (error) {
         project.error.textContent = error.message;
@@ -272,19 +296,43 @@ async function refreshProject(project) {
 }
 
 async function publish(project, button) {
+    if (project.publishing) return;
+    project.publishing = true;
+    project.publishedTag = null;
     button.disabled = true;
     project.result.replaceChildren(element("span", "Generating notes and publishing..."));
     try {
         const data = await api(`${projectPath(project.repo.full_name)}/release`, { method: "POST" });
-        project.result.replaceChildren(link(`Published ${data.tag} — view release`, data.url));
-        // A subsequent click must be an intentional reload, not a duplicate publication.
-        button.textContent = "Release published";
+        project.publishedTag = data.tag;
+        project.result.replaceChildren(link(`Published ${data.tag} — view workflow`, data.url));
         project.active = true;
         project.nextRefresh = Date.now() + 10000;
     } catch (error) {
         project.result.replaceChildren(element("span",
-            `${error.message} Check releases on GitHub before reloading to try again.`, "error"));
-        button.textContent = "Check GitHub releases";
+            `${error.message} Check GitHub Actions and releases before trying again.`, "error"));
+    } finally {
+        project.publishing = false;
+        button.disabled = false;
+        button.textContent = "New Release";
+    }
+}
+
+async function approveDeployment(project, run, deployment) {
+    const key = `${run.id}:${run.attempt}:${deployment.id}`;
+    if (project.approvals.get(key)?.busy || project.approvals.get(key)?.approved) return;
+    project.approvals.set(key, { busy: true });
+    renderProject(project);
+    try {
+        await api(`${projectPath(project.repo.full_name)}/runs/${run.id}/approve`, {
+            method: "POST", body: JSON.stringify({ environment_id: deployment.id }),
+        });
+        project.approvals.set(key, { approved: true, message: "Deployment approved." });
+    } catch (error) {
+        project.approvals.set(key, { message: `${error.message} Refresh to check deployment status before retrying.` });
+    } finally {
+        project.active = true;
+        project.nextRefresh = 0;
+        renderProject(project);
     }
 }
 
@@ -307,7 +355,7 @@ function addProject(repo) {
     card.append(heading, result, error);
     document.getElementById("projects").append(card);
     const project = { repo, card, error, result, data: null, pullRows: [], workflowRows: [],
-        errorText: "", active: true, loading: false, nextRefresh: 0 };
+        errorText: "", active: true, loading: false, nextRefresh: 0, approvals: new Map(), publishing: false };
     button.addEventListener("click", () => publish(project, button));
     projects.set(repo.full_name, project);
 }
