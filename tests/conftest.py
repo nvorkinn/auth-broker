@@ -67,7 +67,10 @@ def app(tmp_path, monkeypatch, migrated_db):
 
 
 class FakeRedis:
-    """Just enough of Redis to see what a config save writes: sets, strings (the configs), and what was published."""
+    """Just enough of Redis to see what a config save writes: sets, strings (configs, pairing keys), what's published.
+
+    A TTL is ignored.
+    """
 
     def __init__(self):
         self.sets: dict[str, set[str]] = {}
@@ -90,6 +93,16 @@ class FakeRedis:
     def mget(self, keys):
         self._check()
         return [self.strings.get(key) for key in keys]
+
+    def set(self, key, value, **_expiry):
+        self._check()
+        self.strings[key] = value
+
+    def delete(self, *keys):
+        self._check()
+        for key in keys:
+            self.sets.pop(key, None)
+            self.strings.pop(key, None)
 
     def scan_iter(self, match, count=None):  # noqa: ARG002
         self._check()

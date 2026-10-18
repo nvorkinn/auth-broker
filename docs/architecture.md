@@ -521,9 +521,15 @@ sequenceDiagram
   `GET /api/config`, which gives (and, while unpaired, issues) the code. Redeeming the code writes the key back and
   nudges. A code that lapses unused leaves the renderer on `GET /api/config` (which then has no code) until the next
   rebuild: any config save, a restart, or `flask config publish`.
-- **No TTL**, as it's rebuilt from the database. `maxmemory-policy volatile-lru` evicts only keys with a TTL, so these
-  are never evicted, and they count against `maxmemory 128mb` for good: about 700 bytes of JSON each, about 1 KB with
-  Redis's own overhead, so a thousand screens take about 1 MB.
+- **The live code, for the render pool.** Which reads only the store, so while a code is live the broker also keeps
+  `v1:pairing:<device id>` (`services/pairing_key.py`): `GET /api/config`'s answer *with* the code, its TTL the code's
+  own expiry (ten minutes). Written whenever a code is issued, over the last one's; deleted when the code is used, the
+  device is paired by token or given an owner (both drop its codes), unpaired or forgotten. Plaintext, by decision:
+  any Redis reader on the host can see a live code (pi-dashboard's `docs/stateless-renderers.md`, "The pairing
+  screen"). `tests/fixtures/pairing_key.json` pins the shape. Redis down never stops a code being issued or used.
+- **No TTL** on the configs, as they're rebuilt from the database. `maxmemory-policy volatile-lru` evicts only keys
+  with a TTL, so these are never evicted, and they count against `maxmemory 128mb` for good: about 700 bytes of JSON
+  each, about 1 KB with Redis's own overhead, so a thousand screens take about 1 MB.
 - **When Redis can't be written** during a save, the save still succeeds, the broker logs "Couldn't write the
   screens' configs to Redis", and a renderer keeps reading the copy that was there (or asks the broker, with none)
   until the next rebuild; `flask config publish` puts it right. Redis restarting loses the keys (it keeps nothing on
