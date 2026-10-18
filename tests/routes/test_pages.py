@@ -790,6 +790,13 @@ def test_saving_the_config_subscribes_a_device_with_the_developer_panel_on(paire
     assert _subscriptions(fake_redis) == {"developer": {device_id}}
 
 
+def test_saving_the_config_subscribes_the_notice_boards_postcode_in_canonical_form(paired_client, fake_redis):
+    client, _, _ = paired_client
+    client.post("/device", data={"interval": "15", "postcode": "sw1a1aa"})
+
+    assert _subscriptions(fake_redis) == {"postcode": {"SW1A 1AA"}}
+
+
 def test_saving_the_config_subscribes_a_device_with_a_glowmarkt_password_to_glow(paired_client, fake_redis):
     client, device_id, _ = paired_client
     client.post(
