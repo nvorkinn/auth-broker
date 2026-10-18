@@ -338,7 +338,7 @@ class Dashboard:
         return repo
 
     def project(self, repo: dict) -> dict:
-        """Return every open PR and every unfinished workflow, without a recency cutoff."""
+        """Return every open PR and unfinished release workflow, without a recency cutoff."""
         path = f"/repos/{repo['full_name']}"
         pulls = [self.pull(path, pr["number"]) for pr in self.pages(f"{path}/pulls", state="open")]
         # Query each unfinished status: a first page of recent runs would hide old approval waits.
@@ -346,11 +346,12 @@ class Dashboard:
         for status in ("queued", "in_progress", "waiting", "requested", "pending"):
             for run in self.pages(f"{path}/actions/runs", "workflow_runs", status=status):
                 runs[run["id"]] = run
-        workflows = [self.workflow(repo, run) for run in runs.values() if run["status"] != "completed"]
+        ongoing = [run for run in runs.values() if run["status"] != "completed"]
+        workflows = [self.workflow(repo, run) for run in ongoing if "release" in run["name"].casefold()]
         return {
             "pulls": pulls,
             "workflows": workflows,
-            "active": bool(workflows) or any(pr["refresh"] for pr in pulls),
+            "active": bool(ongoing) or any(pr["refresh"] for pr in pulls),
         }
 
     def pull(self, path: str, number: int) -> dict:

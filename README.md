@@ -43,8 +43,14 @@ implicit. Organization-owned repositories are intentionally excluded: discovery 
 non-archived repository **owned by the token's user**, not just recently active projects. All result
 lists are paginated. Repository permission or PAT expiry failures are displayed explicitly.
 
-Each project shows all open PRs, individual check results (Checks API and legacy commit statuses),
-remaining pending checks and merge conflicts. Unknown mergeability is labelled as such, not as clear.
+All open PRs appear in one compact, cross-project list, with repository labels and conflicts or
+failed checks first. Pending and failed checks stay visible; completed checks expand inline.
+The Checks API and legacy commit statuses are both included. Unknown mergeability is labelled
+as such, not as clear. On wide screens the combined workflow diagrams and compact per-project
+release controls sit alongside the PR list, using the full viewport width. Diagrams fit their
+panel without horizontal scrolling; job and step details expand inline. Narrow screens reflow
+the panels without hiding PRs or workflows. Refresh failures retain the previous results with
+explicit stale-data labels instead of silently dropping a project's activity.
 Projects with pending checks, unknown mergeability or unfinished workflows refresh automatically every
 10 seconds after the previous fetch; idle projects and repository discovery refresh every minute.
 Requests are limited to three projects at once, stop in hidden tabs, and respect GitHub rate-limit
@@ -53,8 +59,10 @@ responses do not consume GitHub's primary rate limit. Cached data is scoped to t
 after an hour; it is never returned without revalidation. With many active repositories, fetching
 can take longer than the refresh interval.
 
-Actions includes every queued, requested, pending, running and **waiting-for-approval** run, with no
-age cutoff. The dependency diagram uses the workflow YAML **at the run's commit** so jobs that have
+The right-hand panel includes only **release workflows** (a case-insensitive `release` match in the
+workflow name), including queued, requested, pending, running and **waiting-for-approval** runs,
+with no age cutoff. Other CI workflows still keep active projects on the fast refresh cadence,
+but are not drawn in this panel. The dependency diagram uses the workflow YAML **at the run's commit** so jobs that have
 not started are present too. Nodes distinguish done, running, waiting for approval, not started,
 failed and skipped. Matrix and reusable-workflow jobs are grouped into their parent stage, with
 completion counts; expand **All jobs and steps** for every runtime job and step from the current
@@ -817,7 +825,8 @@ fields itself, as one JSON object per line (stream fields are `service,host`):
 | `_time` | When Docker saw the line. A screen has no clock, so the broker dates its lines by their uptime relative to the newest in the report |
 
 The broker's JSON comes from `gunicorn.conf.py` and `broker/log_format.py` (the access log has the
-method, path without query string, status, bytes and duration as fields). The renderers and orchestrator
+method, path without query string, status, bytes and duration as fields); a `flask` command writes the
+same lines to stderr, as its stdout is its output. The renderers and orchestrator
 use `countdown_core.core.log_format` and `countdown_orchestrator.log_format` in the pi-dashboard repo; a
 renderer's lines also carry `device` (its name). Screens' logs are posted by the broker straight to
 VictoriaLogs, tagged `service=countdown-esp32` and `host=<device id>`; `VICTORIA_LOGS_URL` overrides the
