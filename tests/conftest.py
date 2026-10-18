@@ -2,6 +2,7 @@ import fnmatch
 import secrets
 import shutil
 
+import fakeredis
 import pytest
 import redis
 from cryptography.fernet import Fernet
@@ -53,6 +54,9 @@ def app(tmp_path, monkeypatch, migrated_db):
     application = create_app()
     application.config.update(TESTING=True)
     application.extensions["redis"] = FakeRedis()
+    # The frames' client (services/frame_record.py): an empty Redis, so a frame is the database's unless a test puts
+    # a record there (see frames_redis in tests/routes/test_frame_record.py).
+    application.extensions["redis_bytes"] = fakeredis.FakeRedis()
     # Tests register far more devices a minute than the real limit allows; the throttle's own
     # tests put the real one back (see register_throttle).
     application.extensions["register_throttle"] = PairThrottle(max_events=10_000)
