@@ -83,8 +83,9 @@ def _write_subscriptions_to_redis() -> None:
                     pipe.sadd(key, *members)
             pipe.publish("v1:sub:changed", "")
             pipe.execute()
-    except RedisError:
-        current_app.logger.warning("Couldn't publish subscriptions to Redis", exc_info=True)
+    except RedisError as e:
+        # The error's type only: a failed pipeline's text quotes its commands, and SADD v1:sub:postcode's has postcodes.
+        current_app.logger.warning("Couldn't publish subscriptions to Redis (%s)", type(e).__name__)
 
 
 @bp.app_context_processor
