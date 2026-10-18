@@ -1,5 +1,5 @@
 {
-  "about": "A screen's config in the store: the key auth-broker writes it under, the channel it publishes the device id on after changing it, and the value, exactly the JSON GET /api/config answers that device (the countdown API contract's ConfigResponse) less its secrets: the weather API key sent empty and no pairing code. `settings` is the device's settings in auth-broker's database, which its tests make the value from; pi-dashboard's renderer reads the value with the same ConfigResponse model. Both repositories' tests read this file (tests/fixtures/config_store.json in auth-broker, countdown/tests/fixtures/config_store.json in pi-dashboard): change both together.",
+  "about": "A screen's config in the store: the key auth-broker writes it under, the channel it publishes the device id on after changing it, and the value, exactly the JSON GET /api/config answers that device (the countdown API contract's ConfigResponse) less its pairing code, which is null. It carries no key of any kind. `settings` is the device's settings in auth-broker's database, which its tests make the value from; pi-dashboard's renderer reads the value with the same ConfigResponse model. Both repositories' tests read this file (tests/fixtures/config_store.json in auth-broker, countdown/tests/fixtures/config_store.json in pi-dashboard): change both together.",
   "device_id": "a1b2c3d4e5f6",
   "key": "v1:config:a1b2c3d4e5f6",
   "channel": "v1:config:changed",
@@ -44,7 +44,6 @@
       "height": 800
     },
     "weather": {
-      "api_key": "",
       "location": "London",
       "key": "london-gb-2643743"
     },
