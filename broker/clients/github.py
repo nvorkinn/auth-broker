@@ -20,6 +20,8 @@ from redis import RedisError
 from broker.clients import workflow_graph
 
 if TYPE_CHECKING:
+    from collections.abc import Iterable
+
     from redis import Redis
 
 logger = logging.getLogger(__name__)
@@ -337,14 +339,19 @@ class Dashboard:
             raise DashboardError(msg)
         return repo
 
-    def project(self, repo: dict) -> dict:
+    def project(self, repo: dict, known: Iterable[int] = ()) -> dict:
         """Return every open PR and unfinished release workflow, without a recency cutoff."""
         path = f"/repos/{repo['full_name']}"
         pulls = [self.pull(path, pr["number"]) for pr in self.pages(f"{path}/pulls", state="open")]
         # Query each unfinished status: a first page of recent runs would hide old approval waits.
+        # Lifecycle order, so a run that moves on during the sweep (say, just approved) is found by a later query.
         runs = {}
-        for status in ("queued", "in_progress", "waiting", "requested", "pending"):
+        for status in ("requested", "pending", "waiting", "queued", "in_progress"):
             for run in self.pages(f"{path}/actions/runs", "workflow_runs", status=status):
+                runs[run["id"]] = run
+        # The status filters can briefly lag a state change, so look up runs the dashboard showed last time directly.
+        for run_id in known:
+            if run_id not in runs and (run := self.run(path, run_id)):
                 runs[run["id"]] = run
         ongoing = [run for run in runs.values() if run["status"] != "completed"]
         workflows = [self.workflow(repo, run) for run in ongoing if "release" in run["name"].casefold()]
@@ -353,6 +360,15 @@ class Dashboard:
             "workflows": workflows,
             "active": bool(ongoing) or any(pr["refresh"] for pr in pulls),
         }
+
+    def run(self, path: str, run_id: int) -> dict | None:
+        """Read one workflow run, or None when it has been deleted."""
+        try:
+            return self.get(f"{path}/actions/runs/{run_id}")
+        except requests.HTTPError as error:
+            if error.response is not None and error.response.status_code == HTTPStatus.NOT_FOUND:
+                return None
+            raise
 
     def pull(self, path: str, number: int) -> dict:
         """Read mergeability and both Checks API and legacy commit-status checks for the exact PR head."""

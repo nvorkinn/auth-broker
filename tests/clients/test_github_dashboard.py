@@ -142,25 +142,40 @@ def test_project_reads_every_unfinished_status_and_deduplicates(api):
     api.pages = Mock(
         side_effect=[
             [{"number": 3}],
+            [],
+            [],
+            [{"id": 2, "name": "Release packages", "status": "waiting"}],
             [{"id": 1, "name": "Release", "status": "queued"}],
             [{"id": 1, "name": "Release", "status": "in_progress"}],
-            [{"id": 2, "name": "Release packages", "status": "waiting"}],
-            [],
-            [],
         ]
     )
     api.pull = Mock(return_value={"refresh": False})
     api.workflow = Mock(side_effect=lambda _repo, run: run)
     result = api.project(REPO)
-    assert [run["id"] for run in result["workflows"]] == [1, 2]
+    assert sorted(run["id"] for run in result["workflows"]) == [1, 2]
     assert result["active"] is True
+    # Lifecycle order: a run approved mid-sweep leaves "waiting" for a status that is queried later.
     assert [call.kwargs.get("status") for call in api.pages.call_args_list[1:]] == [
-        "queued",
-        "in_progress",
-        "waiting",
         "requested",
         "pending",
+        "waiting",
+        "queued",
+        "in_progress",
     ]
+
+
+@responses.activate
+def test_project_rechecks_known_runs_that_the_status_lists_missed(api):
+    path = f"{ROOT}/repos/alice/project"
+    api.pages = Mock(side_effect=[[], [], [], [], [{"id": 1, "name": "Release", "status": "in_progress"}], []])
+    api.workflow = Mock(side_effect=lambda _repo, run: run)
+    responses.get(f"{path}/actions/runs/7", json={"id": 7, "name": "Release", "status": "queued"})
+    responses.get(f"{path}/actions/runs/8", json={"id": 8, "name": "Release", "status": "completed"})
+    responses.get(f"{path}/actions/runs/9", status=404)
+    result = api.project(REPO, [1, 7, 8, 9])
+    assert sorted(run["id"] for run in result["workflows"]) == [1, 7]
+    assert result["active"] is True
+    assert [call.request.url.split("/")[-1] for call in responses.calls] == ["7", "8", "9"]
 
 
 @pytest.mark.parametrize(

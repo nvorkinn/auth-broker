@@ -21,6 +21,8 @@ if TYPE_CHECKING:
 
 bp = Blueprint("github_dashboard", __name__, url_prefix="/github")
 REPO_PART = re.compile(r"^[A-Za-z0-9_.-]+$")
+# Runs the page showed last time, rechecked by ID; each costs a GitHub call when the status lists miss it.
+MAX_KNOWN_RUNS = 20
 
 
 def dashboard_view(view: Callable[..., ResponseReturnValue]) -> View:
@@ -98,9 +100,12 @@ def repositories() -> ResponseReturnValue:
 @dashboard_view
 def project(owner: str, name: str) -> ResponseReturnValue:
     """Read a project's PRs and unfinished Actions runs."""
+    known = request.args.get("runs", "").split(",") if request.args.get("runs") else []
+    if len(known) > MAX_KNOWN_RUNS or not all(run.isascii() and run.isdecimal() and int(run) > 0 for run in known):
+        return jsonify(error="Invalid workflow run IDs."), 400
     api = github.Dashboard(current_app.config["GITHUB_DASHBOARD_TOKEN"], current_app.extensions["redis"])
     try:
-        return jsonify(api.project(api.owned_repository(owner, name)))
+        return jsonify(api.project(api.owned_repository(owner, name), [int(run) for run in known]))
     finally:
         api.close()
 

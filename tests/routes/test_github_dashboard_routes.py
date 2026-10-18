@@ -44,7 +44,21 @@ def test_repositories_and_project(client, dashboard):
     dashboard.project.return_value = {"pulls": [], "workflows": [], "active": False}
     assert client.get("/github/repositories/alice/project").json["active"] is False
     dashboard.owned_repository.assert_called_once_with("alice", "project")
+    assert dashboard.project.call_args.args[1] == []
     dashboard.close.assert_called()
+
+
+def test_project_passes_previously_shown_runs(client, dashboard):
+    dashboard.project.return_value = {"pulls": [], "workflows": [], "active": True}
+    assert client.get("/github/repositories/alice/project?runs=7,12").status_code == 200
+    assert dashboard.project.call_args.args[1] == [7, 12]
+
+
+@pytest.mark.parametrize("runs", ["7,x", "0", "-1", "7,,8", "\u0661", ",".join(["1"] * 21)])
+def test_project_rejects_invalid_run_ids(client, dashboard, runs):
+    response = client.get("/github/repositories/alice/project", query_string={"runs": runs})
+    assert response.status_code == 400
+    dashboard.project.assert_not_called()
 
 
 @pytest.mark.parametrize("headers", [{}, {"X-CSRF-Token": "wrong"}, {"X-CSRF-Token": "non-ascii-\u00e9"}])

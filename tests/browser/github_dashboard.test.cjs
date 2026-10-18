@@ -381,3 +381,11 @@ test("approval failures are visible, explicitly retryable and never automaticall
     await app.ids.get("workflows").querySelectorAll("button")[0].listeners.click();
     assert.equal(app.calls.filter(call => call.options.method === "POST").length, 2);
 });
+
+test("refreshes recheck the release runs shown last time by ID", async () => {
+    const app = await harness({ ...idle, active: true, workflows: [waitingRelease] });
+    assert.equal(app.calls.at(-1).url, "/github/repositories/alice/project");
+    await app.ids.get("workflows").querySelectorAll("button")[0].listeners.click();
+    await app.tick();
+    assert.equal(app.calls.at(-1).url, "/github/repositories/alice/project?runs=7");
+});
