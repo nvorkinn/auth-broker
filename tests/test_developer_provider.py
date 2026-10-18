@@ -10,10 +10,11 @@ import threading
 import time
 from datetime import UTC, datetime
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import fakeredis
 import pytest
+import redis
 import requests
 from cryptography.fernet import Fernet
 from sqlalchemy import text
@@ -33,6 +34,8 @@ from broker.developer_provider import (
 )
 from broker.models import DeviceConfig, GitHubToken
 from broker.provider_loop import SUB_CHANGED, next_tick, read_only_app
+from broker.services import render_jobs
+from broker.services.render_jobs import JOBS, SCREENS, queued_key
 
 FIXTURE = json.loads((Path(__file__).parent / "fixtures" / "developer.json").read_text())
 FETCHED_AT = datetime.fromisoformat(FIXTURE["fetched_at"]).timestamp()
@@ -133,6 +136,113 @@ def test_the_pace_is_withdrawn_once_the_release_is_off_the_panel(provider, store
     _run(provider, IDLE_GITHUB)
 
     assert store.get(pace_key(device_id)) is None
+
+
+def _pool(store, *device_ids):
+    """List the screens in the render pool, as pi-dashboard's orchestrator does."""
+    store.hset(SCREENS, mapping={device_id: f"screen-{device_id}" for device_id in device_ids})
+
+
+def _jobs(store):
+    """Return the render pool's queue, and take its jobs as the pool's worker would (pop, then claim: the flag goes)."""
+    jobs = store.lrange(JOBS, 0, -1)
+    store.delete(JOBS, *(queued_key(device_id) for device_id in jobs))
+    return jobs
+
+
+def test_each_cycle_of_a_release_queues_a_render_of_the_screen(provider, store, device):
+    device_id = device()
+    _pool(store, device_id)
+
+    _run(provider)
+    assert _jobs(store) == [device_id]
+
+    _run(provider)
+    assert _jobs(store) == [device_id]
+
+
+def test_a_render_still_queued_is_not_queued_twice(provider, store, device):
+    device_id = device()
+    _pool(store, device_id)
+
+    _run(provider)
+    _run(provider)
+
+    assert store.lrange(JOBS, 0, -1) == [device_id]
+
+
+def test_the_cycle_that_finds_the_release_gone_queues_one_last_render(provider, store, device):
+    device_id = device()
+    _pool(store, device_id)
+    _run(provider, JUST_DONE_GITHUB)
+    assert _jobs(store) == [device_id]
+
+    _run(provider, IDLE_GITHUB)
+    assert _jobs(store) == [device_id]
+
+    _run(provider, IDLE_GITHUB)
+    assert _jobs(store) == []
+
+
+def test_no_release_queues_nothing(provider, store, device):
+    _pool(store, device())
+
+    _run(provider, IDLE_GITHUB)
+
+    assert store.exists(JOBS) == 0
+
+
+def test_only_the_screens_with_a_release_are_queued(provider, store, device):
+    busy = device(secret="a-very-long-device-secret-1", token="busy")
+    idle = device(secret="a-very-long-device-secret-2", token="idle")
+    _pool(store, busy, idle)
+
+    with (
+        patch("broker.clients.github.summary", side_effect=lambda token: GITHUB if token == "busy" else IDLE_GITHUB),
+        patch("broker.clients.github.copilot_premium_requests", return_value=280),
+        patch("broker.services.developer.ai_plans.plans", return_value=FIXTURE["plans"]),
+    ):
+        provider.run_cycle()
+
+    assert _jobs(store) == [busy]
+
+
+def test_a_screen_with_its_own_renderer_is_not_queued(provider, store, device):
+    device()
+
+    _run(provider)
+
+    assert store.exists(JOBS) == 0
+
+
+def test_a_github_failure_mid_release_queues_nothing(provider, store, device):
+    _pool(store, device())
+    _run(provider)
+    _jobs(store)
+
+    with patch("broker.clients.github.summary", side_effect=requests.HTTPError("502")):
+        provider.run_cycle()
+
+    assert _jobs(store) == []
+
+
+def test_a_job_that_cant_be_queued_is_logged_by_type_and_the_cycle_goes_on(provider, store, device):
+    first = device(secret="a-very-long-device-secret-1")
+    second = device(secret="a-very-long-device-secret-2")
+    _pool(store, first, second)
+    # Only the job fails (its text quoting a key, as a failed command's would); the data and the pace still go in.
+    script = Mock(side_effect=redis.ConnectionError(queued_key(first)))
+    failing = patch.object(store, "register_script", return_value=script)
+
+    with failing, patch.object(render_jobs, "logger") as logger:
+        _run(provider)
+
+    for device_id in (first, second):
+        assert _stored(store, stored_key(device_id)) == FIXTURE
+        assert store.get(pace_key(device_id)) == str(PACE_S)
+    assert logger.warning.call_count == 2
+    assert "ConnectionError" in logger.warning.call_args.args
+    assert first not in repr(logger.warning.call_args_list)
 
 
 def test_it_polls_faster_while_a_release_runs_and_goes_back_after(provider, device):

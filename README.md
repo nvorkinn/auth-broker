@@ -1143,6 +1143,13 @@ twice a minute. The broker reads the key on each of the screen's polls and has i
 read it, draw that often, and send it with their frames as `X-Refresh-Hint`, which the broker counts too. A burst costs
 about 750 calls over a ten-minute release, against the 5,000 an hour a token gets.
 
+For a screen pi-dashboard's render pool draws (its docs/stateless-renderers.md), each of those 20-second cycles also
+queues a render of it, once the new data is written (`broker/services/render_jobs.py`: the pool's own enqueue script,
+copied byte for byte and pinned by `tests/fixtures/render_enqueue.json`), and so does the cycle that finds the release
+gone, to take it off the screen. Outside a release it queues nothing: the pool's ticker draws every screen on the
+minute. Only screens in the pool's `v1:render:screens` are queued (nothing at all before a pool runs, as nothing would
+take the jobs), and a job that can't be queued is logged by its error's type and left to the tick.
+
 If GitHub rate-limits a device's token anyway (a 429, or a 403 that is a rate limit rather than a missing permission), the
 provider leaves that device alone for as long as GitHub says (`Retry-After`, or until `X-RateLimit-Reset` when
 `X-RateLimit-Remaining` is 0; a minute if it says neither), and polls the other devices as usual. The device's keys are
