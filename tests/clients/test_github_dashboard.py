@@ -203,6 +203,24 @@ def test_waiting_workflow_includes_unstarted_nodes_edges_and_job_steps(api):
     assert "ref=abc" in responses.calls[-1].request.url
 
 
+def test_workflow_parse_diagnostics_are_logged_not_exposed(api, caplog):
+    api.pages = Mock(return_value=[])
+    api.read = Mock(return_value="jobs: [\n  private-workflow-content")
+    run = {
+        "id": 4,
+        "run_attempt": 2,
+        "path": ".github/workflows/release.yml",
+        "head_sha": "abc",
+        "name": "Release",
+    }
+    with pytest.raises(github.DashboardError) as caught:
+        api.workflow(REPO, run)
+    assert caught.value.public_message == "The workflow file could not be parsed. Check the server logs for details."
+    assert isinstance(caught.value.__cause__, ValueError)
+    assert "private-workflow-content" in caplog.text
+    assert "private-workflow-content" not in caught.value.public_message
+
+
 @responses.activate
 def test_publish_includes_prereleases_ignores_drafts_and_generates_notes(api):
     path = f"{ROOT}/repos/alice/project"

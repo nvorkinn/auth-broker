@@ -41,7 +41,7 @@ def dashboard_view(view: Callable[..., ResponseReturnValue]) -> View:
             return _upstream_error(error)
         except github.DashboardError as error:
             current_app.logger.warning("GitHub dashboard operation refused: %s", error)
-            return jsonify(error=str(error)), 409
+            return jsonify(error=error.public_message), 409
 
     return wrapped
 

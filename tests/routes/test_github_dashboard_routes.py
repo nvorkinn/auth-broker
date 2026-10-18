@@ -89,3 +89,14 @@ def test_invalid_repository_and_release_conflicts(client, dashboard):
     response = client.post("/github/repositories/alice/project/release", headers=csrf(client))
     assert response.status_code == 409
     assert response.json["error"] == "Tag already exists."
+
+
+def test_dashboard_returns_public_message_not_exception_diagnostics(client, dashboard, caplog):
+    error = github.DashboardError("The workflow file could not be parsed.")
+    error.args = ("private-workflow-content at internal/path.py:123",)
+    dashboard.project.side_effect = error
+    response = client.get("/github/repositories/alice/project")
+    assert response.status_code == 409
+    assert response.json == {"error": "The workflow file could not be parsed."}
+    assert "private-workflow-content" not in response.get_data(as_text=True)
+    assert "private-workflow-content" in caplog.text

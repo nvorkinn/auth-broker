@@ -250,6 +250,11 @@ def _workflow_jobs(session: requests.Session, repo: dict, run: dict) -> list[wor
 class DashboardError(ValueError):
     """A dashboard operation that cannot safely proceed."""
 
+    def __init__(self, public_message: str) -> None:
+        """Keep a deliberately user-facing message separate from exception diagnostics."""
+        super().__init__(public_message)
+        self.public_message = public_message
+
 
 class Dashboard:
     """The personal dashboard's GitHub operations, all performed with its server-side PAT."""
@@ -396,7 +401,8 @@ class Dashboard:
         try:
             definitions = workflow_graph.workflow_jobs(text)
         except ValueError as error:
-            msg = f"Cannot draw {run['name']}: {error}"
+            logger.warning("Cannot parse %s's workflow %s", repo["full_name"], run["path"], exc_info=True)
+            msg = "The workflow file could not be parsed. Check the server logs for details."
             raise DashboardError(msg) from error
         return {
             "id": run["id"],
