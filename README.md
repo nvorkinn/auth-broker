@@ -938,6 +938,7 @@ devices.
 |---|---|---|---|
 | `v1:spotify:<device id>` | 3 min | every minute | `{"fetched_at", "spotify", "apple_music"}`: each service's `/queue` body |
 | `v1:spotify-top:<device id>` | 2 h | every 30 min, and at once for a device new to it | `{"fetched_at", "spotify", "apple_music"}`: each service's top lists |
+| `v1:art:<sha1 of the image URL>` | 5 min, renewed every minute while a player key shows it | once, when a player key first shows it (before that key is written) | the playing track's cover: the image file's raw bytes, as its host served it (see [Covers](#covers)) |
 
 Each service's part is exactly what its route answers the renderer, so the renderer reads it with the models it
 already has; the only new definition is the wrapper (pi-dashboard's `countdown_core/store/music.py`):
@@ -973,8 +974,8 @@ already has; the only new definition is the wrapper (pi-dashboard's `countdown_c
 
 A minute is as often as a renderer moves its music panel on today, and it shows the player only every other page, so
 the provider makes no more Spotify calls than the renderers it stands in for: one a minute per device, plus four
-every half hour. It also fetches the devices of standalone Pis (the database can't tell which renderers read the
-store), which still call the routes too.
+every half hour, and an image host call only when a cover is new to the store. It also fetches the devices of
+standalone Pis (the database can't tell which renderers read the store), which still call the routes too.
 
 To see it on the host: `docker logs -f spotify-provider`, and
 `docker exec -it redis sh -c 'REDISCLI_AUTH="$REDIS_PASSWORD" redis-cli GET v1:spotify:<device id>'`. Locally, with
@@ -984,6 +985,44 @@ cycle).
 It runs the broker's image, so `deploy.sh` recreates it with the broker on every `deploy-config`, pinned by the same
 `AUTH_BROKER_VERSION`. The renderers read it once pi-dashboard's orchestrator is given `RENDERER_REDIS_URL` (its
 providers README, "Enabling in production").
+
+### Covers
+
+The renderer's now playing page shows the playing track's cover, which it used to download from Spotify's or Apple's
+image host itself. The provider stores it instead (`broker/album_art.py`), so the renderers never call those hosts:
+
+- **Which.** Each service's playing track's (Apple Music's last played), so the page has a cover whichever service it
+  shows. Of the album's `images`, the smallest at least 120 px tall (the renderer's Spotify area is 120 px high in
+  every layout), else the tallest: Spotify's 300 px of its 640, 300 and 64, and the 300 px Apple Music image the broker
+  asks for (`ARTWORK_SIZE`). The renderer scales it down to the style's size. pi-dashboard's `store/music.py`
+  (`art_image`) picks the same way to find the key, so change both together.
+- **Keyed by image, not device.** `v1:art:<sha1 of the URL, exactly as the service wrote it>`, so every screen
+  showing the same album reads one copy, fetched once a cycle at most however many screens show it.
+- **Raw bytes, not base64.** The value is the file itself: base64 would take a third more of Redis's 128 MB for
+  nothing. Writing bytes through the provider's client needs nothing special (its `decode_responses=True` only decodes
+  replies, and it never reads a cover back, only renews its TTL); the renderer reads covers with a second client that
+  doesn't decode (pi-dashboard's `store.reader.binary_store()`), as its usual one decodes every value as text.
+- **Renewed, not fetched again.** Each cycle the provider `EXPIRE`s the covers the player keys still show, and fetches
+  only the ones that aren't there (new, lapsed or evicted), before it writes the player key. The 5 min TTL outlives
+  the player key's 3 min, so a cover never goes before the key that shows it, and one nothing shows lapses soon after.
+- **Failures cost only the cover.** One that can't be fetched (an error, not an image, over 256 KB, not `https`) is
+  logged and tried again next minute; a host that doesn't answer in 5 s isn't tried again until the next cycle. The
+  player key is written regardless, and the renderer draws the page without a cover, as for a local file.
+
+Size: a 300 px cover is a JPEG of about 30 KB (nothing over 256 KB is stored). A device keeps one or two alive
+(Spotify's and Apple Music's), about 60 KB; a listener skipping a track a minute on both keeps about six per service
+alive within the 5 minutes, about 400 KB. For 50 devices that's 3 MB as a rule and 20 MB if every one of them skips
+like that, less where screens share albums: small beside `maxmemory 128mb`. Every cover has a TTL, so under
+`volatile-lru` it can be evicted like the providers' data, and is then just fetched again.
+
+`tests/fixtures/music_art.json` is the keys stored for `music_player.json` (each holding `music_art.jpg` in the tests);
+pi-dashboard's tests read copies of all three. To see them on the host (a cover still shown has a TTL of 240 to 300):
+
+```sh
+docker exec redis sh -c 'REDISCLI_AUTH="$REDIS_PASSWORD" redis-cli -h 127.0.0.1 --scan --pattern "v1:art:*" | head'
+docker exec redis sh -c 'REDISCLI_AUTH="$REDIS_PASSWORD" redis-cli -h 127.0.0.1 TTL v1:art:<sha1>'
+docker exec redis sh -c 'REDISCLI_AUTH="$REDIS_PASSWORD" redis-cli -h 127.0.0.1 STRLEN v1:art:<sha1>'   # its bytes
+```
 
 ## Not built yet
 

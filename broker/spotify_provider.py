@@ -8,6 +8,9 @@ broker and a refreshed token is stored exactly as the proxy stores it. The rende
 store instead of calling /api/spotify and /api/apple-music; standalone Pis, which can't reach Redis, keep calling the
 routes. See "Music in the store" in the README for the keys and what they hold.
 
+The playing track's cover is stored too, once per image however many screens show it (broker/album_art.py), so the
+renderers never call Spotify's or Apple's image hosts either.
+
 The loop is pi-dashboard's provider runner (countdown_providers/runner.py) in miniature: a cycle at once on start,
 then on every epoch-aligned tick of INTERVAL_S, or early on a `v1:sub:changed` message (a config was saved). SIGINT
 and SIGTERM stop it between devices. A device whose fetch fails is logged and skipped (its keys expire if it keeps
@@ -32,6 +35,7 @@ import requests
 from redis.exceptions import RedisError
 from sqlalchemy import or_, select
 
+from broker.album_art import AlbumArt, art_urls
 from broker.clients import spotify
 from broker.db import db
 from broker.models import DeviceConfig, SpotifyToken
@@ -178,11 +182,18 @@ def retry_after(error: Exception) -> int | None:
 class MusicProvider:
     """Runs the cycles against `store` (made with decode_responses=True), in `app`'s context, until stop()."""
 
-    def __init__(self, app: Flask, store: redis.Redis, clock: Callable[[], float] = time.time) -> None:
-        """`clock` gives the time in epoch seconds (a parameter for the tests)."""
+    def __init__(
+        self,
+        app: Flask,
+        store: redis.Redis,
+        clock: Callable[[], float] = time.time,
+        images: requests.Session | None = None,
+    ) -> None:
+        """`clock` gives the time in epoch seconds (a parameter for the tests); `images` fetches the covers."""
         self.app = app
         self.store = store
         self.clock = clock
+        self.art = AlbumArt(store, images)
         self._stopping = threading.Event()
         self._top_fetched: dict[str, TopFetched] = {}
         # Service -> when it may be called again, after it answered 429.
@@ -207,10 +218,12 @@ class MusicProvider:
         logger.info("Stopped the music provider")
 
     def run_cycle(self) -> int:
-        """Fetch every wanted device and write what came back; return how many keys were written.
+        """Fetch every wanted device and write what came back; return how many of their keys were written.
 
-        Raises RedisError if Redis can't be written, ending the cycle; a failing device only loses its own keys.
+        Not counting the covers (logged apart). Raises RedisError if Redis can't be written, ending the cycle; a
+        failing device only loses its own keys.
         """
+        self.art.new_cycle()
         with self.app.app_context():
             try:
                 wanted = wanted_devices()
@@ -224,7 +237,7 @@ class MusicProvider:
                 if self._stopping.is_set():
                     break
                 written += self._fetch_device(want)
-        logger.debug("Music: wrote %d keys for %d devices", written, len(wanted))
+        logger.debug("Music: wrote %d keys for %d devices, and %d new covers", written, len(wanted), self.art.fetched)
         return written
 
     def _top_due(self, want: Wanted, now: float) -> bool:
@@ -253,6 +266,9 @@ class MusicProvider:
         top_complete = set(top) == set(want.services)
         if not player and not top:
             return 0
+        if player:
+            # Before the player key, so a renderer never reads a track whose cover isn't stored yet.
+            self._keep_art(want.device_id, player)
         with self.store.pipeline(transaction=False) as pipe:
             if player:
                 pipe.set(player_key(want.device_id), stored(fetched_at, player), ex=PLAYER_TTL_S)
@@ -264,6 +280,19 @@ class MusicProvider:
         if top_due and top_complete:
             self._top_fetched[want.device_id] = TopFetched(now, want.services)
         return bool(player) + bool(top)
+
+    def _keep_art(self, device_id: str, player: dict[str, dict]) -> None:
+        """Store (or keep) the covers the device's player shows; a cover that fails only goes without.
+
+        Raises RedisError if Redis can't be written, as the player key couldn't be either.
+        """
+        try:
+            self.art.keep(art_urls(player))
+        except RedisError:
+            raise
+        except Exception:
+            # Never worth the player key: the renderer draws the page without a cover.
+            logger.exception("Music: couldn't store device %s's covers", device_id)
 
     def _fetch(
         self, fetcher: Callable[[str], dict], device_id: str, service: str, part: str, now: float
