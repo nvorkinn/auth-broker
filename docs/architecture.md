@@ -328,8 +328,8 @@ sequenceDiagram
     end
 ```
 
-- The screen sleeps for the `Retry-After` the broker sends: 60 s, or what the renderer asked for (20-59 s) while a
-  provider's data is bursty, or 20 s while there is no frame yet. See [Pace](#pace).
+- The screen sleeps for the `Retry-After` the broker sends: until just after the next half-minute (:03 or :33), or
+  every 10 s while a provider's data is bursty, before the first frame too. See [Pace](#pace).
 - The renderer uploads only when its picture changed. If the same frame is uploaded again, only `frames.rendered_at`
   moves, which says the renderer is alive.
 - A renderer that writes the frame record also puts each new picture in Redis, `v1:frame:<device id>` (a hash of the
@@ -430,7 +430,7 @@ stateDiagram-v2
 | `POST /api/devices/register` without `width` and `height` | `400` | the size is required | run |
 | `GET /api/config` with a display secret | `403` | a valid secret for the wrong role | run |
 | Any device call with an unknown or deleted secret | `401 {error: unauthorized}` | the ESP32 registers again | run |
-| `GET` or `POST /api/frame` before the first frame | `404` with `Retry-After: 5` | the renderer is about to upload | run |
+| `GET` or `POST /api/frame` before the first frame | `404` with `Retry-After` | the renderer is about to upload | run |
 | `POST /api/frame` with the current `ETag` | `304` with `ETag` and `Retry-After` | nothing new | run |
 | `POST /api/devices/pairing-code` with a display secret | `200 {code, expires_in_seconds: 600}` | either role may ask | run |
 | `POST /pair/token`, screen not registered yet | `202 {status: waiting}` | try again | run |
@@ -466,12 +466,23 @@ If the code changes, these pages do not: check a diagram against the code before
 
 ## Pace
 
-How often a screen refreshes isn't a setting; the providers decide. A provider whose data is bursty (the developer
-provider, while a release runs) writes a pace key to the store with a short TTL. The renderer reads the fastest of its
-panels' keys, sleeps that long between cycles, and sends it as `X-Refresh-Hint` (seconds) with each `PUT /api/frame`.
-The broker keeps it on the frame row for 3 minutes (`frames.pace`, `pace_until`; `services/pace.py`) and answers the
-screen's polls with it as `Retry-After`, kept between 20 s and the 60 s base. Every upload restates the hint, so a
-frame without one ends it, and a renderer that stops asking or dies lapses back to 60 s on its own.
+How long a screen sleeps after each poll isn't a setting: one pure function in the broker works it out, and nothing
+else does (`services/pace.py`, `sleep_s(now, hints)`). Every `GET` and `POST /api/frame` answer the screen keeps
+polling after (`200`, `304`, and the `404` before the first frame) carries it as `Retry-After`, in whole seconds, from
+the broker's clock. The ESP32 has no clock: it sleeps what it's told.
+
+- Renders are on the minute, and the screen polls twice as often, 3 s (`LEAD_S`) after each half-minute: at about
+  :03 and :33. An out-of-cycle render then shows within about half a minute.
+- A provider whose data is bursty (the developer provider, while a release runs) writes a pace key to the store with a
+  short TTL, `v1:pace:<source>:<id>`. The broker reads the keys of the screen's own panels (`pace.hint_keys`: today
+  `v1:pace:developer:<device id>`, while the developer panel is on) on each poll, in one round trip, and never writes.
+  The shortest live one, kept between 20 s (`HINT_FLOOR_S`) and 60 s, stands in for the minute, and the screen polls
+  at half of it: every 10 s for the developer provider's 20 s.
+- Today's renderers still send their pace with each `PUT /api/frame` as `X-Refresh-Hint`. The broker keeps it on the
+  frame row for 3 minutes (`frames.pace`, `pace_until`) and counts it as one more hint, so every renderer deployed
+  keeps working. A frame without the header ends it.
+- A slot under 5 s away (`MIN_SLEEP_S`) is skipped for the next, and network delay never adds up: each answer starts
+  from the clock again.
 
 ## The config in the store
 

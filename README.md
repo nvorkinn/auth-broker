@@ -1050,11 +1050,11 @@ it polls every 2 minutes (`IDLE_INTERVAL_S`).
 
 It also sets the screen's pace. While one of a device's releases is running its stages change by the minute, so it polls
 every 20 seconds (`BURST_INTERVAL_S`) and writes `v1:pace:developer:<device id>` = 20 with a one-minute TTL, renewed each
-cycle the release still runs. Nothing says a release has ended: the key lapses and the screen goes back to its usual
-60 seconds. The renderer reads the key, sleeps as long, and sends it with its frames as `X-Refresh-Hint`; the broker
-keeps it for three minutes and answers the screen's polls with it as `Retry-After` (`broker/services/pace.py`, and
-"Pace" in [docs/architecture.md](docs/architecture.md#pace)). A burst costs about 750 calls over a ten-minute release,
-against the 5,000 an hour a token gets.
+cycle the release still runs. Nothing says a release has ended: the key lapses and the screen goes back to polling
+twice a minute. The broker reads the key on each of the screen's polls and has it poll every 10 seconds meanwhile
+(`broker/services/pace.py`, and "Pace" in [docs/architecture.md](docs/architecture.md#pace)); today's renderers also
+read it, draw that often, and send it with their frames as `X-Refresh-Hint`, which the broker counts too. A burst costs
+about 750 calls over a ten-minute release, against the 5,000 an hour a token gets.
 
 If GitHub rate-limits a device's token anyway (a 429, or a 403 that is a rate limit rather than a missing permission), the
 provider leaves that device alone for as long as GitHub says (`Retry-After`, or until `X-RateLimit-Reset` when

@@ -341,12 +341,14 @@ def screen_view() -> ResponseReturnValue:
     shown = frame_record.current(frame_record.head(g.device_id), frame)
     upright = config.orientation != "horizontal"
     width, height = (frame_image.HEIGHT, frame_image.WIDTH) if upright else (frame_image.WIDTH, frame_image.HEIGHT)
+    now = pace.clock()
     return render_template(
         "screen.html",
         device_id=g.device_id,
         has_frame=shown is not None,
         rendered_at=shown.rendered_at if shown else None,
-        interval=pace.effective_interval(frame),
+        # As often as the screen polls, right now.
+        interval=pace.poll_interval_s(now, pace.screen_hints(g.device_id, frame, now)),
         width=width,
         height=height,
     )

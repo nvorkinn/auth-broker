@@ -18,9 +18,9 @@ import redis
 
 from broker import create_app
 from broker.db import db
-from broker.models import BASE_INTERVAL, Device, Frame
+from broker.models import Device, Frame
 from broker.routes import frames
-from broker.services import frame_image, frame_record
+from broker.services import frame_image, frame_record, pace
 
 FIXTURES = Path(__file__).parent.parent / "fixtures"
 FIXTURE = json.loads((FIXTURES / "frame_record.json").read_text())
@@ -29,6 +29,13 @@ FIXTURE_FRAME = (FIXTURES / FIXTURE["fields"]["frame"]["file"]).read_bytes()
 SECRET = "a-very-long-device-secret-value"  # register_device's default
 LONG_AGO = datetime(2026, 1, 1, tzinfo=UTC)
 LATER = datetime(2099, 1, 1, tzinfo=UTC)
+# The pacing clock is frozen at 12:00:10 UTC, so every answer says to sleep until 12:00:33 (services/pace.py).
+RETRY_AFTER = "23"
+
+
+@pytest.fixture(autouse=True)
+def frozen_pace(monkeypatch):
+    monkeypatch.setattr(pace, "clock", lambda: datetime(2026, 10, 18, 12, 0, 10, tzinfo=UTC))
 
 
 @pytest.fixture
@@ -116,12 +123,12 @@ def test_the_fixtures_record_is_served_as_it_is(client, register_device, frames_
     assert response.data == FIXTURE_FRAME
     assert response.mimetype == "application/octet-stream"
     assert response.headers["ETag"] == FIXTURE["served_etag"]
-    assert response.headers["Retry-After"] == str(BASE_INTERVAL)
+    assert response.headers["Retry-After"] == RETRY_AFTER
     again = poll(client, **{"If-None-Match": response.headers["ETag"]})
     assert again.status_code == 304
     assert again.data == b""
     assert again.headers["ETag"] == FIXTURE["served_etag"]
-    assert again.headers["Retry-After"] == str(BASE_INTERVAL)
+    assert again.headers["Retry-After"] == RETRY_AFTER
 
 
 @pytest.mark.usefixtures("app")  # for its environment
@@ -169,7 +176,7 @@ def test_a_record_with_no_row_is_served(client, register_device, frames_redis):
 
     assert response.status_code == 200
     assert response.data == _frame(0x22)
-    assert response.headers["Retry-After"] == str(BASE_INTERVAL)
+    assert response.headers["Retry-After"] == RETRY_AFTER
 
 
 @pytest.mark.parametrize("poll", [_get, _poll], ids=["GET", "POST"])
@@ -242,7 +249,7 @@ def test_the_record_keeps_the_pace_the_renderer_asked_for(client, register_devic
     response = _poll(client)
 
     assert response.data == _frame(0x22)
-    assert response.headers["Retry-After"] == "30"
+    assert response.headers["Retry-After"] == "8"  # a 30 s hint polls every 15 s: from 12:00:10, at 12:00:18
 
 
 def test_head_answers_from_the_record_without_a_body(client, register_device, frames_redis):
@@ -311,7 +318,7 @@ def test_a_record_that_cant_be_read_and_no_row_is_no_frame_yet(client, register_
     response = _poll(client)
 
     assert response.status_code == 404
-    assert response.headers["Retry-After"] == str(frames.NO_FRAME_RETRY_AFTER)
+    assert response.headers["Retry-After"] == RETRY_AFTER
 
 
 def test_a_record_replaced_while_it_was_read_gives_the_row(client, register_device, frames_redis, monkeypatch):

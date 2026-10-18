@@ -1,6 +1,8 @@
 import struct
 import zlib
 
+import fakeredis
+
 from broker.db import db
 from broker.models import DeviceConfig
 from broker.routes.frames import FRAME_BYTES
@@ -67,8 +69,23 @@ def test_screen_page_shows_the_picture_and_polls_at_the_screens_interval(app, pa
     assert response.status_code == 200
     html = response.get_data(as_text=True)
     assert f'src="/device/{device_id}/screen/frame.png"' in html
-    assert "const intervalMs = 60 * 1000;" in html
+    assert "const intervalMs = 30 * 1000;" in html  # twice a render, as the screen polls
+    assert "checked every 30 seconds as the screen does" in html
     assert 'width="480" height="800"' in html
+
+
+def test_screen_page_polls_as_fast_as_the_screen_while_a_provider_asks(app, paired_client):
+    client, device_id, secret = paired_client
+    _upload(client, secret, bytes(FRAME_BYTES))
+    with app.app_context():
+        db.session.get(DeviceConfig, device_id).developer_enabled = True
+        db.session.commit()
+    app.extensions["redis"] = store = fakeredis.FakeRedis(decode_responses=True)
+    store.set(f"v1:pace:developer:{device_id}", "20", ex=60)
+
+    html = client.get(f"/device/{device_id}/screen").get_data(as_text=True)
+
+    assert "const intervalMs = 10 * 1000;" in html
 
 
 def test_screen_page_before_the_first_frame_says_so(paired_client):

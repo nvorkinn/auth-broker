@@ -22,8 +22,8 @@ from cryptography.fernet import InvalidToken
 from flask import current_app
 
 from broker.db import db
-from broker.models import BASE_INTERVAL, Device, DeviceConfig, GlowmarktCredentials
-from broker.services import pairing, stops, weather_place
+from broker.models import Device, DeviceConfig, GlowmarktCredentials
+from broker.services import pace, pairing, stops, weather_place
 from broker.services.postcodes import postcode_country
 
 
@@ -41,8 +41,9 @@ def build(config: DeviceConfig, *, pairing_code: str | None) -> ConfigResponse:
     stop_ids = config.tfl_stop_ids
     return ConfigResponse(
         device_id=device_id,
-        # Renderers that predate the pace still read it; they sleep this, and a faster refresh comes from the frames.
-        interval=BASE_INTERVAL,
+        # How often today's renderers draw (and they draw faster while a provider asks). The screen's polls aren't
+        # paced by it: the broker's answers are (services/pace.py).
+        interval=pace.RENDER_INTERVAL_S,
         clock_format=config.clock_format,
         language=config.language,
         timezone=timezone(country, stop_ids),
