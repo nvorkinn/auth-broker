@@ -97,7 +97,7 @@ def test_writes_glowmarkts_answers_under_the_devices_key_with_a_ttl(app, provide
     assert provider.run_cycle() == 1
 
     assert json.loads(store.get(f"v1:energy:{DEVICE}")) == FIXTURE["stored"]
-    assert 0 < store.ttl(f"v1:energy:{DEVICE}") <= glow.TTL_S
+    assert 23 * 60 * 60 < store.ttl(f"v1:energy:{DEVICE}") <= glow.TTL_S
     sign_in = json.loads(glow_api.calls_to("/auth")[0].request.body)
     assert sign_in == {"username": "me@example.com", "password": "hunter2", "applicationId": glowmarkt.APPLICATION_ID}
     readings = glow_api.calls_to("/readings")
