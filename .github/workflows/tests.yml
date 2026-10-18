@@ -25,6 +25,11 @@ jobs:
 
       - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
 
+      - name: Install redis-server
+        # For the render queue's script's tests against a real Redis (tests/services/test_render_jobs.py starts its
+        # own; they skip without it).
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends redis-server
+
       # uv rather than pip: about 10s quicker, most of the job before the tests.
       - name: Install dependencies
         run: uv pip install --system -r requirements-dev.txt

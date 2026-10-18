@@ -40,6 +40,7 @@ from broker.services import (
     geoip,
     pace,
     pairing,
+    render_jobs,
     stops,
     weather_place,
 )
@@ -256,6 +257,8 @@ def _save_device_config(device_id: str) -> ResponseReturnValue:
     _write_subscriptions_to_redis()
     # Every screen's, not just this one's: it costs little, and puts back any copy the store lost.
     config_store.publish_all()
+    # A render of this screen, if the render pool draws it, even if its copy didn't change (an account replaced).
+    render_jobs.request(device_id)
     return redirect(url_for("pages.device_config", device_id=device_id))
 
 

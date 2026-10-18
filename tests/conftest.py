@@ -15,7 +15,7 @@ from broker.auth import hash_secret
 from broker.clients import apple_music
 from broker.db import db
 from broker.models import Device
-from broker.services import assignments
+from broker.services import assignments, render_jobs
 from broker.services.pair_throttle import PairThrottle
 
 
@@ -69,13 +69,15 @@ def app(tmp_path, monkeypatch, migrated_db):
 class FakeRedis:
     """Just enough of Redis to see what a config save writes: sets, strings (configs, pairing keys), what's published.
 
-    A TTL is ignored.
+    And the render jobs queued (services/render_jobs.py): `jobs`, oldest first, a device at most once, as the queue's
+    script does (its flag never lapses here). A TTL is ignored. tests/services/test_render_jobs.py runs the real script.
     """
 
     def __init__(self):
         self.sets: dict[str, set[str]] = {}
         self.strings: dict[str, str] = {}
         self.published: list[tuple[str, str]] = []
+        self.jobs: list[str] = []
         self.fail = False
 
     def _check(self):
@@ -108,6 +110,31 @@ class FakeRedis:
         self._check()
         return [key for key in [*self.strings, *self.sets] if fnmatch.fnmatchcase(key, match)]
 
+    def register_script(self, script):
+        assert script == render_jobs.ENQUEUE, "only the render queue's enqueue is faked"
+        return FakeEnqueue(self)
+
+    def _enqueue(self, device_id) -> int:
+        if device_id in self.jobs:
+            return 0
+        self.jobs.append(device_id)
+        return 1
+
+
+class FakeEnqueue:
+    """The render queue's enqueue script, on a FakeRedis or in its pipeline."""
+
+    def __init__(self, server: FakeRedis):
+        self.server = server
+
+    def __call__(self, keys, args, client=None):
+        assert keys == [render_jobs.queued_key(args[0]), render_jobs.JOBS]
+        if isinstance(client, FakePipeline):
+            client.ops.append(("enqueue", args[0]))
+            return client
+        self.server._check()
+        return self.server._enqueue(args[0])
+
 
 class FakePipeline:
     def __init__(self, server: FakeRedis):
@@ -134,8 +161,12 @@ class FakePipeline:
 
     def execute(self):
         self.server._check()
+        results = []
         for op, key, *rest in self.ops:
-            if op == "delete":
+            results.append(True)
+            if op == "enqueue":
+                results[-1] = self.server._enqueue(key)
+            elif op == "delete":
                 self.server.sets.pop(key, None)
                 self.server.strings.pop(key, None)
             elif op == "set":
@@ -145,6 +176,7 @@ class FakePipeline:
             else:
                 self.server.published.append((key, rest[0]))
         self.ops = []
+        return results
 
 
 @pytest.fixture
