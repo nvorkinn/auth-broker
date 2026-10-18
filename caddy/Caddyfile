@@ -36,6 +36,12 @@ auth.nikolaivorkinn.com {
 	request_header -X-Authentik-Username
 	request_header -X-Authentik-Email
 
+	# A screen polls /api/frame about twice a minute, and most answers are 304s. A 304 has no body and,
+	# through Caddy, no Content-Length, so the ESP32's HTTP client waits for a body until Caddy closes the
+	# idle connection, 5 minutes later, before it sleeps. The screen opens a new connection for every poll
+	# anyway, so close each one after its answer.
+	header /api/frame Connection close
+
 	# Everything but the device API (Bearer secrets, no login), the status endpoint (its own token),
 	# the orchestrator's (its own too) and the public page about the display (/about and its pictures)
 	# is for browsers and needs an Authentik login. The stop search under /api/tfl is a browser call.

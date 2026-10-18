@@ -34,3 +34,12 @@ def test_dashboard_and_its_assets_are_behind_authentik(app):
     routes += ["/static/github_dashboard.js", "/static/github_dashboard.css"]
     assert routes
     assert not any(fnmatchcase(route, pattern) for route in routes for pattern in paths)
+
+
+def test_frame_answers_close_the_connection():
+    """A 304 through Caddy has no Content-Length, and the ESP32 then reads until the connection closes.
+
+    Without `Connection: close` that's Caddy's idle timeout, 5 minutes, after every unchanged frame.
+    """
+    site = CADDYFILE.read_text().split("auth.nikolaivorkinn.com {", 1)[1].split("\n}\n", 1)[0]
+    assert re.search(r"^\theader /api/frame Connection close$", site, re.MULTILINE)
