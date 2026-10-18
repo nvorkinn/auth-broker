@@ -8,7 +8,8 @@ a change reaches a renderer at once: after writing a device's copy, the broker p
 The copies have no TTL. They're rebuilt from the database (publish_all) on every config save, as the broker starts
 (gunicorn.conf.py) and by `flask config publish`, so one Redis lost comes back; and one copy at a time (publish) when
 a device's pairing changes. A device that should have no copy (not paired, a pairing code to show, deleted) has its
-key removed. Only what changed is written, and only those devices are nudged.
+key removed. Only what changed is written, and only those devices are nudged, on the channel and with a render job
+for the render pool (services/render_jobs.py), which listens to no channel.
 
 Under `maxmemory-policy volatile-lru` Redis evicts only keys with a TTL, so it never evicts these, and they count
 against the 128 MB for good: a copy is about 700 bytes of JSON (tests/fixtures/config_store.json), about 1 KB with
@@ -23,7 +24,7 @@ from sqlalchemy import select
 
 from broker.db import db
 from broker.models import Device
-from broker.services import renderer_config
+from broker.services import render_jobs, renderer_config
 
 logger = logging.getLogger(__name__)
 
@@ -86,6 +87,8 @@ def _write(wanted: dict[str, str | None], *, sweep: bool = False) -> None:
             for name in changed:
                 pipe.publish(CHANGED, name.removeprefix(PREFIX))
             pipe.execute()
+        # And a render job for each, after the writes, for a screen the render pool draws (it reads no channel).
+        render_jobs.request(*(name.removeprefix(PREFIX) for name in changed))
     except RedisError as error:
         # The renderers keep the copy they have (or ask the broker, without one) until the next rebuild.
         logger.warning("Couldn't write the screens' configs to Redis (%s)", type(error).__name__)

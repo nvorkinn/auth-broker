@@ -527,6 +527,15 @@ sequenceDiagram
   device is paired by token or given an owner (both drop its codes), unpaired or forgotten. Plaintext, by decision:
   any Redis reader on the host can see a live code (pi-dashboard's `docs/stateless-renderers.md`, "The pairing
   screen"). `tests/fixtures/pairing_key.json` pins the shape. Redis down never stops a code being issued or used.
+- **Render jobs, for the render pool** (`services/render_jobs.py`), which listens to no channel: the broker queues a
+  job on `v1:render:jobs` for every screen whose copy changed, after the write (beside the `v1:config:changed`
+  nudge, which stays while any screen has its own renderer), for the screen whose config was saved even if its copy
+  didn't change (an account replaced), and when a code is issued (after its `v1:pairing:` key is written) or spent
+  (after the key's deleted). The script is pi-dashboard's `render_queue` enqueue, byte for byte: a screen is queued
+  at most once (its `v1:render:queued:<id>` flag, 60 s TTL), and only if it's in `v1:render:screens`, as nothing
+  takes jobs off the list (no TTL) until a pool runs. `tests/fixtures/render_queue.json` pins the script's SHA1
+  and keys; pi-dashboard's tests read the same file. Redis down never fails a save or a code: the error's type is
+  logged, and the pool's ticker draws the screen within the minute.
 - **No TTL** on the configs, as they're rebuilt from the database. `maxmemory-policy volatile-lru` evicts only keys
   with a TTL, so these are never evicted, and they count against `maxmemory 128mb` for good: about 700 bytes of JSON
   each, about 1 KB with Redis's own overhead, so a thousand screens take about 1 MB.
