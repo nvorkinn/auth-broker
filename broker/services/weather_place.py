@@ -1,8 +1,8 @@
 """A screen's weather place: picking it from Open-Meteo, storing it, and the readable key it is known by.
 
 A place is stored as Open-Meteo's id, with its name, label, country and coordinates as Open-Meteo gave them when
-it was picked (never as the browser sent them). weather_location keeps the place's name, which is what renderers
-are sent today (the Weather config's `location`).
+it was picked (never as the browser sent them). weather_location keeps the place's name, which renderers are sent
+as the Weather config's `location`; its `key` is weather_key(), which the weather is subscribed and stored under.
 """
 
 import re
@@ -34,22 +34,31 @@ def slugify(text: str) -> str:
 _NON_DECOMPOSING = str.maketrans({"ø": "o", "æ": "ae", "ß": "ss", "đ": "d", "ł": "l", "þ": "th", "ð": "d", "œ": "oe"})
 
 
+# The country part of the key of a place Open-Meteo gave no country code: one ISO 3166-1 leaves for users to assign,
+# so no country has it.
+NO_COUNTRY = "xx"
+
+
 def weather_key(config: DeviceConfig) -> str | None:
     """Return the readable key a screen's weather is known by, e.g. "london-gb-2643743"; None for no location.
 
     It is <slug of the name>-<country code>-<Open-Meteo id>: the id makes it unique, the rest makes it readable.
-    A config saved before places were picked has only its free text, which gives the slug of that text instead
-    ("london"), so it still has a key until `flask weather backfill` gives it a place.
+    The country is always there (NO_COUNTRY if Open-Meteo gave none), as a number after a two-letter country is how
+    the weather provider tells a place's key from the slug of text that ends in a number ("oslo-0150").
 
-    It is the key the weather's subscriptions and data will be kept under in Redis (members of v1:sub:weather,
-    and v1:weather:<key>); nothing uses it for that yet.
+    A config saved before places were picked has only its free text, which gives the slug of that text instead
+    ("london", or the text itself, case and spaces folded, if it has nothing to slug), so it still has a key and its
+    screen still has weather (the provider geocodes it by name) until `flask weather backfill` gives it a place.
+
+    It is the key the weather's subscriptions and data are kept under in Redis (members of v1:sub:weather, and
+    v1:weather:<key>), and renderers are sent it as the Weather config's `key`.
     """
     if config.weather_place_id is not None:
         slug = slugify(config.weather_place_name or config.weather_location or "")
-        country = (config.weather_country_code or "").lower()
+        country = (config.weather_country_code or "").lower() or NO_COUNTRY
         return "-".join(part for part in (slug, country, str(config.weather_place_id)) if part)
     normalized = " ".join((config.weather_location or "").casefold().split())
-    return slugify(normalized) or None
+    return slugify(normalized) or normalized or None
 
 
 def resolve(place_id: str, text: str, current: DeviceConfig) -> dict[str, Any] | None:

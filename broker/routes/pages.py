@@ -83,8 +83,10 @@ def _write_subscriptions_to_redis() -> None:
     for config in configs:
         for stop_id in config.tfl_stop_ids:
             subs["entur" if stop_id.startswith("NSR:") else "tfl"].add(stop_id)
-        if config.weather_location:
-            subs["weather"].add(config.weather_location)
+        # By the place picked, not the text typed, so screens that picked the same place share its forecast; a
+        # config with only free text (not yet backfilled) by that text's slug (see weather_place.weather_key).
+        if weather_key := weather_place.weather_key(config):
+            subs["weather"].add(weather_key)
         if config.spotify_enabled:
             subs["spotify"].add(config.device_id)
         if config.developer_enabled:

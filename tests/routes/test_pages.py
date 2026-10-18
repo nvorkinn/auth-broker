@@ -7,6 +7,7 @@ from broker.clients import weather
 from broker.db import db
 from broker.models import Device, DeviceConfig, GitHubToken, GlowmarktCredentials, SpotifyToken
 from broker.routes.pages import normalize_postcode, postcode_country
+from broker.services import weather_place
 
 
 def _place(name, place_id=1, **fields):
@@ -762,8 +763,9 @@ def _subscriptions(fake_redis):
     return {key.removeprefix("v1:sub:"): members for key, members in fake_redis.sets.items()}
 
 
-def test_saving_the_config_publishes_subscriptions_to_redis(paired_client, fake_redis):
+def test_saving_the_config_publishes_subscriptions_to_redis(paired_client, fake_redis, weather_location_lookup):
     client, device_id, _ = paired_client
+    weather_location_lookup.side_effect = lambda name, **_: [_place(name, 2643743, country_code="gb")]
     client.post(
         "/device",
         data={
@@ -777,10 +779,47 @@ def test_saving_the_config_publishes_subscriptions_to_redis(paired_client, fake_
     assert _subscriptions(fake_redis) == {
         "tfl": {"940GZZLUEUS"},
         "entur": {"NSR:StopPlace:58366"},
-        "weather": {"London"},
+        "weather": {"london-gb-2643743"},
         "spotify": {device_id},
     }
     assert fake_redis.published == [("v1:sub:changed", "")]
+
+
+def _give_another_screen_weather(app, register_device, location, place=None):
+    """Register another screen (no one's) and give its config `location`, picked as `place` if one is given."""
+    device_id, _ = register_device("another-device-secret-value-0123")
+    with app.app_context():
+        config = db.session.get(DeviceConfig, device_id)
+        weather_place.store(config, place)
+        config.weather_location = location
+        db.session.commit()
+    return device_id
+
+
+def test_screens_that_picked_the_same_place_subscribe_it_once_however_they_typed_it(
+    app, paired_client, register_device, fake_redis, weather_location_lookup
+):
+    client, _, _ = paired_client
+    london = _place("London", 2643743, country_code="gb")
+    weather_location_lookup.side_effect, weather_location_lookup.return_value = None, [london]
+    _give_another_screen_weather(app, register_device, "london", london)
+
+    client.post("/device", data={"interval": "20", "weather_location": "London"})
+
+    assert _subscriptions(fake_redis)["weather"] == {"london-gb-2643743"}
+
+
+def test_a_location_with_no_place_picked_is_still_subscribed_by_its_slug(
+    app, paired_client, register_device, fake_redis, weather_location_lookup
+):
+    """Saved before places were picked, and not backfilled yet: its screen keeps its weather."""
+    client, _, _ = paired_client
+    weather_location_lookup.side_effect = lambda name, **_: [_place(name, 2643743, country_code="gb")]
+    _give_another_screen_weather(app, register_device, " St. Albans ")
+
+    client.post("/device", data={"interval": "20", "weather_location": "London"})
+
+    assert _subscriptions(fake_redis)["weather"] == {"london-gb-2643743", "st-albans"}
 
 
 def test_saving_the_config_subscribes_a_device_with_the_developer_panel_on(paired_client, fake_redis):

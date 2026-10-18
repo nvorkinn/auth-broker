@@ -79,7 +79,7 @@ def test_get_config_returns_defaults_and_shared_keys(client, register_device):
         "timezone": "Europe/London",
         "style": "airy",
         "screen": {"orientation": "vertical", "width": 480, "height": 800},
-        "weather": {"api_key": "test-weather-key", "location": ""},
+        "weather": {"api_key": "test-weather-key", "location": "", "key": None},
         "notice_board": {"postcode": None, "country": None, "style": "airy"},
         "tfl": {"app_key": "test-tfl-key", "stop_ids": [], "style": "grouped"},
         "departures": {"stops": [], "style": "grouped"},
@@ -104,6 +104,36 @@ def test_get_config_sends_the_developer_switch_but_never_the_github_token(app, c
 
     assert response.get_json()["developer"] == {"enabled": True}
     assert b"github_pat_secret" not in response.data
+
+
+def test_get_config_sends_the_key_the_weather_is_subscribed_under(app, client, register_device):
+    """The renderer reads v1:weather:<key>: the picked place's, beside its name."""
+    device_id, secret = register_device()
+    _set_config(
+        app,
+        device_id,
+        weather_location="London",
+        weather_place_id=2643743,
+        weather_place_name="London",
+        weather_place_label="London, England, United Kingdom",
+        weather_country_code="GB",
+        weather_lat=51.50853,
+        weather_lon=-0.12574,
+    )
+
+    body = client.get("/api/config", headers={"Authorization": f"Bearer {secret}"}).get_json()
+
+    assert body["weather"] == {"api_key": "test-weather-key", "location": "London", "key": "london-gb-2643743"}
+
+
+def test_get_config_sends_the_slug_as_the_key_of_a_location_with_no_place_picked(app, client, register_device):
+    """A config saved before places were picked, and not backfilled: its typed text, as it is subscribed."""
+    device_id, secret = register_device()
+    _set_config(app, device_id, weather_location="St. Albans")
+
+    body = client.get("/api/config", headers={"Authorization": f"Bearer {secret}"}).get_json()
+
+    assert (body["weather"]["location"], body["weather"]["key"]) == ("St. Albans", "st-albans")
 
 
 def _set_config(app, device_id, **values):
