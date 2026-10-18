@@ -169,23 +169,6 @@ def test_polls_everything_each_cycle_whether_or_not_anyone_is_looking(provider, 
     assert (first.call_count, second.call_count) == (1, 1)
 
 
-def test_the_stored_json_is_what_the_route_answers(app, client, provider, store, device):
-    """The route and the provider share one snapshot, so a renderer reads the same data either way."""
-    device_id = device()
-    _run(provider)
-    with (
-        patch("broker.clients.github.summary", return_value=GITHUB),
-        patch("broker.clients.github.copilot_premium_requests", return_value=280),
-        patch("broker.services.developer.ai_plans.plans", return_value=FIXTURE["plans"]),
-    ):
-        answer = client.get(
-            "/api/developer", headers={"Authorization": "Bearer a-very-long-device-secret-1"}
-        ).get_json()
-
-    stored = _stored(store, stored_key(device_id))
-    assert answer == {k: v for k, v in stored.items() if k != "fetched_at"}
-
-
 def test_a_github_failure_writes_nothing_and_keeps_the_pace_of_a_running_release(provider, store, device):
     device_id = device()
     _run(provider)

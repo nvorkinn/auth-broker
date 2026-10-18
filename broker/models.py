@@ -111,7 +111,7 @@ class DeviceConfig(db.Model):
     spotify_enabled: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("0"))
     # Apple Music in the Spotify area, beside Spotify or instead of it (see routes/apple_music_proxy.py).
     apple_music_enabled: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("0"))
-    # The developer panel: GitHub pull requests and builds, and AI plans (see routes/developer.py).
+    # The developer panel: GitHub pull requests and builds, and AI plans (see developer_provider.py).
     developer_enabled: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("0"))
     # Every departure stop, in the owner's order: TfL NaPTAN ids and Entur NSR ids (NSR:...) mixed; the id says
     # which (services/stops.py). Named for when they were all TfL's.

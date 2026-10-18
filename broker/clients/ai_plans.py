@@ -18,7 +18,7 @@ STUB_PLANS = (("Claude", "Max", 3), ("Gemini", "AI Pro", 22))
 
 
 def plans(today: date, copilot_used: int | None, *, has_copilot: bool) -> list[dict]:
-    """Return the plans, as /api/developer's `plans`: Copilot's (if `has_copilot`), then the placeholders."""
+    """Return the plans, the developer panel's `plans`: Copilot's (if `has_copilot`), then the placeholders."""
     found = []
     if has_copilot:
         found.append(
