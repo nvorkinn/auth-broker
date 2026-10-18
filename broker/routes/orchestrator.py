@@ -21,10 +21,14 @@ bp = Blueprint("orchestrator", __name__, url_prefix="/api/orchestrator")
 @bp.get("/assignments")
 @require_orchestrator_token
 def list_assignments() -> ResponseReturnValue:
-    """Every assignment that isn't deleted. `claim_token` is null once the renderer has claimed it."""
+    """Every assignment that isn't deleted. `claim_token` is null once the renderer has claimed it.
+
+    `device_id` is the screen's (its `v1:config:` and `v1:frame:` keys are under it), so the orchestrator can hand the
+    screen to the render pool; null once the device is forgotten (the assignment is then `deleting`).
+    """
     return jsonify(
         assignments=[
-            {"id": a.id, "slug": a.slug, "claim_token": a.claim_token, "status": a.status}
+            {"id": a.id, "slug": a.slug, "claim_token": a.claim_token, "status": a.status, "device_id": a.device_id}
             for a in assignments.listing()
         ]
     )

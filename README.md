@@ -271,9 +271,11 @@ polls the assignments with `Authorization: Bearer <ORCHESTRATOR_TOKEN>`
 (`secrets/broker.env`; unset keeps these endpoints off with a 404, and Caddy sends
 `/api/orchestrator/*` past the login):
 
-- `GET /api/orchestrator/assignments`: `{"assignments": [{"id", "slug", "claim_token", "status"}]}`.
+- `GET /api/orchestrator/assignments`: `{"assignments": [{"id", "slug", "claim_token", "status", "device_id"}]}`.
   `status` is `pending`, `provisioned`, `suspended`, `failed` or `deleting`. `claim_token` is
-  `null` once the renderer has claimed it.
+  `null` once the renderer has claimed it. `device_id` is the screen's (its `v1:config:` and `v1:frame:` keys are
+  under it), which the orchestrator needs to hand a screen to the render pool (its `POOL_SLUGS`); `null` once the
+  device is forgotten.
 - `POST /api/orchestrator/assignments/<id>/status` `{"status": "provisioned" | "failed" | "deleted", "detail": ""}`.
   `deleted` removes the assignment, and is only accepted for one that is `deleting` (409
   otherwise). A `provisioned` or `failed` report for an assignment that has since been suspended or

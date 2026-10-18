@@ -169,6 +169,7 @@ def test_the_orchestrator_lists_a_pending_assignment_with_its_claim_token(app, o
         "slug": f"{USERNAME}-lisa",
         "claim_token": assignment.claim_token,
         "status": "pending",
+        "device_id": screen,
     }
 
 
@@ -280,6 +281,8 @@ def test_forgetting_a_device_has_its_renderer_removed(app, orchestrator, client,
 
     [item] = _list(orchestrator)
     assert (item["id"], item["status"], item["claim_token"]) == (assignment_id, "deleting", None)
+    # The device is gone, so there's no screen to hand to the render pool.
+    assert item["device_id"] is None
     url = f"/api/orchestrator/assignments/{assignment_id}/status"
     assert orchestrator().post(url, headers=_bearer(TOKEN), json={"status": "deleted"}).status_code == 200
     assert _list(orchestrator) == []
