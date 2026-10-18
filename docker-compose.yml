@@ -95,7 +95,8 @@ services:
 
   # The developer provider: each screen's developer panel (GitHub and AI plans), polled for as long as the panel is on
   # and written to Redis for the renderers, which it also asks to refresh faster while a release runs (the pace key).
-  # The broker's image and settings, like the music provider, on the same AUTH_BROKER_VERSION.
+  # The broker's image, on the same AUTH_BROKER_VERSION. Like the glow-provider it opens the database read-only
+  # (provider_loop.read_only_app: no migrations, SQLite's mode=ro), so ./data is mounted :ro.
   developer-provider:
     <<: *release-image
     image: ghcr.io/nvorkinn/auth-broker:${AUTH_BROKER_VERSION:-latest}
@@ -105,14 +106,11 @@ services:
     network_mode: host
     command: ["python", "-m", "broker.developer_provider"]
     volumes:
-      - ./data:/app/data
+      - ./data:/app/data:ro
     # The broker's secrets (the GitHub tokens are decrypted with its key), and Redis's password.
     env_file:
       - broker.env
       - redis.env
-    # Not used here, but the broker's create_app() won't start without it.
-    environment:
-      SPOTIFY_REDIRECT_URI: https://auth.nikolaivorkinn.com/auth/spotify/callback
     stop_grace_period: 30s
 
   caddy:

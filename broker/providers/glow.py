@@ -32,20 +32,22 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import redis
 from cryptography.fernet import InvalidToken
-from flask import Flask
 from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 
 from broker.clients.glowmarkt import DAILY, HOURLY, MONTHLY, PERIODS, GlowmarktAccount, local_now, utc_offset_param
 from broker.clients.glowmarkt import window_start as page_window_start
-from broker.db import _db_path, db
+from broker.db import db
 from broker.log_format import JsonFormatter
 from broker.models import DeviceConfig, GlowmarktCredentials
+from broker.provider_loop import read_only_app
 from broker.routes.devices import _timezone
 from broker.routes.pages import postcode_country
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+
+    from flask import Flask
 
 logger = logging.getLogger("broker.providers.glow")
 
@@ -77,19 +79,6 @@ class Account:
     username: str
     password: str
     zone: str
-
-
-def create_app() -> Flask:
-    """Return an app that can only read the broker's database and decrypt what's in it.
-
-    Not broker.create_app(): that migrates the database and wants every one of the broker's secrets. This opens the
-    database read-only (SQLite's mode=ro), so the provider can never write to it, nor hold a write lock.
-    """
-    app = Flask(__name__)
-    app.config["CREDENTIAL_ENCRYPTION_KEY"] = os.environ["CREDENTIAL_ENCRYPTION_KEY"]
-    app.config["SQLALCHEMY_DATABASE_URI"] = f"sqlite:///file:{_db_path()}?mode=ro&uri=true"
-    db.init_app(app)
-    return app
 
 
 def accounts() -> list[Account]:
@@ -279,7 +268,8 @@ def main() -> None:
         socket_timeout=5,
         socket_connect_timeout=5,
     )
-    provider = GlowProvider(create_app(), store)
+    # The broker's database, read-only (with ./data mounted :ro), like the developer provider's.
+    provider = GlowProvider(read_only_app(), store)
     signal.signal(signal.SIGTERM, provider.stop)
     signal.signal(signal.SIGINT, provider.stop)
     provider.serve()

@@ -16,6 +16,7 @@ import responses
 from broker.clients import glowmarkt
 from broker.db import db
 from broker.models import Device, DeviceConfig, GlowmarktCredentials
+from broker.provider_loop import read_only_app
 from broker.providers import glow
 
 FIXTURE = json.loads((Path(__file__).parent.parent / "fixtures" / "glow_energy.json").read_text())
@@ -84,7 +85,7 @@ def store():
 
 @pytest.fixture
 def provider(app, store):
-    provider_app = glow.create_app()
+    provider_app = read_only_app()
     yield glow.GlowProvider(provider_app, store, now=lambda: NOW)
     with provider_app.app_context():
         db.engine.dispose()
@@ -214,7 +215,7 @@ class FakeClock:
 
 def test_waits_for_the_next_epoch_aligned_tick(app, store, monkeypatch):
     clock = FakeClock(1000 * glow.INTERVAL_S + 123.4)
-    provider = glow.GlowProvider(glow.create_app(), store, clock=clock)
+    provider = glow.GlowProvider(read_only_app(), store, clock=clock)
     monkeypatch.setattr(provider, "run_cycle", lambda **_: 0)
     deadlines = []
 
@@ -231,7 +232,7 @@ def test_waits_for_the_next_epoch_aligned_tick(app, store, monkeypatch):
 
 def test_a_nudge_on_sub_changed_ends_the_wait(app, store):
     clock = FakeClock(0.0)
-    provider = glow.GlowProvider(glow.create_app(), store, clock=clock)
+    provider = glow.GlowProvider(read_only_app(), store, clock=clock)
     provider._pubsub = store.pubsub(ignore_subscribe_messages=True)
     provider._pubsub.subscribe(glow.SUB_CHANGED)
     store.publish(glow.SUB_CHANGED, "")
@@ -241,7 +242,7 @@ def test_a_nudge_on_sub_changed_ends_the_wait(app, store):
 
 def test_the_wait_ends_at_the_deadline_or_a_stop(app, store):
     clock = FakeClock(100.0)
-    provider = glow.GlowProvider(glow.create_app(), store, clock=clock)
+    provider = glow.GlowProvider(read_only_app(), store, clock=clock)
 
     assert provider._wait(50.0) is False
     provider.stop()
@@ -249,7 +250,7 @@ def test_the_wait_ends_at_the_deadline_or_a_stop(app, store):
 
 
 def test_serve_runs_a_nudged_cycle_after_a_nudge_and_a_full_one_after_a_tick(app, store, monkeypatch):
-    provider = glow.GlowProvider(glow.create_app(), store)
+    provider = glow.GlowProvider(read_only_app(), store)
     cycles = []
     waits = iter([True, False])
 

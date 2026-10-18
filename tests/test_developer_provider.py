@@ -5,6 +5,7 @@ tests), so a change to either side that breaks the other shows up in both.
 """
 
 import json
+import shutil
 import threading
 import time
 from datetime import UTC, datetime
@@ -14,9 +15,12 @@ from unittest.mock import patch
 import fakeredis
 import pytest
 import requests
+from cryptography.fernet import Fernet
+from sqlalchemy import text
+from sqlalchemy.exc import OperationalError
 
-from broker import developer_provider
-from broker.db import db
+from broker import developer_provider, provider_loop
+from broker.db import _db_path, db
 from broker.developer_provider import (
     BURST_INTERVAL_S,
     IDLE_INTERVAL_S,
@@ -28,7 +32,7 @@ from broker.developer_provider import (
     stored_key,
 )
 from broker.models import DeviceConfig, GitHubToken
-from broker.provider_loop import SUB_CHANGED, next_tick
+from broker.provider_loop import SUB_CHANGED, next_tick, read_only_app
 
 FIXTURE = json.loads((Path(__file__).parent / "fixtures" / "developer.json").read_text())
 FETCHED_AT = datetime.fromisoformat(FIXTURE["fetched_at"]).timestamp()
@@ -47,8 +51,17 @@ def store():
 
 
 @pytest.fixture
-def provider(app, store):
-    return DeveloperProvider(app, store, clock=lambda: FETCHED_AT)
+def provider_app(app):
+    """Return the app the provider runs in, as main() has it: read_only_app(), on the database that `app` writes."""
+    provider_app = read_only_app()
+    yield provider_app
+    with provider_app.app_context():
+        db.engine.dispose()
+
+
+@pytest.fixture
+def provider(provider_app, store):
+    return DeveloperProvider(provider_app, store, clock=lambda: FETCHED_AT)
 
 
 @pytest.fixture
@@ -232,12 +245,76 @@ def test_a_device_switched_off_stops_the_fast_polls(app, provider, store, device
     assert provider.interval_s() == IDLE_INTERVAL_S
 
 
-def test_redis_down_is_logged_and_tried_next_tick(app, device):
+def test_the_provider_cant_write_to_the_database(provider, device):
+    device_id = device()
+
+    with provider.app.app_context():
+        db.session.get(DeviceConfig, device_id).developer_enabled = False
+        with pytest.raises(OperationalError, match="readonly"):
+            db.session.commit()
+
+
+def test_a_cycle_reads_a_read_only_database_and_leaves_it_as_it_was(provider, store, device):
+    """As in production, with ./data mounted read-only: nothing is created beside it (journal, WAL, lock), or changed.
+
+    The modes only stop a process that isn't root (as in CI); the comparison catches a write either way.
+    """
+    device_id = device()
+    path = _db_path()
+    before = {file.name: file.read_bytes() for file in path.parent.iterdir()}
+    modified = path.stat().st_mtime_ns
+    path.chmod(0o444)
+    path.parent.chmod(0o555)
+    try:
+        _run(provider)
+    finally:
+        path.parent.chmod(0o755)
+        path.chmod(0o644)
+
+    assert _stored(store, stored_key(device_id)) == FIXTURE
+    assert {file.name: file.read_bytes() for file in path.parent.iterdir()} == before
+    assert path.stat().st_mtime_ns == modified
+
+
+def test_main_runs_the_provider_on_the_read_only_database(tmp_path, migrated_db, monkeypatch):
+    """With only CREDENTIAL_ENCRYPTION_KEY of the broker's secrets, and no migrations: nothing is added beside it."""
+    data = tmp_path / "data"
+    data.mkdir()
+    shutil.copyfile(migrated_db, data / "broker.db")
+    monkeypatch.setenv("BROKER_DB_PATH", str(data / "broker.db"))
+    monkeypatch.setenv("CREDENTIAL_ENCRYPTION_KEY", Fernet.generate_key().decode())
+    for name in ("FLASK_SECRET_KEY", "SPOTIFY_CLIENT_ID", "SPOTIFY_CLIENT_SECRET", "SPOTIFY_REDIRECT_URI"):
+        monkeypatch.delenv(name, raising=False)
+    ran = []
+
+    def run(self):  # a method, so not list.append itself, which wouldn't be handed the provider
+        ran.append(self)
+
+    monkeypatch.setattr(provider_loop, "configure_logging", lambda: None)
+    monkeypatch.setattr(provider_loop, "connect", lambda: fakeredis.FakeRedis(decode_responses=True))
+    monkeypatch.setattr(provider_loop.signal, "signal", lambda *_: None)
+    monkeypatch.setattr(DeveloperProvider, "run", run)
+
+    developer_provider.main()
+
+    (provider,) = ran
+    with provider.app.app_context():
+        try:
+            assert developer_provider.wanted_devices() == []
+            with pytest.raises(OperationalError, match="readonly"):
+                db.session.execute(text("DELETE FROM device_config"))
+        finally:
+            db.session.remove()
+            db.engine.dispose()
+    assert [file.name for file in data.iterdir()] == ["broker.db"]
+
+
+def test_redis_down_is_logged_and_tried_next_tick(provider_app, device):
     device()
     server = fakeredis.FakeServer()
     server.connected = False  # every command raises ConnectionError
     provider = DeveloperProvider(
-        app, fakeredis.FakeRedis(server=server, decode_responses=True), clock=lambda: FETCHED_AT
+        provider_app, fakeredis.FakeRedis(server=server, decode_responses=True), clock=lambda: FETCHED_AT
     )
 
     # Patched rather than caplog: other tests (alembic's logging set-up) can leave loggers disabled.
@@ -301,10 +378,10 @@ class Clock:
         (_rate_limited(403, text='{"message": "You have exceeded a secondary rate limit"}'), 60),
     ],
 )
-def test_a_rate_limited_token_is_left_alone_until_github_says(app, store, device, error, wait):
+def test_a_rate_limited_token_is_left_alone_until_github_says(provider_app, store, device, error, wait):
     device_id = device()
     clock = Clock()
-    provider = DeveloperProvider(app, store, clock=clock)
+    provider = DeveloperProvider(provider_app, store, clock=clock)
     _run(provider)
     before = store.get(stored_key(device_id))
 
@@ -321,10 +398,10 @@ def test_a_rate_limited_token_is_left_alone_until_github_says(app, store, device
     assert _stored(store, stored_key(device_id))["fetched_at"] == datetime.fromtimestamp(clock.now, UTC).isoformat()
 
 
-def test_a_rate_limited_device_does_not_hold_up_the_others(app, store, device):
+def test_a_rate_limited_device_does_not_hold_up_the_others(provider_app, store, device):
     limited = device(secret="a-very-long-device-secret-1", token="limited")
     fine = device(secret="a-very-long-device-secret-2", token="fine")
-    provider = DeveloperProvider(app, store, clock=Clock())
+    provider = DeveloperProvider(provider_app, store, clock=Clock())
 
     def summary(token):
         if token == "limited":
@@ -345,9 +422,9 @@ def test_a_rate_limited_device_does_not_hold_up_the_others(app, store, device):
     assert _stored(store, stored_key(fine)) == FIXTURE
 
 
-def test_a_403_that_isnt_a_rate_limit_does_not_back_off(app, store, device):
+def test_a_403_that_isnt_a_rate_limit_does_not_back_off(provider_app, store, device):
     device()
-    provider = DeveloperProvider(app, store, clock=Clock())
+    provider = DeveloperProvider(provider_app, store, clock=Clock())
 
     with patch("broker.clients.github.summary", side_effect=_rate_limited(403, text='{"message": "Bad credentials"}')):
         provider.run_cycle()

@@ -2,7 +2,7 @@
 
     python -m broker.developer_provider
 
-It runs from the broker's image with the broker's settings and database. For every device in `v1:sub:developer`'s
+It runs from the broker's image and reads the broker's database, read-only. For every device in `v1:sub:developer`'s
 terms (the developer panel switched on) it polls everything the panel shows (the owner's GitHub, with the token only
 the broker holds, and their AI plans) on its own, whether or not a renderer is looking, and writes it to
 `v1:developer:<device id>`. The renderers on the server read that instead of calling /api/developer.
@@ -14,6 +14,10 @@ deleted (or lapses), and the screen goes back to its usual pace. See "The pace" 
 
 A device whose GitHub rate-limits its token (403/429, see github.rate_limit_wait) isn't polled again until GitHub says
 it may be (Retry-After, or X-RateLimit-Reset), and its keys are left as they are meanwhile.
+
+It never writes to the database: it runs in provider_loop.read_only_app() (SQLite's mode=ro, no migrations), with
+./data mounted read-only, and needs only CREDENTIAL_ENCRYPTION_KEY of the broker's secrets, to decrypt the tokens.
+GitHub's personal access tokens aren't refreshed, so there is nothing to write back.
 """
 
 import json

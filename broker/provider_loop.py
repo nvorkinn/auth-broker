@@ -5,6 +5,9 @@ cycle to the next), or early on a `v1:sub:changed` message (a config was saved).
 devices. A cycle that fails is logged and the next tick tries again; an unreachable Redis is logged and the
 subscription retried every RESUBSCRIBE_S, so a missed nudge only delays a change until the next tick.
 
+A provider runs in read_only_app(), which can only read the broker's database (the Glowmarkt provider uses it too),
+so its compose service mounts ./data read-only.
+
 (The music and Glowmarkt providers have their own copies of this, older than it.)
 """
 
@@ -19,12 +22,13 @@ from contextlib import suppress
 from typing import TYPE_CHECKING
 
 import redis
+from flask import Flask
 from redis.exceptions import RedisError
+
+from broker.db import init_read_only_app
 
 if TYPE_CHECKING:
     from collections.abc import Callable
-
-    from flask import Flask
 
 SUB_CHANGED = "v1:sub:changed"
 # How long each wait for a `v1:sub:changed` message lasts, so a stop is noticed within it.
@@ -141,6 +145,19 @@ class ProviderLoop(ABC):
             self._pubsub = None
 
 
+def read_only_app() -> Flask:
+    """Return an app that can only read the broker's database and decrypt what's in it: the one a provider runs in.
+
+    Not broker.create_app(): that migrates the database (taking a lock file next to it) and wants every one of the
+    broker's secrets. This needs only CREDENTIAL_ENCRYPTION_KEY, and opens the database read-only (SQLite's mode=ro,
+    see db.init_read_only_app), so the provider can never write to it, nor hold a write lock.
+    """
+    app = Flask(__name__)
+    app.config["CREDENTIAL_ENCRYPTION_KEY"] = os.environ["CREDENTIAL_ENCRYPTION_KEY"]
+    init_read_only_app(app)
+    return app
+
+
 def connect() -> redis.Redis:
     """Return a client for the store, from REDIS_URL and REDIS_PASSWORD, as the broker's own."""
     return redis.Redis.from_url(
@@ -162,11 +179,9 @@ def configure_logging() -> None:
 
 
 def serve(make_provider: Callable[[Flask, redis.Redis], ProviderLoop]) -> None:
-    """Run the provider `make_provider` makes until SIGINT or SIGTERM."""
+    """Run the provider `make_provider` makes, in read_only_app(), until SIGINT or SIGTERM."""
     configure_logging()
-    from broker import create_app  # noqa: PLC0415 -- after logging is set up, so the app's start is logged too
-
-    provider = make_provider(create_app(), connect())
+    provider = make_provider(read_only_app(), connect())
     # As a container's PID 1 nothing handles SIGTERM unless we do, and docker stop would have to kill us.
     for signum in (signal.SIGINT, signal.SIGTERM):
         signal.signal(signum, lambda *_: provider.stop())
