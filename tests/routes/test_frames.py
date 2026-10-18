@@ -1027,8 +1027,9 @@ def test_a_poll_writes_nothing_to_redis(client, register_device, app, store, mon
     for _ in range(3):
         assert _retry_after(client) == "13"
 
-    assert sorted(set(sent)) == ["GET", "PTTL"]  # reads, in one round trip a poll
-    assert sent.count("GET") == 3
+    # Reads only: the pace key and its TTL in one round trip a poll, and the frame record's HMGET (frame_record.py).
+    assert set(sent) <= {"GET", "PTTL", "HMGET"}
+    assert (sent.count("GET"), sent.count("PTTL")) == (3, 3)
 
 
 @pytest.mark.usefixtures("frozen")

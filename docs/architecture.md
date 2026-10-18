@@ -332,6 +332,10 @@ sequenceDiagram
   every 10 s while a provider's data is bursty, before the first frame too. See [Pace](#pace).
 - The renderer uploads only when its picture changed. If the same frame is uploaded again, only `frames.rendered_at`
   moves, which says the renderer is alive.
+- A renderer that writes the frame record also puts each new picture in Redis, `v1:frame:<device id>` (a hash of the
+  frame, its ETag and when it was drawn, TTL a day), and the broker answers the poll from it when it's newer than
+  the `frames` row or the same picture, reading only its ETag for a 304. Without one, or while it can't be read, the
+  row. See the README's [Frames in the store](../README.md#frames-in-the-store).
 - Metrics and logs the screen reports are forwarded in the background to VictoriaMetrics and VictoriaLogs, and never
   slow or fail the poll. The `{device_id}` placeholder in the metrics text is replaced by the broker.
 - `last_seen_at` moves on any authenticated call, at most once a minute; `display_last_seen_at` only on the screen's
