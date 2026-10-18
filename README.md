@@ -928,10 +928,13 @@ rule both use), and nothing of the account itself.
 Every 15 minutes (on the epoch-aligned tick, or at once for an account that's
 new or changed when the broker publishes on `v1:sub:changed`) it asks Glowmarkt,
 per device, for the three pages the renderer's energy panel draws, and writes
-`v1:energy:<device id>` with a TTL of an hour. Glowmarkt has a new reading at
-most every half-hour; an hour is four cycles, so a blip of a cycle or two goes
-unnoticed, while after an hour without a fetch the key is gone and the renderers
-stop drawing new pages (each keeps its last) rather than redraw stale ones. A device
+`v1:energy:<device id>` with a TTL of about a day (`TTL_S`). Glowmarkt has a new
+reading at most every half-hour, and DCC data is often hours late, so energy
+changes slowly: Glowmarkt failing for hours changes nothing on the screens,
+while after a day without a fetch the key is gone and the energy panel says it's
+not available rather than draw readings that old. The TTL is the only expiry
+(pi-dashboard's `docs/stateless-renderers.md`, "Expiry"): renderers keep no copy
+of their own. A device
 whose sign-in fails is logged and skipped (its key expires); its token is kept
 between cycles and renewed when Glowmarkt refuses it. The value is Glowmarkt's
 answers as they came, in a thin wrapper, so the renderer reads them with the
@@ -1119,7 +1122,8 @@ renderer reads both with the same models; the only definition of its own is the 
 }
 ```
 
-- A part is `null` when the service is switched off or its fetch failed; the renderer then keeps its last panel.
+- A part is `null` when the service is switched off or its fetch failed; the renderer's panel then says it's not
+  available.
   Top lists short of a service are written only if there's no copy yet: a full older one is kept, and the fetch is
   tried again next minute.
 - Nothing playing is a queue with `"currently_playing": null` (and `"queue": []` for Spotify's 204), not a missing

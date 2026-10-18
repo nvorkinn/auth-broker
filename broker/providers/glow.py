@@ -57,9 +57,12 @@ SUB_CHANGED = "v1:sub:changed"
 # pages are hours, days and months: every 15 minutes keeps the open hour's bar within a quarter of an hour, at three
 # readings requests per device, fewer than a renderer's own (each page every 10 minutes).
 INTERVAL_S = 15 * 60
-# Four cycles: a blip of a cycle or two goes unnoticed, while after an hour without a fetch (the provider down, or
-# Glowmarkt failing) the key is gone and the renderers stop drawing new pages (each keeps its last).
-TTL_S = 60 * 60
+# About a day, as decided for energy (pi-dashboard's docs/stateless-renderers.md, "Expiry"): the readings change
+# slowly (a new half-hour at most every 30 minutes, DCC data often hours late), so Glowmarkt failing for hours changes
+# nothing on the screens, while after a day without a fetch (the provider down, or Glowmarkt failing all day) the key
+# is gone and the energy panel says it's not available, rather than draw readings that old. This TTL is the only
+# expiry: the renderers keep no copy of their own.
+TTL_S = 24 * 60 * 60
 # How long to wait before asking Redis again for the nudges, when it can't be reached.
 RESUBSCRIBE_S = 5
 # The renderer's default zone when its config has none (the countdown-api contract's).
