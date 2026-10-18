@@ -270,7 +270,7 @@ sequenceDiagram
     Note right of B: DB: +renderer_assignments
     Note over B: slug = username + '-' + what the user typed, at most 32 characters, unique across the whole broker. claim_token is random (32 bytes) and kept as it is
     O->>B: GET /api/orchestrator/assignments (every 10 s)<br/>Bearer ORCHESTRATOR_TOKEN
-    B-->>O: 200 {assignments: [kitchen/pending + claim_token]}
+    B-->>O: 200 {assignments: [kitchen/pending + claim_token + device_id]}
     Note over O,R: docker run renderer-SLUG: image RENDERER_IMAGE, host network, env BROKER_URL, DEVICE_NAME=SLUG, CLAIM_TOKEN, volumes renderer-SLUG-data and -key
     O->>B: POST /api/orchestrator/assignments/ID/status {provisioned}<br/>Bearer ORCHESTRATOR_TOKEN
     B-->>O: 200 {status: provisioned}
