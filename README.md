@@ -141,9 +141,9 @@ times out, check GitHub's releases before reloading to try again: GitHub might h
    The server exchanges the code for tokens and keeps them — the Pi never
    sees a Spotify token, only its own device secret.
 4. **Ongoing:** the renderer reads its config from Redis (see
-   [Configs in the store](#configs-in-the-store)), or polls `GET /api/config` (device settings +
-   the shared weather API key, never TfL's: only the broker's stop lookups
-   use it, and pi-dashboard's providers have their own) without it, and reads its panels'
+   [Configs in the store](#configs-in-the-store)), or polls `GET /api/config` (the device's
+   settings, and no API key: the weather needs none, and TfL's is only for the broker's stop
+   lookups, as pi-dashboard's providers have their own) without it, and reads its panels'
    data from Redis. With Spotify or Apple Music on, the music provider fetches
    what's playing and the top lists with the tokens only the broker holds
    (refreshing Spotify's itself) and writes them there (see "Music in the
@@ -974,8 +974,9 @@ and don't need the broker to be up, and a save reaches the screen at once
 (`broker/services/config_store.py`; `services/renderer_config.py` makes it, and the route's answer, the same way):
 
 - **The value** is exactly `GET /api/config`'s JSON for the device (the contract's `ConfigResponse`), less its
-  secrets: `weather.api_key` empty, which the renderers no longer use, and `pairing_code` null (TfL's key isn't in
-  the config at all any more).
+  pairing code (`pairing_code` null). It carries no API key: `weather.api_key` is empty in both, only because
+  renderers built on countdown-api before the field was optional still require it, and TfL's key isn't in the
+  config at all any more.
   `tests/fixtures/config_store.json` is an example; pi-dashboard's tests read the same file, so change both together.
 - **Written** for every device on every config save, as the broker starts (gunicorn's `post_worker_init`, in
   `gunicorn.conf.py`, which writes the subscriptions too), by `flask weather backfill` and by

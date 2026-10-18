@@ -27,13 +27,13 @@ from broker.services import pairing, stops, weather_place
 from broker.services.postcodes import postcode_country
 
 
-def build(config: DeviceConfig, *, pairing_code: str | None, api_key: bool) -> ConfigResponse:
+def build(config: DeviceConfig, *, pairing_code: str | None) -> ConfigResponse:
     """Return the config a renderer is sent for the device `config` is the settings of.
 
-    Bundles the device's own settings with the shared weather API key if `api_key` (else it's sent empty), so a key
-    rotation doesn't require re-flashing every gifted device. Never TfL's key: the renderer reads TfL's departures and
-    disruptions from the store, whose providers have their own, and the broker's is only for its stop lookups.
-    Carries the device_id, so a renderer needn't keep it, and `pairing_code`, the code it is to show (None for none).
+    It is the device's own settings, and no key of any kind: the renderer reads everything from the store, whose
+    providers have their own keys (TfL's), or need none (Open-Meteo's weather). The broker's TfL key is only for its
+    stop lookups. Carries the device_id, so a renderer needn't keep it, and `pairing_code`, the code it is to show
+    (None for none).
     """
     device_id = config.device_id
     creds = db.session.get(GlowmarktCredentials, device_id)
@@ -49,7 +49,10 @@ def build(config: DeviceConfig, *, pairing_code: str | None, api_key: bool) -> C
         screen=Screen(orientation=config.orientation, width=config.width, height=config.height),
         # The key is what the weather is subscribed under, so it's what the renderer reads (v1:weather:<key>).
         weather=Weather(
-            api_key=current_app.config["WEATHER_API_KEY"] if api_key else "",
+            # No weather API key: the renderer reads the forecast from the store, and Open-Meteo needs none. Sent
+            # empty, and explicitly (a default left unset is left out of the response), because renderers built on
+            # countdown-api before api_key was optional require it; it goes once none of those is deployed.
+            api_key="",
             location=config.weather_location,
             key=weather_place.weather_key(config),
         ),
@@ -80,16 +83,16 @@ def build(config: DeviceConfig, *, pairing_code: str | None, api_key: bool) -> C
 def for_store(device: Device) -> ConfigResponse | None:
     """Return the copy of the device's config the store keeps for its renderer, or None if it keeps none.
 
-    It is the config GET /api/config answers with, less what mustn't be in Redis, which every provider and renderer
-    can read: the weather API key (sent empty; the renderers no longer use it) and the pairing code (null). A code
-    proves someone is at the screen, and hands the screen to whoever types it.
+    It is the config GET /api/config answers with, less the pairing code (null), which mustn't be in Redis, where
+    every provider and renderer can read it: a code proves someone is at the screen, and hands the screen to whoever
+    types it.
 
     None while the renderer has a code to show (the device isn't paired, or a code was asked for and is still live):
     only GET /api/config gives it one, and issues it, so with no copy in the store the renderer asks the broker.
     """
     if device.config is None or device.paired_at is None or pairing.live_code(device.device_id):
         return None
-    return build(device.config, pairing_code=None, api_key=False)
+    return build(device.config, pairing_code=None)
 
 
 def timezone(country: str | None, stop_ids: list[str]) -> str:
