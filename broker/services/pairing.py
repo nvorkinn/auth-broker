@@ -14,6 +14,7 @@ import secrets
 import string
 from datetime import UTC, datetime, timedelta
 
+from flask import current_app
 from sqlalchemy import delete, or_, select
 
 from broker.db import db
@@ -78,7 +79,7 @@ def _after_pairing(device_id: str, previous: str | None, user: str) -> None:
     else:
         pairing_key.delete(device_id)
     # So a pooled screen goes back to its dashboard now, not at the next tick.
-    render_jobs.request(device_id)
+    render_jobs.enqueue(current_app.extensions["redis"], [device_id])
 
 
 def issue_code(device_id: str) -> str:
@@ -97,7 +98,7 @@ def issue_code(device_id: str) -> str:
     # For a screen the pool draws, which reads only the store; over the key of any code this one replaces.
     pairing_key.write(device_id, code, expires_at)
     # And draws it now, after the key's written.
-    render_jobs.request(device_id)
+    render_jobs.enqueue(current_app.extensions["redis"], [device_id])
     return code
 
 

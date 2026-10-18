@@ -221,6 +221,10 @@ class _DownRedis:
 
         return fail
 
+    def register_script(self, _script):
+        # Redis-py's own makes no call: the script is sent when it runs, which fails like any other command.
+        return self.__getattr__("evalsha")
+
 
 def test_redis_down_never_stops_a_code_being_issued_or_used(app, client, register_device):
     _device_id, secret = register_device()
