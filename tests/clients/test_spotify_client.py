@@ -15,90 +15,6 @@ def _mock_response(json_data=None, status_code=200, content=b"{}"):
     return response
 
 
-def test_get_current_track_returns_none_when_not_linked(app, paired_client):
-    _, device_id, _ = paired_client
-    with app.app_context():
-        assert spotify_module.get_current_track(device_id) is None
-
-
-def test_get_current_track_refreshes_expired_token(app, paired_client):
-    _, device_id, _ = paired_client
-
-    with app.app_context():
-        db.session.add(
-            SpotifyToken(
-                device_id=device_id,
-                refresh_token="old-refresh",
-                access_token="old-access",
-                expires_at=time.time() - 100,
-            )
-        )
-        db.session.commit()
-
-        refresh_payload = {"access_token": "new-access", "expires_in": 3600}
-        now_playing_payload = {
-            "is_playing": True,
-            "item": {
-                "name": "Song",
-                "artists": [{"name": "Artist"}],
-                "album": {
-                    "name": "Album",
-                    "images": [{"height": 300, "url": "https://big"}, {"height": 64, "url": "https://small"}],
-                },
-            },
-        }
-
-        def fake_post(url, **kwargs):
-            assert url == spotify_module.TOKEN_URL
-            assert kwargs["data"]["grant_type"] == "refresh_token"
-            assert kwargs["data"]["refresh_token"] == "old-refresh"
-            return _mock_response(refresh_payload)
-
-        with (
-            patch("broker.clients.spotify.requests.post", side_effect=fake_post),
-            patch("broker.clients.spotify.requests.get", return_value=_mock_response(now_playing_payload)),
-        ):
-            track = spotify_module.get_current_track(device_id)
-
-        assert track == now_playing_payload
-
-        row = db.session.get(SpotifyToken, device_id)
-        assert row.access_token == "new-access"
-        # Spotify didn't rotate the refresh token in this response - the old one must survive.
-        assert row.refresh_token == "old-refresh"
-
-
-def test_get_current_track_returns_none_on_204(app, paired_client):
-    _, device_id, _ = paired_client
-
-    with app.app_context():
-        db.session.add(
-            SpotifyToken(
-                device_id=device_id, refresh_token="refresh", access_token="access", expires_at=time.time() + 3600
-            )
-        )
-        db.session.commit()
-
-        with patch("broker.clients.spotify.requests.get", return_value=_mock_response(status_code=204, content=b"")):
-            assert spotify_module.get_current_track(device_id) is None
-
-
-def test_get_current_track_passes_through_when_nothing_playing(app, paired_client):
-    _, device_id, _ = paired_client
-    payload = {"is_playing": False, "item": None}
-
-    with app.app_context():
-        db.session.add(
-            SpotifyToken(
-                device_id=device_id, refresh_token="refresh", access_token="access", expires_at=time.time() + 3600
-            )
-        )
-        db.session.commit()
-
-        with patch("broker.clients.spotify.requests.get", return_value=_mock_response(payload)):
-            assert spotify_module.get_current_track(device_id) == payload
-
-
 def _link_spotify(device_id):
     db.session.add(
         SpotifyToken(device_id=device_id, refresh_token="refresh", access_token="access", expires_at=time.time() + 3600)
@@ -172,12 +88,19 @@ def test_get_queue_refreshes_expired_token(app, paired_client):
             patch(
                 "broker.clients.spotify.requests.post",
                 return_value=_mock_response({"access_token": "new-access", "expires_in": 3600}),
-            ),
+            ) as refresh,
             patch("broker.clients.spotify.requests.get", return_value=_mock_response({"queue": []})) as mocked,
         ):
             assert spotify_module.get_queue(device_id) == {"queue": []}
 
+        assert refresh.call_args.args[0] == spotify_module.TOKEN_URL
+        assert refresh.call_args.kwargs["data"]["grant_type"] == "refresh_token"
+        assert refresh.call_args.kwargs["data"]["refresh_token"] == "old-refresh"
         assert mocked.call_args.kwargs["headers"] == {"Authorization": "Bearer new-access"}
+        row = db.session.get(SpotifyToken, device_id)
+        assert row.access_token == "new-access"
+        # Spotify didn't rotate the refresh token in this response - the old one must survive.
+        assert row.refresh_token == "old-refresh"
 
 
 def test_get_users_top_items_returns_none_when_not_linked(app, paired_client):

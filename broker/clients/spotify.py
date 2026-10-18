@@ -1,7 +1,7 @@
 """Talks to Spotify on a device's behalf.
 
-It does the OAuth token exchange, keeps each device's tokens fresh, and makes the Web API calls the device-facing
-endpoints proxy.
+It does the OAuth token exchange, keeps each device's tokens fresh, and makes the Web API calls the music provider
+(broker/spotify_provider.py) writes to the store.
 """
 
 import urllib.parse
@@ -93,28 +93,6 @@ def _get_access_token(device_id: str) -> str | None:
     if token.expires_at is None or token.expires_at - 30 < datetime.now(UTC).timestamp():
         return _refresh_access_token(device_id, token.refresh_token)
     return token.access_token
-
-
-def get_current_track(device_id: str) -> dict[str, object] | None:
-    """Return what the device's Spotify is playing, in the shape of countdown's SpotifyClient.get_current_track().
-
-    That way the Pi side can eventually swap a direct spotipy call for a call to this broker
-    without touching the display code that consumes it.
-    """
-    access_token = _get_access_token(device_id)
-    if access_token is None:
-        return None
-
-    response = requests.get(
-        "https://api.spotify.com/v1/me/player/currently-playing",
-        headers={"Authorization": f"Bearer {access_token}"},
-        timeout=10,
-    )
-    if response.status_code == HTTPStatus.NO_CONTENT or not response.content:
-        return None
-    response.raise_for_status()
-
-    return response.json()
 
 
 def get_queue(device_id: str) -> list[dict[str, object]]:

@@ -114,9 +114,9 @@ Things the diagram can't say:
 | Table | One row per | Written by | Read by |
 |---|---|---|---|
 | `devices` | screen and its renderer | `POST /api/devices/register` (insert, and deletes unpaired screens older than 24 h), `POST /api/renderers/claim` (`renderer_secret_hash`), pairing (`owner`, `paired_at`), config polls (`device_name`), every device call (`last_seen_at`, and `display_last_seen_at` for the screen), "Unlink screen", the CLI | every device call (secret lookup), the pages, `GET /api/status/devices`, the CLI |
-| `device_config` | device | created at registration (with the screen's size), `POST /device` (settings), `unpair --config` | `GET /api/config`, `Retry-After` on frame polls, the Spotify proxy, `/device` |
+| `device_config` | device | created at registration (with the screen's size), `POST /device` (settings), `unpair --config` | `GET /api/config`, `Retry-After` on frame polls, the music provider, `/device` |
 | `pairing_codes` | live code | `POST /api/devices/pairing-code`, `flask devices code`, `GET /api/config` while unpaired; deleted on use, on expiry (swept on each new code) and by `unpair` | `POST /pair`, `GET /api/config` |
-| `spotify_tokens` | device that connected Spotify | `/auth/spotify/callback`, lazy refresh in the proxy | the Spotify proxy; deleted by Disconnect, `unpair --config`, `forget` |
+| `spotify_tokens` | device that connected Spotify | `/auth/spotify/callback`, lazy refresh in the music provider | the music provider; deleted by Disconnect, `unpair --config`, `forget` |
 | `glowmarkt_credentials` | device | `POST /device` | `GET /api/config`, `/device` |
 | `github_tokens` | device given a GitHub token | `POST /device`; deleted by "Remove token", `unpair --config`, `forget` | the developer-provider, `/device` |
 | `frames` | device | `PUT /api/frame` | `GET` and `POST /api/frame` |
