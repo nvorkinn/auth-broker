@@ -75,6 +75,9 @@ def _write_subscriptions_to_redis() -> None:
         "glow": set(),
         "spotify": set(),
         "developer": set(),
+        # The notice board's place, for the notice providers (floods, weather warnings, roads...): each postcode
+        # in canonical form ("SW1A 1AA", "0150"); a Norwegian one is four digits (see postcode_country).
+        "postcode": set(),
     }
 
     for config in configs:
@@ -86,6 +89,8 @@ def _write_subscriptions_to_redis() -> None:
             subs["spotify"].add(config.device_id)
         if config.developer_enabled:
             subs["developer"].add(config.device_id)
+        if config.postcode:
+            subs["postcode"].add(config.postcode)
     subs["glow"] = set(
         db.session.scalars(
             db.select(GlowmarktCredentials.device_id).where(GlowmarktCredentials.password_encrypted.is_not(None))
