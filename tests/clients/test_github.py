@@ -209,8 +209,11 @@ def test_a_release_started_by_hand_is_called_by_its_run_number():
 
 
 def test_a_finished_release_shows_for_a_minute_then_not():
-    just = _release_run(status="completed", conclusion="success", updated=NOW - timedelta(seconds=50))
-    earlier = _release_run(status="completed", conclusion="failure", updated=NOW - timedelta(seconds=70))
+    # From the time now, not NOW: that's taken when the module is imported, which under xdist can be long enough
+    # before this runs to push a run finished "50 seconds ago" past the minute.
+    now = datetime.now(UTC)
+    just = _release_run(status="completed", conclusion="success", updated=now - github.SHOWN_AFTER / 2)
+    earlier = _release_run(status="completed", conclusion="failure", updated=now - 2 * github.SHOWN_AFTER)
 
     with patch("requests.Session.get", side_effect=_releasing([just])):
         (release,) = github.summary("github_pat_abc")["releases"]

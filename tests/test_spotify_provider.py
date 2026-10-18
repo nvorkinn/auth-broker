@@ -1,7 +1,9 @@
 """The music provider (broker/spotify_provider.py): what it writes to the store, and how it copes with failures.
 
 tests/fixtures/music_player.json and music_top.json are the stored contract: pi-dashboard's renderer tests read the
-same two files (copied into its tests), so a change to either side that breaks the other shows up in both.
+same two files (copied into its tests), so a change to either side that breaks the other shows up in both. So is
+music_art.json, the covers stored for music_player.json (each music_art.jpg's bytes here); tests/test_album_art.py has
+the rest of the covers' tests.
 """
 
 import json
@@ -14,8 +16,10 @@ from unittest.mock import Mock, patch
 import fakeredis
 import pytest
 import requests
+import responses
 
 from broker import spotify_provider
+from broker.album_art import ART_TTL_S
 from broker.clients import spotify as spotify_client
 from broker.db import db
 from broker.models import AppleMusicToken, DeviceConfig, SpotifyToken
@@ -33,6 +37,8 @@ from tests.conftest import apple_song
 FIXTURES = Path(__file__).parent / "fixtures"
 PLAYER = json.loads((FIXTURES / "music_player.json").read_text())
 TOP = json.loads((FIXTURES / "music_top.json").read_text())
+COVERS = json.loads((FIXTURES / "music_art.json").read_text())
+ART = (FIXTURES / "music_art.jpg").read_bytes()
 FETCHED_AT = datetime.fromisoformat(PLAYER["fetched_at"]).timestamp()
 SPOTIFY_API = "https://api.spotify.com/v1"
 APPLE_SONGS = [apple_song("1", name="Efecto"), apple_song("2", name="Tití Me Preguntó")]
@@ -78,8 +84,31 @@ class FakeSpotify:
 
 
 @pytest.fixture
-def store():
-    return fakeredis.FakeRedis(decode_responses=True)
+def server():
+    return fakeredis.FakeServer()
+
+
+@pytest.fixture
+def store(server):
+    return fakeredis.FakeRedis(server=server, decode_responses=True)
+
+
+@pytest.fixture
+def binary(server):
+    """Return the same store as the renderer reads the covers: values as bytes."""
+    return fakeredis.FakeRedis(server=server)
+
+
+@pytest.fixture(autouse=True)
+def image_host():
+    """Mock the covers' hosts: music_art.jpg for the fixture's covers; any other request fails.
+
+    Their calls go through the provider's own session, which the patched requests.get doesn't reach.
+    """
+    with responses.RequestsMock(assert_all_requests_are_fired=False) as host:
+        for cover in COVERS.values():
+            host.add(responses.GET, cover["url"], body=ART, content_type="image/jpeg")
+        yield host
 
 
 @pytest.fixture
@@ -140,6 +169,95 @@ def test_writes_the_player_and_the_top_lists_in_the_stored_shape(app, provider, 
     assert _stored(store, top_key(device_id)) == TOP
     assert 0 < store.ttl(player_key(device_id)) <= PLAYER_TTL_S
     assert PLAYER_TTL_S < store.ttl(top_key(device_id)) <= TOP_TTL_S
+
+
+def test_the_covers_are_stored_under_the_keys_the_renderer_reads(provider, binary, device, musickit, image_host):
+    """Each service's playing track's (Apple Music's last played), as the image's bytes, by its URL."""
+    device(apple_music=True)
+
+    _run(provider)
+
+    for service in ("spotify", "apple_music"):
+        assert binary.get(COVERS[service]["key"]) == ART
+        assert PLAYER_TTL_S < binary.ttl(COVERS[service]["key"]) <= ART_TTL_S
+    assert sorted(call.request.url for call in image_host.calls) == sorted(c["url"] for c in COVERS.values())
+
+
+def test_the_covers_are_stored_before_the_player_key_that_shows_them(provider, store, device):
+    """So a renderer never reads a track whose cover isn't there yet."""
+    device_id = device()
+    keep = provider.art.keep
+    player_there = []
+
+    def spy(urls):
+        player_there.append(store.exists(player_key(device_id)))
+        keep(urls)
+
+    provider.art.keep = spy
+    _run(provider)
+
+    assert player_there == [0]
+    assert store.exists(COVERS["spotify"]["key"], player_key(device_id)) == 2
+
+
+def test_screens_playing_the_same_album_share_one_cover(provider, binary, device, image_host):
+    device(refresh_token="one")
+    device(refresh_token="two")
+
+    assert _run(provider) == 4
+
+    assert len(image_host.calls) == 1
+    assert binary.keys("v1:art:*") == [COVERS["spotify"]["key"].encode()]
+
+
+def test_a_cover_still_playing_is_renewed_each_minute_not_fetched_again(app, binary, device, image_host, store):
+    device()
+    now = [FETCHED_AT]
+    provider = MusicProvider(app, store, clock=lambda: now[0])
+    _run(provider)
+    binary.expire(COVERS["spotify"]["key"], 30)
+
+    now[0] += 60
+    _run(provider)
+
+    assert len(image_host.calls) == 1
+    assert binary.ttl(COVERS["spotify"]["key"]) > ART_TTL_S - 5
+
+
+def test_a_cover_that_cant_be_fetched_doesnt_cost_the_player(provider, store, binary, device, image_host):
+    """The renderer draws the page without it; it's tried again next cycle."""
+    device_id = device()
+    image_host.replace(responses.GET, COVERS["spotify"]["url"], status=500)
+
+    assert _run(provider) == 2
+
+    assert _stored(store, player_key(device_id))["spotify"] == PLAYER["spotify"]
+    assert binary.get(COVERS["spotify"]["key"]) is None
+    image_host.replace(responses.GET, COVERS["spotify"]["url"], body=ART, content_type="image/jpeg")
+    _run(provider)
+    assert binary.get(COVERS["spotify"]["key"]) == ART
+
+
+def test_a_failure_storing_the_covers_doesnt_cost_the_player(provider, store, device):
+    device_id = device()
+
+    with (
+        patch.object(provider.art, "keep", side_effect=ValueError("boom")),
+        patch.object(spotify_provider, "logger") as logger,
+    ):
+        assert _run(provider) == 2
+
+    assert _stored(store, player_key(device_id))["spotify"] == PLAYER["spotify"]
+    assert "covers" in logger.exception.call_args.args[0]
+
+
+def test_nothing_playing_has_no_cover(provider, store, device, image_host):
+    device()
+
+    _run(provider, FakeSpotify(queue="204"))
+
+    assert len(image_host.calls) == 0
+    assert store.keys("v1:art:*") == []
 
 
 def test_the_stored_parts_are_what_the_proxy_routes_answer(app, client, provider, store, device, musickit):
