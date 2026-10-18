@@ -124,3 +124,60 @@ def test_get_place_raises_when_open_meteo_cant_be_asked(app):
         pytest.raises(GeocodingUnavailableError),
     ):
         get_place(2643743)
+
+
+# --- Nothing logged says where a screen is ----------------------------------------------------------------------------
+# The logs go to the central log store; a failed request's text quotes its URL, with the place's name or id in it.
+
+SEARCH_URL_FAILURE = requests.ConnectionError(
+    "HTTPSConnectionPool(host='geocoding-api.open-meteo.com', port=443): Max retries exceeded with url: "
+    "/v1/search?name=Little+Snoring&count=8&language=en&format=json"
+)
+PLACE_URL_FAILURE = requests.ConnectionError(
+    "HTTPSConnectionPool(host='geocoding-api.open-meteo.com', port=443): Max retries exceeded with url: "
+    "/v1/get?id=2643743&language=en&format=json"
+)
+
+
+def _logged(logger) -> str:
+    """Return every line `logger` (a patched module logger) was asked to write, formatted, with any exc_info noted."""
+    lines = []
+    for call in logger.method_calls:
+        message, *args = call.args
+        lines.append((message % tuple(args)) + (" [exc_info]" if call.kwargs.get("exc_info") else ""))
+    return "\n".join(lines)
+
+
+@pytest.mark.parametrize(
+    ("failure", "reason"),
+    [
+        ({"side_effect": SEARCH_URL_FAILURE}, "ConnectionError"),
+        ({"return_value": _response({}, status_code=502)}, "HTTPError"),
+    ],
+)
+def test_a_failed_search_logs_neither_the_place_nor_the_url(app, failure, reason):
+    with (
+        app.app_context(),
+        patch("broker.clients.weather.requests.get", **failure),
+        patch("broker.clients.weather.logger") as logger,
+        pytest.raises(GeocodingUnavailableError),
+    ):
+        search_places("Little Snoring")
+
+    logged = _logged(logger)
+    assert logged.startswith(f"Couldn't search Open-Meteo for a weather place: {reason}")
+    for trace in ("Little", "Snoring", "open-meteo", "[exc_info]"):
+        assert trace not in logged
+
+
+def test_a_failed_place_lookup_logs_neither_its_id_nor_the_url(app):
+    with (
+        app.app_context(),
+        patch("broker.clients.weather.requests.get", side_effect=PLACE_URL_FAILURE),
+        patch("broker.clients.weather.logger") as logger,
+        pytest.raises(GeocodingUnavailableError),
+    ):
+        get_place(2643743)
+
+    logged = _logged(logger)
+    assert logged == "Couldn't get a weather place from Open-Meteo: ConnectionError"

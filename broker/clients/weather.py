@@ -4,11 +4,11 @@ A place is Open-Meteo's (GeoNames') town or city: {id, name, admin1, country, co
 label}, label being what the settings page shows ("London, England, United Kingdom").
 """
 
+import logging
 from http import HTTPStatus
 from typing import Any
 
 import requests
-from flask import current_app
 
 OPEN_METEO_GEOCODING_URL = "https://geocoding-api.open-meteo.com/v1/search"
 OPEN_METEO_PLACE_URL = "https://geocoding-api.open-meteo.com/v1/get"
@@ -16,9 +16,22 @@ OPEN_METEO_PLACE_URL = "https://geocoding-api.open-meteo.com/v1/get"
 TIMEOUT = 4
 SEARCH_COUNT = 8
 
+logger = logging.getLogger(__name__)
+
 
 class GeocodingUnavailableError(Exception):
     """Open-Meteo couldn't be asked, or answered with something that isn't a geocoding result."""
+
+
+def _reason(error: Exception) -> str:
+    """Say what went wrong without the error's own text: its type, and an HTTP error's status ("HTTPError 503").
+
+    A failed request's text quotes its URL, with the place's name or id in it, and a place says where a screen, and
+    someone's home, is: the logs go to the central log store.
+    """
+    if isinstance(error, requests.HTTPError) and error.response is not None:
+        return f"{type(error).__name__} {error.response.status_code}"
+    return type(error).__name__
 
 
 def _place(result: dict[str, Any]) -> dict[str, Any]:
@@ -55,7 +68,7 @@ def search_places(name: str, count: int = SEARCH_COUNT) -> list[dict[str, Any]]:
         # Open-Meteo leaves "results" out entirely when nothing matches.
         return [_place(result) for result in response.json().get("results") or []]
     except (requests.RequestException, ValueError, KeyError, TypeError) as e:
-        current_app.logger.warning("Couldn't search Open-Meteo for weather place %r", name, exc_info=True)
+        logger.warning("Couldn't search Open-Meteo for a weather place: %s", _reason(e))  # not which, nor the URL
         raise GeocodingUnavailableError from e
 
 
@@ -82,5 +95,5 @@ def get_place(place_id: int) -> dict[str, Any] | None:
             return None
         return _place(result)
     except (requests.RequestException, ValueError, KeyError, TypeError) as e:
-        current_app.logger.warning("Couldn't get weather place %s from Open-Meteo", place_id, exc_info=True)
+        logger.warning("Couldn't get a weather place from Open-Meteo: %s", _reason(e))  # not which, nor the URL
         raise GeocodingUnavailableError from e

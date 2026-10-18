@@ -1,7 +1,8 @@
 import re
-from unittest.mock import Mock, patch
+from unittest.mock import MagicMock, Mock, patch
 
 import pytest
+import redis
 
 from broker.clients import weather
 from broker.db import db
@@ -874,6 +875,27 @@ def test_the_config_is_saved_even_when_redis_is_down(app, paired_client, fake_re
     assert response.status_code == 302
     with app.app_context():
         assert db.session.get(DeviceConfig, device_id).weather_location == "London"
+
+
+def test_a_failed_subscription_publish_logs_the_errors_type_not_its_text(
+    app, paired_client, fake_redis, weather_location_lookup
+):
+    """A failed pipeline's text quotes its commands, SADD v1:sub:postcode <postcode> among them: not logged."""
+    client, _, _ = paired_client
+    weather_location_lookup.side_effect = lambda name, **_: [_place(name, 2643743, country_code="gb")]
+    failing = MagicMock()
+    failing.__enter__.return_value.execute.side_effect = redis.ResponseError(
+        "Command # 9 (SADD v1:sub:postcode SE17 3LL) of pipeline caused error: OOM command not allowed"
+    )
+    fake_redis.pipeline = lambda **_: failing
+
+    with patch.object(app, "logger") as logger:
+        response = client.post("/device", data={"postcode": "SE17 3LL", "weather_location": "London"})
+
+    assert response.status_code == 302
+    [call] = [c for c in logger.method_calls if c.args and "subscriptions" in c.args[0]]
+    assert call.args == ("Couldn't publish subscriptions to Redis (%s)", "ResponseError")
+    assert not call.kwargs.get("exc_info")
 
 
 # --- The weather place picker ---------------------------------------------------------------------------------------
