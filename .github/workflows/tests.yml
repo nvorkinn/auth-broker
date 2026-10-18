@@ -94,3 +94,10 @@ jobs:
 
       - name: Check config
         run: docker run --rm auth-broker-${{ matrix.image }} ${{ matrix.check }}
+
+      # The broker's image as docker-compose.yml runs it: the broker (gunicorn, reading gunicorn.conf.py) and each
+      # provider on it, with stand-in secrets and no Redis, must start and then stop cleanly. Importing the code (above)
+      # isn't starting it: v1.34.0's gunicorn refused gunicorn.conf.py, and this is what would have said so.
+      - name: Start its services
+        if: matrix.image == 'broker'
+        run: python3 scripts/check_image_starts.py auth-broker-broker

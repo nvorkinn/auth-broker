@@ -543,6 +543,12 @@ External calls (Spotify, TfL) are mocked in tests — nothing hits the network.
 which posts a coverage comment and status check on each PR (config in
 `codecov.yml`). The upload needs a `CODECOV_TOKEN` repository secret.
 
+The same workflow builds each image. The broker's is then started the way
+`docker-compose.yml` runs it, broker and providers, which have to start and
+stop cleanly (`scripts/check_image_starts.py`, which also runs on any Linux
+Docker host after `docker build -t auth-broker-broker .`: the services use
+host networking, as on the server).
+
 ## Deploying
 
 To release, run the Release workflow from the Actions tab (Run workflow, on
