@@ -3,9 +3,10 @@ name: Auto-approve PRs
 on:
   pull_request:
     types: [ opened, synchronize, reopened, ready_for_review ]
+  workflow_call:
 
 permissions:
-  contents: write
+  contents: read
   pull-requests: write
   checks: read
   actions: read
@@ -13,13 +14,17 @@ permissions:
 jobs:
   auto-approve:
     runs-on: ubuntu-latest
-    if: ${{ !github.event.pull_request.draft }}
+    if: >-
+      ${{
+        github.event_name == 'pull_request' &&
+        !github.event.pull_request.draft &&
+        github.event.pull_request.head.repo.full_name == github.repository &&
+        github.actor != 'dependabot[bot]' &&
+        github.event.pull_request.user.login != 'dependabot[bot]' &&
+        github.event.pull_request.user.login != 'github-actions[bot]'
+      }}
     timeout-minutes: 30
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v7
-
-      # CRUCIAL: Wait for CI checks to complete first
       - name: Wait for CI checks to complete
         uses: lewagon/wait-on-check-action@369769072fe522a3a8a85c03c96af1e5242a1994 # v1.9.1
         with:
@@ -27,11 +32,23 @@ jobs:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
           wait-interval: 30
           allowed-conclusions: success,skipped,neutral
+          # Reusable jobs can have one or more "caller / " prefixes.
+          check-regexp: '^(?!(?:.* / )?auto-approve$)'
           running-workflow-name: 'auto-approve'
 
-      # Only approve if CI passes
       - name: Approve PR
         if: success()
-        run: gh pr review --approve ${{ github.event.pull_request.number }}
+        shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          current_sha=$(gh api "repos/$REPO/pulls/$PR_NUMBER" --jq '.head.sha')
+          if [ "$current_sha" != "$SHA" ]; then
+            echo "::error::The PR head changed while waiting for checks; refusing to approve."
+            exit 1
+          fi
+          gh api --method POST "repos/$REPO/pulls/$PR_NUMBER/reviews" \
+            -f event=APPROVE -f commit_id="$SHA" --jq '.state'
