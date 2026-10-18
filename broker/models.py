@@ -66,13 +66,6 @@ ORIENTATIONS = ("horizontal", "vertical")
 CLOCK_FORMATS = {"24h": "24-hour (13:00)", "12h": "12-hour (1:00 PM)"}
 # What the screen is drawn in: the API contract's language, with its name in itself for the config page.
 LANGUAGES = {"en": "English", "nb": "Norsk"}
-# How often a screen refreshes, in seconds. Nobody sets it: it is BASE_INTERVAL, unless a provider's data is bursty
-# (a release is running) and the renderer asks for faster, never below MIN_INTERVAL. See services/pace.py.
-BASE_INTERVAL = 60
-MIN_INTERVAL = 20
-# How long a renderer's request for a faster refresh holds after its last frame upload, so one that stops asking
-# (or dies) is back at BASE_INTERVAL by itself.
-PACE_LEASE_S = 180
 # How the screen draws every panel (the departures, Spotify, the notice board): the API contract's style, with the
 # name and description the config page shows beside each one's picture (broker/static/styles/<style>.png, cut from
 # the renderer's own portrait snapshot of every panel in it).

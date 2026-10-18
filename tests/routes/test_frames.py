@@ -3,14 +3,19 @@ import re
 import threading
 from datetime import UTC, datetime, timedelta
 from hashlib import blake2b
+from unittest.mock import patch
 
+import fakeredis
 import pytest
+import redis
 from sqlalchemy import inspect, select
 
 from broker.db import db
-from broker.models import Device, Frame
+from broker.models import Device, DeviceConfig, Frame
 from broker.routes import frames
 from broker.routes.frames import FRAME_BYTES
+from broker.services import pace
+from broker.services.pace import PACE_LEASE_S
 
 SECRET = "a-very-long-device-secret-value"  # register_device's default
 
@@ -525,13 +530,13 @@ def test_post_returns_the_frame_like_get(client, register_device, shipped):
     assert "Retry-After" in response.headers
 
 
-def test_post_before_any_frame_is_404_with_retry_after_but_still_ships(client, register_device, shipped):
+def test_post_before_any_frame_is_404_with_retry_after_but_still_ships(client, register_device, shipped, frozen):
     register_device()
 
     response = _post(client, {"metrics": LINES, "logs": ["boot"]})
 
     assert response.status_code == 404
-    assert response.headers["Retry-After"] == "20"
+    assert response.headers["Retry-After"] == "23"  # at 12:00:10, until 12:00:33
     assert len(shipped) == 2
 
 
@@ -864,41 +869,212 @@ def test_post_on_the_id_less_route_uses_the_secrets_own_device(client, register_
     assert _metrics_calls(shipped)[0]["data"] == f"esp,device_id={device_id} uptime_s=3600i,rssi=-60i".encode()
 
 
-# --- the pace: a renderer asking for a faster refresh, as a lease -------------------------------------------------
+# --- Retry-After: the pacing function's answer (services/pace.py) on every poll ------------------------------------
+#
+# The clock is frozen at 12:00:10 UTC (`frozen`), so without a hint every answer says 23 (until 12:00:33), and with a
+# 20 s hint 13 (until 12:00:23: 12:00:13 is under MIN_SLEEP_S away). tests/services/test_pace.py tests the function.
+
+NOON = datetime(2026, 10, 18, 12, 0, tzinfo=UTC)
+
+
+@pytest.fixture
+def frozen(monkeypatch):
+    """Freeze the pacing clock at 12:00:10 UTC; return a function that moves it to `seconds` past 12:00."""
+
+    def _move(seconds: float) -> None:
+        monkeypatch.setattr(pace, "clock", lambda: NOON + timedelta(seconds=seconds))
+
+    _move(10)
+    return _move
+
+
+@pytest.fixture
+def store(app):
+    """Give the app a fakeredis, where the providers' pace keys are."""
+    store = fakeredis.FakeRedis(decode_responses=True)
+    app.extensions["redis"] = store
+    return store
+
+
+def _developer_panel(app, device_id, *, on=True):
+    with app.app_context():
+        db.session.get(DeviceConfig, device_id).developer_enabled = on
+        db.session.commit()
 
 
 def _retry_after(client, secret=SECRET):
     return _get(client, None, secret).headers["Retry-After"]
 
 
-def test_a_frame_is_polled_again_after_the_base_interval_by_default(client, register_device):
+def _answers(client, device_id):
+    """Return (status, Retry-After) of each way a screen polls: GET and POST, plain and with the current ETag."""
+    plain_get = _get(client, device_id, SECRET)
+    etag = plain_get.headers.get("ETag", '"none"')
+    answers = [plain_get, _get(client, device_id, SECRET, **{"If-None-Match": etag})]
+    answers += [_post(client, {"logs": []}), _post(client, {"logs": []}, **{"If-None-Match": etag})]
+    return [(response.status_code, response.headers.get("Retry-After")) for response in answers]
+
+
+@pytest.mark.usefixtures("frozen", "shipped")
+def test_every_answer_says_to_sleep_until_just_after_the_next_half_minute(client, register_device):
     device_id, _ = register_device()
+    assert _answers(client, device_id) == [(404, "23")] * 4  # before the first frame: the same function
+
     _put(client, device_id, _frame())
 
-    assert _retry_after(client) == "60"
+    assert _answers(client, device_id) == [(200, "23"), (304, "23"), (200, "23"), (304, "23")]
 
 
-def test_a_renderer_can_ask_for_a_faster_refresh_with_its_frame(client, register_device):
+@pytest.mark.parametrize(
+    ("seconds", "expected"),
+    [(0, "33"), (2.5, "31"), (3, "30"), (10, "23"), (28, "5"), (29, "34"), (33, "30"), (58, "5"), (59, "34")],
+)
+def test_the_sleep_is_worked_out_from_the_servers_clock(client, register_device, frozen, seconds, expected):
+    device_id, _ = register_device()
+    _put(client, device_id, _frame())
+    frozen(seconds)
+
+    assert _retry_after(client) == expected
+
+
+@pytest.mark.usefixtures("frozen", "shipped")
+def test_a_live_developer_pace_key_makes_every_answer_poll_every_10s(client, register_device, app, store):
+    device_id, _ = register_device()
+    _developer_panel(app, device_id)
+    store.set(f"v1:pace:developer:{device_id}", "20", ex=60)
+    assert _answers(client, device_id) == [(404, "13")] * 4
+
+    _put(client, device_id, _frame())
+
+    assert _answers(client, device_id) == [(200, "13"), (304, "13"), (200, "13"), (304, "13")]
+
+
+@pytest.mark.usefixtures("frozen")
+def test_the_pace_key_lapsing_brings_the_screen_back_to_the_half_minute(client, register_device, app, store):
+    device_id, _ = register_device()
+    _developer_panel(app, device_id)
+    _put(client, device_id, _frame())
+    store.set(f"v1:pace:developer:{device_id}", "20", ex=60)
+    assert _retry_after(client) == "13"
+
+    store.delete(f"v1:pace:developer:{device_id}")
+
+    assert _retry_after(client) == "23"
+
+
+@pytest.mark.usefixtures("frozen")
+def test_the_pace_key_counts_only_while_the_screen_shows_the_developer_panel(client, register_device, app, store):
+    device_id, _ = register_device()
+    _put(client, device_id, _frame())
+    store.set(f"v1:pace:developer:{device_id}", "20", ex=60)
+    _developer_panel(app, device_id, on=False)
+
+    assert _retry_after(client) == "23"
+
+
+@pytest.mark.usefixtures("frozen")
+def test_another_screens_pace_key_is_not_this_ones(client, register_device, app, store):
+    device_id, _ = register_device()
+    other_id, other_secret = register_device("another-very-long-device-secret")
+    for screen in (device_id, other_id):
+        _developer_panel(app, screen)
+        _put(client, screen, _frame(), secret=SECRET if screen == device_id else other_secret)
+    store.set(f"v1:pace:developer:{other_id}", "20", ex=60)
+
+    assert (_retry_after(client), _retry_after(client, other_secret)) == ("23", "13")
+
+
+@pytest.mark.parametrize("value", ["0", "soon", "-5"])
+@pytest.mark.usefixtures("frozen")
+def test_a_pace_key_that_is_not_seconds_is_ignored(client, register_device, app, store, value):
+    device_id, _ = register_device()
+    _developer_panel(app, device_id)
+    _put(client, device_id, _frame())
+    store.set(f"v1:pace:developer:{device_id}", value, ex=60)
+
+    assert _retry_after(client) == "23"
+
+
+@pytest.mark.usefixtures("frozen")
+def test_a_pace_key_that_never_lapses_is_ignored(client, register_device, app, store):
+    device_id, _ = register_device()
+    _developer_panel(app, device_id)
+    _put(client, device_id, _frame())
+    store.set(f"v1:pace:developer:{device_id}", "20")
+
+    assert _retry_after(client) == "23"
+
+
+def test_a_poll_writes_nothing_to_redis(client, register_device, app, store, monkeypatch, frozen):
+    device_id, _ = register_device()
+    _developer_panel(app, device_id)
+    _put(client, device_id, _frame())
+    store.set(f"v1:pace:developer:{device_id}", "20", ex=60)
+    sent = []
+    execute = redis.client.Pipeline.execute
+    monkeypatch.setattr(
+        redis.client.Pipeline,
+        "execute",
+        lambda pipe, *args, **kwargs: (
+            sent.extend(c[0][0] for c in pipe.command_stack) or execute(pipe, *args, **kwargs)
+        ),
+    )
+    command = redis.Redis.execute_command
+    monkeypatch.setattr(
+        redis.Redis, "execute_command", lambda r, *args, **kwargs: sent.append(args[0]) or command(r, *args, **kwargs)
+    )
+
+    for _ in range(3):
+        assert _retry_after(client) == "13"
+
+    assert sorted(set(sent)) == ["GET", "PTTL"]  # reads, in one round trip a poll
+    assert sent.count("GET") == 3
+
+
+@pytest.mark.usefixtures("frozen")
+def test_redis_down_is_logged_and_the_screen_keeps_its_usual_pace(client, register_device, app):
+    device_id, _ = register_device()
+    _developer_panel(app, device_id)
+    _put(client, device_id, _frame())
+    app.extensions["redis"] = redis.Redis(host="127.0.0.1", port=1, socket_connect_timeout=0.2)  # nothing listens
+
+    with patch.object(pace, "logger") as logger:
+        assert _retry_after(client) == "23"
+
+    logger.warning.assert_called_once_with("Couldn't read the screen's pace hints from Redis (%s)", "ConnectionError")
+
+
+# The legacy hint: today's renderers (pi-dashboard v1.26.0) send their pace with each frame, as X-Refresh-Hint. The
+# broker keeps it on the frame's row for PACE_LEASE_S, and it's one more hint for the same function.
+
+
+@pytest.mark.usefixtures("frozen")
+def test_a_renderers_hint_makes_the_screen_poll_at_half_of_it(client, register_device):
     register_device()
 
     response = client.put("/api/frame", data=_frame(), headers={**_auth(), "X-Refresh-Hint": "20"})
 
     assert response.status_code == 204
-    assert _retry_after(client) == "20"
+    assert _retry_after(client) == "13"
 
 
-def test_a_conditional_get_carries_the_faster_refresh_too(client, register_device):
+@pytest.mark.usefixtures("frozen")
+def test_a_conditional_get_carries_the_renderers_hint_too(client, register_device):
     device_id, _ = register_device()
     client.put("/api/frame", data=_frame(), headers={**_auth(), "X-Refresh-Hint": "30"})
     etag = _get(client, device_id, SECRET).headers["ETag"]
 
     response = _get(client, device_id, SECRET, **{"If-None-Match": etag})
 
-    assert (response.status_code, response.headers["Retry-After"]) == (304, "30")
+    assert (response.status_code, response.headers["Retry-After"]) == (304, "8")  # 15 s polls: :18
 
 
-@pytest.mark.parametrize(("asked", "granted"), [("5", "20"), ("0", "20"), ("45", "45"), ("60", "60"), ("3600", "60")])
-def test_the_asked_for_refresh_is_kept_between_the_minimum_and_base(client, register_device, asked, granted):
+@pytest.mark.parametrize(
+    ("asked", "granted"),
+    [("5", "13"), ("19", "13"), ("20", "13"), ("40", "13"), ("45", "16"), ("60", "23"), ("3600", "23")],
+)
+@pytest.mark.usefixtures("frozen")
+def test_the_renderers_hint_is_floored_and_capped_by_the_function(client, register_device, asked, granted):
     register_device()
 
     client.put("/api/frame", data=_frame(), headers={**_auth(), "X-Refresh-Hint": asked})
@@ -906,29 +1082,46 @@ def test_the_asked_for_refresh_is_kept_between_the_minimum_and_base(client, regi
     assert _retry_after(client) == granted
 
 
-@pytest.mark.parametrize("asked", ["", "soon", "-5", "2.5"])
+@pytest.mark.parametrize("asked", ["", "soon", "-5", "2.5", "0"])
+@pytest.mark.usefixtures("frozen")
 def test_junk_hints_are_no_request(client, register_device, asked):
     register_device()
 
     client.put("/api/frame", data=_frame(), headers={**_auth(), "X-Refresh-Hint": asked})
 
-    assert _retry_after(client) == "60"
+    assert _retry_after(client) == "23"
 
 
+@pytest.mark.usefixtures("frozen")
 def test_the_next_frame_without_a_hint_ends_the_faster_refresh(client, register_device):
     device_id, _ = register_device()
     client.put("/api/frame", data=_frame(), headers={**_auth(), "X-Refresh-Hint": "20"})
 
     _put(client, device_id, _frame())
 
-    assert _retry_after(client) == "60"
+    assert _retry_after(client) == "23"
 
 
-def test_the_faster_refresh_lapses_when_the_renderer_stops_asking(app, client, register_device):
-    device_id, _ = register_device()
+def test_the_renderers_hint_lapses_after_the_lease_when_it_stops_asking(client, register_device, frozen):
+    register_device()
     client.put("/api/frame", data=_frame(), headers={**_auth(), "X-Refresh-Hint": "20"})
-    with app.app_context():
-        db.session.get(Frame, device_id).pace_until = datetime.now(UTC) - timedelta(seconds=1)
-        db.session.commit()
+    frozen(10 + PACE_LEASE_S - 1)
+    assert _retry_after(client) == "14"  # 12:03:09: :13 is too close, so :23
 
-    assert _retry_after(client) == "60"
+    frozen(10 + PACE_LEASE_S)
+
+    assert _retry_after(client) == "23"  # 12:03:10: back to :33
+
+
+@pytest.mark.usefixtures("frozen")
+def test_the_shortest_of_the_renderers_hint_and_the_pace_key_wins(client, register_device, app, store):
+    device_id, _ = register_device()
+    _developer_panel(app, device_id)
+    client.put("/api/frame", data=_frame(), headers={**_auth(), "X-Refresh-Hint": "40"})
+    store.set(f"v1:pace:developer:{device_id}", "20", ex=60)
+    assert _retry_after(client) == "13"
+
+    client.put("/api/frame", data=_frame(), headers={**_auth(), "X-Refresh-Hint": "20"})
+    store.set(f"v1:pace:developer:{device_id}", "40", ex=60)
+
+    assert _retry_after(client) == "13"

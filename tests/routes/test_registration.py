@@ -12,8 +12,8 @@ from sqlalchemy import select
 from broker.auth import hash_secret
 from broker.db import db
 from broker.models import Device, DeviceConfig
-from broker.routes.frames import FRAME_BYTES, NO_FRAME_RETRY_AFTER
-from broker.services import registration
+from broker.routes.frames import FRAME_BYTES
+from broker.services import pace, registration
 from broker.services.pair_throttle import MAX_REGISTRATION_LOCKOUT_SECONDS, REGISTRATIONS_PER_MINUTE, PairThrottle
 
 USER = "user-1"
@@ -334,25 +334,32 @@ def test_id_less_requests_are_logged_with_the_device_id(app, client, split_devic
     assert f"{method.upper()} {path} device={slug} ({device_id}) role=renderer" in caplog.messages
 
 
-# --- Retry-After: how often to poll -----------------------------------------------------------------
+# --- Retry-After: how often to poll (services/pace.py; tests/routes/test_frames.py has the rest) ---------------------
 
 
-def test_no_frame_yet_is_a_json_404_with_a_short_retry(client, split_device):
+@pytest.fixture
+def frozen(monkeypatch):
+    monkeypatch.setattr(pace, "clock", lambda: datetime(2026, 10, 18, 12, 0, 10, tzinfo=UTC))
+
+
+@pytest.mark.usefixtures("frozen")
+def test_no_frame_yet_is_a_json_404_with_the_usual_retry(client, split_device):
     _, _, display_secret = split_device
 
     response = client.get("/api/frame", headers=_auth(display_secret))
 
     assert response.status_code == 404
     assert response.get_json() == {"error": "no frame yet"}
-    assert response.headers["Retry-After"] == str(NO_FRAME_RETRY_AFTER)
+    assert response.headers["Retry-After"] == "23"  # until 12:00:33, just after the next half-minute
 
 
-def test_a_frame_says_to_poll_again_after_the_base_interval(app, client, split_device):
+@pytest.mark.usefixtures("frozen")
+def test_a_frame_says_to_poll_again_just_after_the_next_half_minute(app, client, split_device):
     _device_id, renderer_secret, display_secret = split_device
     client.put("/api/frame", data=bytes(FRAME_BYTES), headers=_auth(renderer_secret))
 
     first = client.get("/api/frame", headers=_auth(display_secret))
     unchanged = client.get("/api/frame", headers={**_auth(display_secret), "If-None-Match": first.headers["ETag"]})
 
-    assert (first.status_code, first.headers["Retry-After"]) == (200, "60")
-    assert (unchanged.status_code, unchanged.headers["Retry-After"]) == (304, "60")
+    assert (first.status_code, first.headers["Retry-After"]) == (200, "23")
+    assert (unchanged.status_code, unchanged.headers["Retry-After"]) == (304, "23")
