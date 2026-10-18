@@ -142,9 +142,9 @@ def test_project_reads_every_unfinished_status_and_deduplicates(api):
     api.pages = Mock(
         side_effect=[
             [{"number": 3}],
-            [{"id": 1, "status": "queued"}],
-            [{"id": 1, "status": "in_progress"}],
-            [{"id": 2, "status": "waiting"}],
+            [{"id": 1, "name": "Release", "status": "queued"}],
+            [{"id": 1, "name": "Release", "status": "in_progress"}],
+            [{"id": 2, "name": "Release packages", "status": "waiting"}],
             [],
             [],
         ]
@@ -161,6 +161,28 @@ def test_project_reads_every_unfinished_status_and_deduplicates(api):
         "requested",
         "pending",
     ]
+
+
+@pytest.mark.parametrize(
+    ("name", "shown"),
+    [
+        ("Release", True),
+        ("release packages", True),
+        ("Prerelease", True),
+        ("Tests", False),
+        ("CodeQL", False),
+        ("Terraform", False),
+        ("Deploy", False),
+    ],
+)
+def test_only_release_workflows_are_drawn_but_other_ci_still_keeps_fast_polling(api, name, shown):
+    run = {"id": 7, "name": name, "status": "waiting"}
+    api.pages = Mock(side_effect=[[], [], [], [run], [], []])
+    api.workflow = Mock(return_value=run)
+    result = api.project(REPO)
+    assert result["workflows"] == ([run] if shown else [])
+    assert result["active"] is True
+    assert api.workflow.call_count == int(shown)
 
 
 @responses.activate
