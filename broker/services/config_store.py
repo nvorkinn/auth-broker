@@ -88,7 +88,7 @@ def _write(wanted: dict[str, str | None], *, sweep: bool = False) -> None:
                 pipe.publish(CHANGED, name.removeprefix(PREFIX))
             pipe.execute()
         # And a render job for each, after the writes, for a screen the render pool draws (it reads no channel).
-        render_jobs.request(*(name.removeprefix(PREFIX) for name in changed))
+        render_jobs.enqueue(redis, [name.removeprefix(PREFIX) for name in changed])
     except RedisError as error:
         # The renderers keep the copy they have (or ask the broker, without one) until the next rebuild.
         logger.warning("Couldn't write the screens' configs to Redis (%s)", type(error).__name__)
