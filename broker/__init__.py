@@ -13,15 +13,14 @@ from . import db as db_module
 from .auth import current_username
 from .routes import (
     apple_music_link,
-    apple_music_proxy,
     devices,
     frames,
+    github_dashboard,
     orchestrator,
     pages,
     place_search,
     renderers,
     spotify_oauth,
-    spotify_proxy,
     status,
     stop_search,
 )
@@ -63,11 +62,10 @@ def create_app() -> Flask:
 
     app.register_blueprint(devices.bp)
     app.register_blueprint(renderers.bp)
-    app.register_blueprint(spotify_proxy.bp)
     app.register_blueprint(spotify_oauth.bp)
-    app.register_blueprint(apple_music_proxy.bp)
     app.register_blueprint(apple_music_link.bp)
     app.register_blueprint(pages.bp)
+    app.register_blueprint(github_dashboard.bp)
     app.register_blueprint(stop_search.bp)
     app.register_blueprint(place_search.bp)
     app.register_blueprint(frames.bp)

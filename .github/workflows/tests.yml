@@ -35,6 +35,9 @@ jobs:
       - name: Check formatting
         run: ruff format --check .
 
+      - name: Test dashboard browser logic
+        run: node --test tests/browser/*.test.cjs
+
       - name: Run tests
         # One worker per CPU; pytest-cov combines their coverage.
         run: python -m pytest -n auto -v --cov=broker --cov-report=term-missing --cov-report=xml

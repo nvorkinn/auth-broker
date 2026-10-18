@@ -5,7 +5,6 @@ Also the ID-less endpoints a registered client polls.
 
 import threading
 from datetime import UTC, datetime, timedelta
-from unittest.mock import patch
 
 import pytest
 from sqlalchemy import select
@@ -323,39 +322,7 @@ def test_an_id_less_put_checks_the_frame_size(client, split_device):
     assert client.put("/api/frame", data=b"short", headers=_auth(renderer_secret)).status_code == 400
 
 
-@pytest.mark.parametrize("path", ["/api/spotify/now-playing", "/api/spotify/queue", "/api/spotify/top/tracks"])
-def test_id_less_spotify_routes_answer_the_renderer(client, split_device, path):
-    _, renderer_secret, display_secret = split_device
-
-    response = client.get(path, headers=_auth(renderer_secret))
-
-    assert response.status_code == 200  # Spotify is off by default: the empty answer, not an error
-    assert client.get(path, headers=_auth(display_secret)).status_code == 403
-    assert client.get(path, headers=_auth("not-a-registered-secret")).status_code == 401
-
-
-def test_id_less_spotify_routes_proxy_for_the_secrets_device(app, client, split_device):
-    device_id, renderer_secret, _ = split_device
-    with app.app_context():
-        db.session.get(DeviceConfig, device_id).spotify_enabled = True
-        db.session.commit()
-
-    with patch("broker.clients.spotify.get_current_track", return_value={"song": "A Song"}) as mocked:
-        response = client.get("/api/spotify/now-playing", headers=_auth(renderer_secret))
-
-    mocked.assert_called_once_with(device_id)
-    assert response.get_json() == {"song": "A Song"}
-
-
-def test_an_unknown_spotify_top_type_is_not_found(client, split_device):
-    _, renderer_secret, _ = split_device
-    assert client.get("/api/spotify/top/albums", headers=_auth(renderer_secret)).status_code == 404
-
-
-@pytest.mark.parametrize(
-    ("method", "path"),
-    [("get", "/api/config"), ("put", "/api/frame"), ("get", "/api/spotify/now-playing")],
-)
+@pytest.mark.parametrize(("method", "path"), [("get", "/api/config"), ("put", "/api/frame")])
 def test_id_less_requests_are_logged_with_the_device_id(app, client, split_device, caplog, method, path):
     device_id, renderer_secret, _ = split_device
     with app.app_context():

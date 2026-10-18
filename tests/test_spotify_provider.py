@@ -17,12 +17,13 @@ import fakeredis
 import pytest
 import requests
 import responses
+from sqlalchemy import select
 
 from broker import spotify_provider
 from broker.album_art import ART_TTL_S
 from broker.clients import spotify as spotify_client
 from broker.db import db
-from broker.models import AppleMusicToken, DeviceConfig, SpotifyToken
+from broker.models import AppleMusicPlay, AppleMusicToken, DeviceConfig, SpotifyToken
 from broker.spotify_provider import (
     PLAYER_TTL_S,
     TOP_INTERVAL_S,
@@ -160,15 +161,21 @@ def _stored(store, key):
 
 
 def test_writes_the_player_and_the_top_lists_in_the_stored_shape(app, provider, store, device, musickit):
-    """Both services' parts are what their proxy routes answer, wrapped with when they were fetched."""
-    device_id = device(apple_music=True)
+    """Each service's queue and top lists in Spotify's shapes, wrapped with when they were fetched.
 
-    assert _run(provider) == 2
+    Spotify's are its own answers, asked for as the renderer shows them (each of TIME_RANGES, five of each); Apple
+    Music's are made to look like them (broker/services/music.py).
+    """
+    device_id = device(apple_music=True)
+    fake = FakeSpotify()
+
+    assert _run(provider, fake) == 2
 
     assert _stored(store, player_key(device_id)) == PLAYER
     assert _stored(store, top_key(device_id)) == TOP
     assert 0 < store.ttl(player_key(device_id)) <= PLAYER_TTL_S
     assert PLAYER_TTL_S < store.ttl(top_key(device_id)) <= TOP_TTL_S
+    assert (f"{SPOTIFY_API}/me/top/tracks", {"time_range": "short_term", "limit": "5"}) in fake.gets
 
 
 def test_the_covers_are_stored_under_the_keys_the_renderer_reads(provider, binary, device, musickit, image_host):
@@ -260,28 +267,6 @@ def test_nothing_playing_has_no_cover(provider, store, device, image_host):
     assert store.keys("v1:art:*") == []
 
 
-def test_the_stored_parts_are_what_the_proxy_routes_answer(app, client, provider, store, device, musickit):
-    device_id = device(apple_music=True)
-    _run(provider)
-    fake = FakeSpotify()
-    headers = {"Authorization": "Bearer a-very-long-device-secret-refresh"}
-    with (
-        patch("broker.clients.spotify.requests.get", side_effect=fake.get),
-        patch("broker.clients.apple_music.recently_played", return_value=APPLE_SONGS),
-    ):
-        spotify_queue = client.get("/api/spotify/queue", headers=headers).get_json()
-        spotify_top = client.get("/api/spotify/top/tracks?time_range=short_term&limit=5", headers=headers).get_json()
-        apple_queue = client.get("/api/apple-music/queue", headers=headers).get_json()
-        apple_top = client.get("/api/apple-music/top/artists?time_range=long_term&limit=5", headers=headers).get_json()
-
-    assert _stored(store, player_key(device_id))["spotify"] == spotify_queue
-    assert _stored(store, player_key(device_id))["apple_music"] == apple_queue
-    assert _stored(store, top_key(device_id))["spotify"]["short_term"]["tracks"] == spotify_top
-    assert _stored(store, top_key(device_id))["apple_music"]["long_term"]["artists"] == apple_top
-    # Asked for as the renderer asks the proxy.
-    assert (f"{SPOTIFY_API}/me/top/tracks", {"time_range": "short_term", "limit": "5"}) in fake.gets
-
-
 def test_nothing_playing_is_stored_as_such(provider, store, device):
     """Spotify's 204 (nothing playing) is a queue with nothing playing, not a missing key."""
     device_id = device()
@@ -314,7 +299,7 @@ def test_devices_with_music_off_or_spotify_unlinked_are_skipped(provider, store,
 
 
 def test_apple_music_switched_on_but_not_connected_is_nothing_playing(provider, store, device):
-    """As the proxy answers it."""
+    """Its part is there, empty: null would mean its fetch failed."""
     device_id = device(spotify=False, apple_music=True, linked=False)
 
     _run(provider)
@@ -324,6 +309,61 @@ def test_apple_music_switched_on_but_not_connected_is_nothing_playing(provider, 
         "tracks": {"items": []},
         "artists": {"items": []},
     }
+
+
+def _plays(app, device_id):
+    with app.app_context():
+        plays = db.session.scalars(
+            select(AppleMusicPlay).where(AppleMusicPlay.device_id == device_id).order_by(AppleMusicPlay.id)
+        )
+        return [play.song_id for play in plays]
+
+
+def test_apple_musics_new_plays_are_logged_once_each(app, store, device, musickit):
+    """The top lists are counted from these plays (apple_music_plays), which only the provider logs.
+
+    Every minute it reads the recently played list, which has no times: only the songs ahead of where the last read
+    picks up are new (apple_music.new_plays), so the same list read again logs nothing, and the same song played
+    again straight after is a second play.
+    """
+    device_id = device(spotify=False, apple_music=True)
+    now = [FETCHED_AT]
+    provider = MusicProvider(app, store, clock=lambda: now[0])
+    one, two, three = (apple_song(song_id, name=f"Song {song_id}") for song_id in ("1", "2", "3"))
+
+    _run(provider, apple_songs=[one, two])
+    assert _plays(app, device_id) == ["2", "1"]  # oldest first
+
+    now[0] += 60
+    _run(provider, apple_songs=[one, two])
+    assert _plays(app, device_id) == ["2", "1"]
+
+    now[0] += 60
+    _run(provider, apple_songs=[three, three, one])
+    assert _plays(app, device_id) == ["2", "1", "3", "3"]
+    with app.app_context():
+        assert db.session.get(AppleMusicToken, device_id).seen_ids == ["3", "3", "1"]
+
+    now[0] += TOP_INTERVAL_S
+    _run(provider, apple_songs=[three, three, one])
+    top = _stored(store, top_key(device_id))["apple_music"]["short_term"]["tracks"]["items"]
+    assert top[0]["name"] == "Song 3"
+    assert sorted(track["name"] for track in top) == ["Song 1", "Song 2", "Song 3"]
+    assert _plays(app, device_id) == ["2", "1", "3", "3"]
+
+
+def test_apple_music_switched_off_is_not_read_or_logged(app, provider, device, musickit):
+    """Even with a token: as before, plays are only logged while the screen shows Apple Music."""
+    device_id = device(apple_music=False)
+
+    with (
+        patch("broker.clients.spotify.requests.get", side_effect=FakeSpotify().get),
+        patch("broker.clients.apple_music.recently_played") as played,
+    ):
+        provider.run_cycle()
+
+    played.assert_not_called()
+    assert _plays(app, device_id) == []
 
 
 def test_one_devices_revoked_token_doesnt_stop_the_others(provider, store, device):
@@ -367,7 +407,7 @@ def test_a_partial_top_fetch_doesnt_replace_a_full_one(app, store, device, music
     assert _stored(store, player_key(device_id))["spotify"] is None
 
 
-def test_refreshed_tokens_are_stored_as_the_proxy_stores_them(app, provider, device):
+def test_refreshed_tokens_are_stored_for_the_next_calls(app, provider, device):
     device_id = device(refresh_token="old-refresh", expires_in=-100)
     fake = FakeSpotify()
 

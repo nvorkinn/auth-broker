@@ -81,7 +81,7 @@ def test_get_config_returns_defaults_and_shared_keys(client, register_device):
         "screen": {"orientation": "vertical", "width": 480, "height": 800},
         "weather": {"api_key": "test-weather-key", "location": "", "key": None},
         "notice_board": {"postcode": None, "country": None, "style": "airy"},
-        "tfl": {"app_key": "test-tfl-key", "stop_ids": [], "style": "grouped"},
+        "tfl": {"stop_ids": [], "style": "grouped"},
         "departures": {"stops": [], "style": "grouped"},
         "spotify": {"enabled": False, "style": "airy"},
         "glowmarkt": {"enabled": False},
@@ -89,6 +89,18 @@ def test_get_config_returns_defaults_and_shared_keys(client, register_device):
         "apple_music": {"enabled": False},
         "pairing_code": body["pairing_code"],
     }
+
+
+def test_get_config_never_sends_the_tfl_key(app, client, register_device):
+    """The broker keeps TfL's key for its stop lookups; the providers have their own, and the screen reads the store."""
+    device_id, secret = register_device()
+    _set_config(app, device_id, tfl_stop_ids=["940GZZLUEUS"])
+
+    response = client.get("/api/config", headers={"Authorization": f"Bearer {secret}"})
+
+    assert response.get_json()["tfl"] == {"stop_ids": ["940GZZLUEUS"], "style": "grouped"}
+    assert app.config["TFL_APP_KEY"] == "test-tfl-key"
+    assert b"test-tfl-key" not in response.data
 
 
 def test_get_config_sends_the_developer_switch_but_never_the_github_token(app, client, register_device):

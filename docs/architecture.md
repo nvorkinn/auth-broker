@@ -15,9 +15,9 @@ this page is the map. [The database](database.md) has the tables.
 | Part | Where it lives | What it does |
 |---|---|---|
 | **ESP32 screen** | [countdown-esp32](https://github.com/nvorkinn/countdown-esp32), on the wall | Drives a Waveshare 7.5" e-paper panel (800x480, black and white). Registers with the broker, then polls it for finished frames and paints them. It draws nothing itself. |
-| **Renderer** | [pi-dashboard](https://github.com/nvorkinn/pi-dashboard) (`countdown-server` image), one container per screen | Reads the screen's config from Redis (the broker's copy, see [the config in the store](#the-config-in-the-store)), or from the broker without one, calls TfL, Open-Meteo, Glowmarkt and the broker's Spotify proxy, draws the 1-bit frame, uploads it. |
+| **Renderer** | [pi-dashboard](https://github.com/nvorkinn/pi-dashboard) (`countdown-server` image), one container per screen | Reads the screen's config from Redis (the broker's copy, see [the config in the store](#the-config-in-the-store)), or from the broker without one, and its panels' data from Redis, draws the 1-bit frame, uploads it. |
 | **Orchestrator** | pi-dashboard (`countdown-orchestrator`), one container, mounts `docker.sock` | Polls the broker for *assignments* and starts, stops and removes the renderer containers to match. |
-| **auth-broker** | this repository, gunicorn on `127.0.0.1:5000` | The hub: device identities, pairing, each screen's settings, the latest frame, renderer assignments, the Spotify proxy. State is one SQLite file. |
+| **auth-broker** | this repository, gunicorn on `127.0.0.1:5000` | The hub: device identities, pairing, each screen's settings and its Spotify and Apple Music links, the latest frame, renderer assignments. State is one SQLite file. |
 | **Caddy** | this repository (`caddy/`), the host's ports 80 and 443 | TLS, routing, the sign-in gate for browser pages, and the `X-Authentik-*` headers. |
 | **authentik** | this repository (`terraform/`), behind the `sso.` host | Sign-in, sign-up, passkeys and authenticator apps, Google login. Its embedded outpost answers Caddy's forward_auth. |
 | **Fluent Bit, VictoriaLogs, VictoriaMetrics** | this repository | Where the screens' and renderers' logs and metrics end up. |
@@ -52,7 +52,7 @@ flowchart LR
 ```
 
 Caddy decides by path. The device paths (`/api/config`, `/api/frame`, `/api/devices/*`, `/api/renderers/*`,
-`/api/spotify/*`, `/api/status/*`, `/api/orchestrator/*`) go straight through: the broker checks the bearer secret
+`/api/status/*`, `/api/orchestrator/*`) go straight through: the broker checks the bearer secret
 itself. Every other path is a browser page and needs an authentik sign-in first. Caddy deletes the `X-Authentik-Uid`,
 `-Username` and `-Email` headers from every request, then, on browser paths only, copies on the ones the outpost returns. The broker **trusts**
 `X-Authentik-Uid` and `-Username`: it validates no token and keeps no user table (only the uid, in `devices.owner`).
@@ -94,7 +94,7 @@ public URL (`BROKER_URL`).
 | Caller | Calls | Authenticates with |
 |---|---|---|
 | **ESP32 screen** | `POST /api/devices/register` (5 a minute per IP, then 429), `POST /api/frame` (the same answer as `GET`, plus a metrics and logs report), `POST /api/devices/pairing-code` | nothing for register (the secret is in the body), otherwise the **display secret** |
-| **Renderer** | `POST /api/renderers/claim`, `GET /api/config` (only when Redis has no copy of its config), `PUT /api/frame`, `GET /api/spotify/{now-playing,queue,top/artists,top/tracks}`, `POST /api/devices/pairing-code` | the **claim token** (claim only), otherwise the **renderer secret** |
+| **Renderer** | `POST /api/renderers/claim`, `GET /api/config` (only when Redis has no copy of its config), `PUT /api/frame`, `POST /api/devices/pairing-code` | the **claim token** (claim only), otherwise the **renderer secret** |
 | **Orchestrator** | `GET /api/orchestrator/assignments`, `POST /api/orchestrator/assignments/{id}/status` | `ORCHESTRATOR_TOKEN` |
 | **Home Assistant** | `GET /api/status/devices` | `STATUS_TOKEN` |
 | **Signed-in user** | `/pair`, `POST /pair/token`, `/device[/{id}]` and `/name`, `POST /api/displays/{id}/renderer`, Spotify connect and disconnect, `POST /device[/{id}]/display/unlink`, `GET /api/stops/search` (and its old name, `/api/tfl/search`), `GET /api/places/search` | `X-Authentik-Uid` from Caddy |
@@ -120,11 +120,11 @@ Several different things get called a token or a secret here, and they are not i
 | **Outpost cookie** | The outpost, after sign-in, on the broker's host | the browser | cookie, browser to Caddy | authentik's session settings (its defaults: none are set in this repository) |
 | **Flask session cookie** | The broker, only while someone connects Spotify | the browser, signed with `FLASK_SECRET_KEY`, not encrypted | cookie | the browser session. Holds the Spotify `state` and the target device id, nothing else |
 | **Spotify tokens, per device** | Spotify, via `/auth/spotify/callback` | `spotify_tokens`, **plaintext** | never leave the broker | refreshed lazily when they expire. Deleted by Disconnect, `unpair --config` and `forget` |
-| **Third-party keys** | The operator: `SPOTIFY_CLIENT_ID` and `_SECRET`, `TFL_APP_KEY`, `WEATHER_API_KEY` | environment | Spotify's as HTTP Basic to Spotify. `TFL_APP_KEY` and `WEATHER_API_KEY` are returned **in plaintext** in `GET /api/config`, so a key rotation reaches every screen without a re-flash; never in the copy of the config in Redis, where they're empty | the operator rotates them |
+| **Third-party keys** | The operator: `SPOTIFY_CLIENT_ID` and `_SECRET`, `TFL_APP_KEY`, `WEATHER_API_KEY` | environment | Spotify's as HTTP Basic to Spotify. `WEATHER_API_KEY` is returned **in plaintext** in `GET /api/config`, so a key rotation reaches every screen without a re-flash; never in the copy of the config in Redis, where it's empty. `TFL_APP_KEY` never leaves the broker: it's only for TfL's stop lookups (the settings page's stop search and saved stops' names); pi-dashboard's TfL providers have their own, from its deploy's `TFL_APP_KEY` secret | the operator rotates them |
 | **Glowmarkt credentials** | The owner, on `/device` | `glowmarkt_credentials`: the username as is, the password Fernet-encrypted with `CREDENTIAL_ENCRYPTION_KEY` | never sent: `GET /api/config` carries only `glowmarkt.enabled`; the glow-provider decrypts them, to sign in itself, and writes only the readings to Redis | cleared by `unpair --config` and `forget`. Changing the key makes stored passwords unreadable |
 | **GitHub token, per device** | The owner, on `/device`: a fine-grained, read-only personal access token | `github_tokens`, Fernet-encrypted with `CREDENTIAL_ENCRYPTION_KEY` | never leaves the broker: the developer-provider makes the GitHub calls with it and writes only the panel's data to Redis | deleted by "Remove token", `unpair --config` and `forget`. GitHub expires it as the owner chose |
 | **MusicKit key** | The operator: `APPLE_MUSIC_TEAM_ID`, `APPLE_MUSIC_KEY_ID` and `APPLE_MUSIC_PRIVATE_KEY` (the .p8), from an Apple Developer Program account | environment | never leaves the broker: it signs 12-hour developer tokens, which go to Apple and to the config page for MusicKit JS | the operator revokes and replaces it in Apple's developer portal. Unset: no Apple Music |
-| **Apple Music user token, per device** | Apple, via MusicKit JS on `/device`, posted to `/device/<id>/apple-music/connect` | `apple_music_tokens`, Fernet-encrypted with `CREDENTIAL_ENCRYPTION_KEY` | never leaves the broker: `GET /api/apple-music/*` makes the Apple calls with it | about six months, and can't be refreshed: cleared when Apple refuses it, so the page asks to connect again. Deleted with its play log by Disconnect, `unpair --config` and `forget` |
+| **Apple Music user token, per device** | Apple, via MusicKit JS on `/device`, posted to `/device/<id>/apple-music/connect` | `apple_music_tokens`, Fernet-encrypted with `CREDENTIAL_ENCRYPTION_KEY` | never leaves the broker: the spotify-provider makes the Apple calls with it and writes only what was played to Redis | about six months, and can't be refreshed: cleared when Apple refuses it, so the page asks to connect again. Deleted with its play log by Disconnect, `unpair --config` and `forget` |
 | **`LOGS_INGEST_TOKEN`** | The operator | Caddy's environment | Bearer on the `logs.` and `metrics.` ingest paths | Caddy only. The broker forwards on loopback without one |
 
 Not secrets, though they look like it: `device_id` and an assignment's `id` (both `token_hex(6)`), and the **slug**
@@ -306,7 +306,7 @@ sequenceDiagram
     loop every pace seconds (renderer: 60 s, faster while a provider's data is bursty), or at once on v1:config:changed
         R->>D: GET v1:config:DEVICE_ID
         D-->>R: the config JSON, the broker's copy (without one: GET /api/config to the broker, which has the pairing code)
-        Note over R: Polls whichever APIs are due. TfL, Open-Meteo, postcodes.io and Glowmarkt are called directly. Spotify goes through the broker (GET /api/spotify/...)
+        Note over R: Draws its panels from Redis, where the providers keep their data (Spotify and Apple Music: the broker's spotify-provider)
         R->>B: PUT /api/frame (48,000 bytes, only if the picture changed)<br/>Bearer renderer secret
         B-->>R: 204
         Note right of B: DB: +frames
@@ -494,8 +494,8 @@ sequenceDiagram
 ```
 
 - **What's stored.** `v1:config:<device id>` holds exactly `GET /api/config`'s JSON for the device, the contract's
-  `ConfigResponse`, less what mustn't be in Redis, which every provider and renderer can read: `tfl.app_key` and
-  `weather.api_key` are empty (the renderers no longer use them), and `pairing_code` is null. No Glowmarkt, GitHub,
+  `ConfigResponse`, less what mustn't be in Redis, which every provider and renderer can read: `weather.api_key` is
+  empty (the renderers no longer use it), and `pairing_code` is null. No Glowmarkt, GitHub,
   Spotify or Apple Music credential is in the config at all. `tests/fixtures/config_store.json` pins the shape, and
   pi-dashboard's tests read the same file.
 - **When.** The whole set is rebuilt from the database on every config save, as the broker starts (gunicorn's

@@ -89,14 +89,9 @@ def test_the_stored_config_is_what_get_api_config_answers_less_its_secrets(app, 
 
     answered = _get_config(client, secret)
 
-    assert answered["tfl"]["app_key"] == "test-tfl-key"
     assert answered["weather"]["api_key"] == "test-weather-key"
     assert answered["pairing_code"] is None  # paired
-    without_keys = answered | {
-        "tfl": answered["tfl"] | {"app_key": ""},
-        "weather": answered["weather"] | {"api_key": ""},
-    }
-    assert _stored(store, device_id) == without_keys
+    assert _stored(store, device_id) == answered | {"weather": answered["weather"] | {"api_key": ""}}
 
 
 def test_the_stored_config_carries_no_secret(app, store, paired_client, monkeypatch):

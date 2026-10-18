@@ -27,12 +27,13 @@ from broker.services import pairing, stops, weather_place
 from broker.services.postcodes import postcode_country
 
 
-def build(config: DeviceConfig, *, pairing_code: str | None, api_keys: bool) -> ConfigResponse:
+def build(config: DeviceConfig, *, pairing_code: str | None, api_key: bool) -> ConfigResponse:
     """Return the config a renderer is sent for the device `config` is the settings of.
 
-    Bundles the device's own settings with the shared app-level API keys if `api_keys` (else they're sent empty), so
-    a key rotation doesn't require re-flashing every gifted device. Carries the device_id, so a
-    renderer needn't keep it, and `pairing_code`, the code it is to show (None for none).
+    Bundles the device's own settings with the shared weather API key if `api_key` (else it's sent empty), so a key
+    rotation doesn't require re-flashing every gifted device. Never TfL's key: the renderer reads TfL's departures and
+    disruptions from the store, whose providers have their own, and the broker's is only for its stop lookups.
+    Carries the device_id, so a renderer needn't keep it, and `pairing_code`, the code it is to show (None for none).
     """
     device_id = config.device_id
     creds = db.session.get(GlowmarktCredentials, device_id)
@@ -48,7 +49,7 @@ def build(config: DeviceConfig, *, pairing_code: str | None, api_keys: bool) -> 
         screen=Screen(orientation=config.orientation, width=config.width, height=config.height),
         # The key is what the weather is subscribed under, so it's what the renderer reads (v1:weather:<key>).
         weather=Weather(
-            api_key=current_app.config["WEATHER_API_KEY"] if api_keys else "",
+            api_key=current_app.config["WEATHER_API_KEY"] if api_key else "",
             location=config.weather_location,
             key=weather_place.weather_key(config),
         ),
@@ -57,7 +58,6 @@ def build(config: DeviceConfig, *, pairing_code: str | None, api_keys: bool) -> 
         notice_board=NoticeBoard(postcode=config.postcode or None, country=country, style=config.style),
         # For renderers that predate `departures`: only the stops they can show.
         tfl=Tfl(
-            app_key=current_app.config["TFL_APP_KEY"] if api_keys else "",
             stop_ids=[s for s in stop_ids if stops.source_of(s) == "tfl"],
             style=_departures_style(config.style),
         ),
@@ -70,7 +70,8 @@ def build(config: DeviceConfig, *, pairing_code: str | None, api_keys: bool) -> 
         glowmarkt=Glowmarkt(enabled=_glowmarkt_enabled(creds)),
         # Only the switch: the GitHub token stays here, and the developer provider fills the store the screen reads.
         developer=Developer(enabled=config.developer_enabled),
-        # Only the switch, like the developer panel's: the screen gets Apple Music from /api/apple-music.
+        # Only the switch, like the developer panel's: the Apple token stays here, and the music provider fills the
+        # store the screen reads.
         apple_music=AppleMusic(enabled=config.apple_music_enabled),
         pairing_code=pairing_code,
     )
@@ -80,7 +81,7 @@ def for_store(device: Device) -> ConfigResponse | None:
     """Return the copy of the device's config the store keeps for its renderer, or None if it keeps none.
 
     It is the config GET /api/config answers with, less what mustn't be in Redis, which every provider and renderer
-    can read: the app's API keys (sent empty; the renderers no longer use them) and the pairing code (null). A code
+    can read: the weather API key (sent empty; the renderers no longer use it) and the pairing code (null). A code
     proves someone is at the screen, and hands the screen to whoever types it.
 
     None while the renderer has a code to show (the device isn't paired, or a code was asked for and is still live):
@@ -88,7 +89,7 @@ def for_store(device: Device) -> ConfigResponse | None:
     """
     if device.config is None or device.paired_at is None or pairing.live_code(device.device_id):
         return None
-    return build(device.config, pairing_code=None, api_keys=False)
+    return build(device.config, pairing_code=None, api_key=False)
 
 
 def timezone(country: str | None, stop_ids: list[str]) -> str:

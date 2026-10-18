@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="csrf-token" content="{{ csrf }}">
+    <title>GitHub dashboard</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='github_dashboard.css') }}">
+    <script src="{{ url_for('static', filename='github_dashboard.js') }}" defer></script>
+</head>
+<body>
+    <main>
+        <header class="page-header">
+            <div>
+                <p class="eyebrow">PROJECT MONITOR</p>
+                <h1>GitHub dashboard</h1>
+                <p>Open pull requests, live workflows and releases, in one place.</p>
+            </div>
+            <span class="identity">{{ username }} &middot; authentik SSO</span>
+        </header>
+        <div class="toolbar">
+            <p id="summary" role="status">Loading your repositories...</p>
+            <button id="refresh" type="button">Refresh all</button>
+        </div>
+        <p class="hint">Active projects refresh every 10 seconds; idle projects and repository discovery every minute.
+            New Release publishes the next minor version immediately on the default branch.</p>
+        <p id="error" class="error" role="alert" hidden></p>
+        <div id="projects"></div>
+        <noscript><p class="error">JavaScript is required for live project monitoring.</p></noscript>
+    </main>
+</body>
+</html>
