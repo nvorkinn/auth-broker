@@ -453,6 +453,17 @@ docker exec auth-broker flask --app wsgi config publish                         
 Each of these that changes a device's pairing also updates its config in the store and nudges its renderer
 (see [Configs in the store](#configs-in-the-store)), so `unpair` and `code` show on its screen at once.
 
+The device's data in the store (`v1:energy:`, `v1:spotify:`, `v1:spotify-top:`, `v1:developer:` and
+`v1:pace:developer:`) is deleted, after the database's commit, whenever it changes hands: `unpair`, `forget`,
+`owner` with someone other than its owner, and pairing with a code or token by anyone but its owner
+(`broker/services/device_keys.py`). So is the data made from an account the settings page removes or replaces: the
+energy readings when the Glowmarkt account is cleared or changed, the developer panel when the GitHub token is
+replaced or disconnected, and the music when Spotify or Apple Music is disconnected. A Redis that can't be asked is
+logged and the change saved all the same; the keys then lapse by their TTLs. The frame record follows the frames
+table's row, as before (`forget` and `unpair --config`). Linked accounts that a hand-over keeps (`code`, `owner`,
+`unpair` without `--config`) are still the device's, so the providers write their keys again from them: use
+`unpair --config` to hand a device over without them.
+
 `docker exec auth-broker flask --app wsgi weather backfill` gives every config with a weather location
 but no picked place the place Open-Meteo finds first for its text (the one a renderer finds too), leaving
 the text itself alone. It reports each one, skips any it can't resolve, and is safe to run again; run it

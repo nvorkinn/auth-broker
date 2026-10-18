@@ -4,6 +4,7 @@ import re
 from http import HTTPStatus
 from typing import TYPE_CHECKING, Any
 
+from cryptography.fernet import InvalidToken
 from flask import Blueprint, Response, current_app, g, jsonify, redirect, render_template, request, url_for
 from redis import Redis, RedisError
 
@@ -33,6 +34,7 @@ from broker.models import (
 from broker.services import (
     assignments,
     config_store,
+    device_keys,
     frame_image,
     frame_record,
     geoip,
@@ -241,10 +243,16 @@ def _save_device_config(device_id: str) -> ResponseReturnValue:
     config.tfl_stop_ids = stop_ids
     for field, value in choices.items():
         setattr(config, field, value)
-    _save_glowmarkt_credentials(device_id)
-    _save_github_token(device_id)
+    glowmarkt_changed = _save_glowmarkt_credentials(device_id)
+    github_changed = _save_github_token(device_id)
 
     db.session.commit()
+    # What the store has from an account that's gone or been replaced, before the nudge below has the providers write
+    # the new one's: so the screen never shows the old account's data, however long its key would have lasted.
+    stale = device_keys.energy(device_id) if glowmarkt_changed else []
+    stale += device_keys.developer(device_id) if github_changed else []
+    if stale:
+        device_keys.delete(stale)
     _write_subscriptions_to_redis()
     # Every screen's, not just this one's: it costs little, and puts back any copy the store lost.
     config_store.publish_all()
@@ -273,24 +281,53 @@ def _weather_place(config: DeviceConfig) -> tuple[dict[str, Any] | None, list[st
         return None, ["We couldn't check the weather location just now. Please try again in a minute."]
 
 
-def _save_glowmarkt_credentials(device_id: str) -> None:
-    """Stage the posted Glowmarkt username, and password unless its field was left blank."""
+def _save_glowmarkt_credentials(device_id: str) -> bool:
+    """Stage the posted Glowmarkt username, and password unless its field was left blank.
+
+    Return whether that changes the account the glow-provider signs in with, or leaves it none.
+    """
     # A blank password field keeps the stored password.
     glowmarkt_password = request.form.get("glowmarkt_password", "")
-    creds = db.session.get(GlowmarktCredentials, device_id) or GlowmarktCredentials(device_id=device_id)
+    stored = db.session.get(GlowmarktCredentials, device_id)
+    before = _glowmarkt_account(stored) if stored is not None else None
+    creds = stored or GlowmarktCredentials(device_id=device_id)
     creds.username = request.form.get("glowmarkt_username", "").strip()
     if glowmarkt_password:
         creds.password = glowmarkt_password
     db.session.add(creds)
+    return _glowmarkt_account(creds) != before
 
 
-def _save_github_token(device_id: str) -> None:
-    """Stage the posted GitHub token, unless its field was left blank (which keeps the stored one)."""
+def _glowmarkt_account(creds: GlowmarktCredentials) -> tuple[str, str] | str | None:
+    """Return the account the provider signs in with (GlowmarktCredentials.sign_in); None for none.
+
+    "undecryptable" for a password that won't decrypt, which the provider can't sign in with either.
+    """
+    try:
+        return creds.sign_in()
+    except InvalidToken:
+        return "undecryptable"
+
+
+def _save_github_token(device_id: str) -> bool:
+    """Stage the posted GitHub token, unless its field was left blank (which keeps the stored one).
+
+    Return whether that replaces the token the developer provider uses.
+    """
     token = request.form.get("github_token", "").strip()
-    if token:
-        stored = db.session.get(GitHubToken, device_id) or GitHubToken(device_id=device_id)
-        stored.token = token
-        db.session.add(stored)
+    if not token:
+        return False
+    stored = db.session.get(GitHubToken, device_id)
+    try:
+        unchanged = stored is not None and stored.token == token
+    except InvalidToken:
+        unchanged = False
+    if unchanged:
+        return False
+    stored = stored or GitHubToken(device_id=device_id)
+    stored.token = token
+    db.session.add(stored)
+    return True
 
 
 @bp.route("/device/name", methods=["GET", "POST"], defaults={"device_id": None})
@@ -449,6 +486,9 @@ def spotify_disconnect() -> ResponseReturnValue:
     if token is not None:
         db.session.delete(token)
         db.session.commit()
+        # What it was playing, and its top lists (kept up to two hours): the music provider writes them again
+        # within a minute for whatever is still linked.
+        device_keys.delete(device_keys.music(g.device_id))
     return redirect(url_for("pages.device_config", device_id=g.device_id))
 
 
@@ -461,6 +501,8 @@ def github_disconnect() -> ResponseReturnValue:
     if token is not None:
         db.session.delete(token)
         db.session.commit()
+        # Its GitHub summary: the developer provider writes the panel again, without it, within a cycle.
+        device_keys.delete(device_keys.developer(g.device_id))
     return redirect(url_for("pages.device_config", device_id=g.device_id))
 
 
