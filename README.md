@@ -37,7 +37,8 @@ used server-side only, never sent to the browser. As with the broker's other pag
 proxy may reach the broker's loopback listener; do not expose its port directly.
 
 Create a fine-grained PAT for your GitHub account with access to the desired repositories. Repository
-permissions: **Actions: read**, **Checks: read**, **Commit statuses: read**, **Pull requests: read** and
+permissions: **Actions: read**, **Deployments: read and write** (to approve waiting deployments),
+**Checks: read**, **Commit statuses: read**, **Pull requests: read** and
 **Contents: read and write** (for workflow YAML, generated notes, tags and releases); Metadata read is
 implicit. Organization-owned repositories are intentionally excluded: discovery includes every
 non-archived repository **owned by the token's user**, not just recently active projects. All result
@@ -68,6 +69,11 @@ failed and skipped. Matrix and reusable-workflow jobs are grouped into their par
 completion counts; expand **All jobs and steps** for every runtime job and step from the current
 attempt. Dynamic matrices and reusable-workflow internals cannot be expanded before GitHub returns
 their jobs. A workflow that cannot be read is an explicit error, not a misleading edgeless graph.
+Waiting environments show an **Approve &lt;environment&gt;** button when the PAT's GitHub user is
+eligible to review them. Each click approves only that environment; the server rechecks the
+repository, release run and current reviewer eligibility before posting to GitHub's
+`/actions/runs/{run_id}/pending_deployments` endpoint. GitHub's required reviewers, self-review
+restrictions, wait timers and protection rules still apply; the dashboard does not bypass them.
 
 **New Release publishes immediately**, with no confirmation dialog. It rechecks repository ownership,
 reads all published releases **including prereleases** (excluding drafts), and bumps the highest
@@ -77,8 +83,12 @@ is `1.0.0`; if releases exist but none has a semantic version tag, publication i
 The broker calls `POST /repos/{owner}/{repo}/releases/generate-notes` with the previous tag and
 default branch, then creates a non-draft, non-prerelease release with those notes on that branch.
 An already-existing target tag is refused rather than reused. Release actions require a session
-CSRF token, are never automatically retried, and disable the button once requested. If a write
-times out, check GitHub's releases before reloading to try again: GitHub might have accepted it.
+CSRF token and are never automatically retried. **New Release** is disabled while publishing and
+resets when the request finishes so another release can be created without reloading. If a write
+times out, check GitHub Actions and releases before explicitly trying again: GitHub might have
+accepted it. Deployment approval buttons also prevent duplicate requests while an approval is in
+flight. **View workflow** opens GitHub Actions, initially filtered by the published tag until the
+run is discovered, then links directly to its workflow run rather than to the GitHub release page.
 
 ## How a device gets set up
 

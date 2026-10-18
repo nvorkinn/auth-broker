@@ -55,6 +55,8 @@ button:focus-visible, a:focus-visible, summary:focus-visible { outline: 2px soli
 .workflow-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 350px), 1fr)); }
 .workflow { min-width: 0; padding: 10px 12px; border-top: 1px solid var(--border); }
 .workflow-title { font-weight: 600; }
+.deployment-controls { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin-top: 8px; font-size: 11px; }
+.deployment-controls button { font-size: 11px; }
 .graph-scroll { overflow: hidden; margin: 8px 0 0; }
 .graph { position: relative; isolation: isolate; transform-origin: top left; }
 .graph svg { position: absolute; inset: 0; z-index: -1; }

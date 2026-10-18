@@ -205,6 +205,12 @@ def test_waiting_workflow_includes_unstarted_nodes_edges_and_job_steps(api):
     responses.get(
         f"{path}/contents/.github/workflows/release.yml", body="jobs:\n  build: {}\n  deploy:\n    needs: build\n"
     )
+    responses.get(
+        f"{path}/actions/runs/4/pending_deployments",
+        json=[
+            {"environment": {"id": 10, "name": "production"}, "current_user_can_approve": True, "wait_timer": 0},
+        ],
+    )
     result = api.workflow(
         REPO,
         {
@@ -222,7 +228,53 @@ def test_waiting_workflow_includes_unstarted_nodes_edges_and_job_steps(api):
     assert result["status"] == "waiting"
     assert [(node["state"], node["needs"]) for node in result["nodes"]] == [("done", []), ("queued", ["build"])]
     assert result["jobs"][0]["steps"][0]["name"] == "Compile"
-    assert "ref=abc" in responses.calls[-1].request.url
+    assert result["pending_deployments"] == [{"id": 10, "name": "production", "can_approve": True, "wait_timer": 0}]
+    assert "ref=abc" in responses.calls[-2].request.url
+
+
+@responses.activate
+def test_approve_rechecks_run_and_only_approves_selected_environment(api):
+    path = f"{ROOT}/repos/alice/project/actions/runs/4"
+    responses.get(path, json={"name": "Release", "status": "waiting"})
+    responses.get(
+        f"{path}/pending_deployments",
+        json=[
+            {"environment": {"id": 10, "name": "production"}, "current_user_can_approve": True, "wait_timer": 0},
+            {"environment": {"id": 11, "name": "staging"}, "current_user_can_approve": True, "wait_timer": 0},
+        ],
+    )
+    responses.post(f"{path}/pending_deployments", json=[{"id": 7}])
+    api.approve_deployment(REPO, 4, 10)
+    payload = json.loads(responses.calls[-1].request.body)
+    assert payload["environment_ids"] == [10]
+    assert payload["state"] == "approved"
+
+
+@responses.activate
+@pytest.mark.parametrize(
+    ("name", "status", "pending", "message"),
+    [
+        ("Tests", "waiting", [], "unfinished release"),
+        ("Release", "completed", [], "unfinished release"),
+        ("Release", "waiting", [], "no longer waiting"),
+        (
+            "Release",
+            "waiting",
+            [
+                {"environment": {"id": 10, "name": "production"}, "current_user_can_approve": False, "wait_timer": 0},
+            ],
+            "cannot approve",
+        ),
+    ],
+)
+def test_approval_refuses_non_release_completed_missing_or_unauthorized_gates(api, name, status, pending, message):
+    path = f"{ROOT}/repos/alice/project/actions/runs/4"
+    responses.get(path, json={"name": name, "status": status})
+    if name == "Release" and status != "completed":
+        responses.get(f"{path}/pending_deployments", json=pending)
+    with pytest.raises(github.DashboardError, match=message):
+        api.approve_deployment(REPO, 4, 10)
+    assert all(call.request.method == "GET" for call in responses.calls)
 
 
 def test_workflow_parse_diagnostics_are_logged_not_exposed(api, caplog):

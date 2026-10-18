@@ -281,9 +281,103 @@ test("publishing is a CSRF-protected POST with no automatic retries after an amb
     const write = app.calls.find(call => call.options.method === "POST");
     assert.equal(write.url, "/github/repositories/alice/project/release");
     assert.equal(write.options.headers["X-CSRF-Token"], "csrf-token");
-    assert.equal(app.ids.get("refresh").disabled, true);
-    assert.match(app.evaluate('projects.get("alice/project").result.children[0].textContent'), /Check releases/);
+    assert.equal(app.ids.get("refresh").disabled, false);
+    assert.equal(app.ids.get("refresh").textContent, "New Release");
+    assert.match(app.evaluate('projects.get("alice/project").result.children[0].textContent'), /Check GitHub Actions/);
     app.advance(10000);
     await app.tick();
     assert.equal(app.calls.filter(call => call.options.method === "POST").length, 1);
+});
+
+test("release buttons reset after success and can publish again without reloading", async () => {
+    const app = await harness();
+    app.setData({ tag: "v1.20.0", url: "https://github.com/alice/project/actions?query=branch%3Av1.20.0" });
+    await app.evaluate('publish(projects.get("alice/project"), document.getElementById("refresh"))');
+    const button = app.ids.get("refresh");
+    assert.equal(button.disabled, false);
+    assert.equal(button.textContent, "New Release");
+    const result = app.evaluate('projects.get("alice/project").result.children[0]');
+    assert.match(result.href, /\/actions\?/);
+    assert.match(result.textContent, /view workflow/);
+    app.setData({ tag: "v1.21.0", url: "https://github.com/alice/project/actions?query=branch%3Av1.21.0" });
+    await app.evaluate('publish(projects.get("alice/project"), document.getElementById("refresh"))');
+    assert.equal(app.calls.filter(call => call.options.method === "POST").length, 2);
+    assert.match(app.evaluate('projects.get("alice/project").result.children[0].textContent'), /v1.21.0/);
+});
+
+test("concurrent publish calls produce only one write", async () => {
+    const app = await harness();
+    app.setData({ tag: "v1.20.0", url: "https://github.com/alice/project/actions" });
+    await app.evaluate(`Promise.all([
+        publish(projects.get("alice/project"), document.getElementById("refresh")),
+        publish(projects.get("alice/project"), document.getElementById("refresh"))
+    ])`);
+    assert.equal(app.calls.filter(call => call.options.method === "POST").length, 1);
+});
+
+test("a failed subsequent release keeps its error visible when an older workflow refreshes", async () => {
+    const app = await harness();
+    app.setData({ tag: "v1.20.0", url: "https://github.com/alice/project/actions" });
+    await app.evaluate('publish(projects.get("alice/project"), document.getElementById("refresh"))');
+    app.setFailure({ status: 502, message: "Publication uncertain" });
+    await app.evaluate('publish(projects.get("alice/project"), document.getElementById("refresh"))');
+    app.setFailure(null);
+    app.setData({ ...idle, active: true, workflows: [waitingRelease] });
+    app.advance(10000);
+    await app.tick();
+    assert.match(text(app.evaluate('projects.get("alice/project").result')), /Publication uncertain/);
+});
+
+const waitingRelease = {
+    id: 7, name: "Release", number: 5, status: "waiting", branch: "v1.20.0", attempt: 1,
+    url: "https://github.com/alice/project/actions/runs/7", jobs: [], nodes: [],
+    pending_deployments: [
+        { id: 10, name: "production", can_approve: true, wait_timer: 0 },
+        { id: 11, name: "protected", can_approve: false, wait_timer: 30 },
+    ],
+};
+
+test("published link resolves to the discovered Actions run", async () => {
+    const app = await harness();
+    app.setData({ tag: "v1.20.0", url: "https://github.com/alice/project/actions?query=branch%3Av1.20.0" });
+    await app.evaluate('publish(projects.get("alice/project"), document.getElementById("refresh"))');
+    app.setData({ ...idle, active: true, workflows: [waitingRelease] });
+    app.advance(10000);
+    await app.tick();
+    assert.equal(app.evaluate('projects.get("alice/project").result.children[0].href'), waitingRelease.url);
+});
+
+test("waiting deployments have per-environment controls respecting reviewer eligibility", async () => {
+    const app = await harness({ ...idle, active: true, workflows: [waitingRelease] });
+    const buttons = app.ids.get("workflows").querySelectorAll("button");
+    assert.equal(buttons[0].textContent, "Approve production");
+    assert.equal(buttons[0].disabled, false);
+    assert.equal(buttons[1].disabled, true);
+    assert.match(text(app.ids.get("workflows")), /30-minute wait timer/);
+    await Promise.all([buttons[0].listeners.click(), buttons[0].listeners.click()]);
+    const writes = app.calls.filter(call => call.options.method === "POST");
+    assert.equal(writes.length, 1);
+    assert.equal(writes[0].url, "/github/repositories/alice/project/runs/7/approve");
+    assert.deepEqual(JSON.parse(writes[0].options.body), { environment_id: 10 });
+    assert.equal(writes[0].options.headers["X-CSRF-Token"], "csrf-token");
+    assert.equal(writes[0].options.headers["Content-Type"], "application/json");
+    assert.equal(app.ids.get("workflows").querySelectorAll("button")[0].textContent, "Approved");
+    assert.equal(app.ids.get("workflows").querySelectorAll("button")[0].disabled, true);
+    await app.tick();
+    assert.equal(app.calls.filter(call => call.options.method === "POST").length, 1);
+    assert.equal(app.ids.get("workflows").querySelectorAll("button")[0].disabled, true);
+});
+
+test("approval failures are visible, explicitly retryable and never automatically retried", async () => {
+    const app = await harness({ ...idle, active: true, workflows: [waitingRelease] });
+    app.setFailure({ status: 502, message: "The action may have succeeded" });
+    await app.ids.get("workflows").querySelectorAll("button")[0].listeners.click();
+    assert.match(text(app.ids.get("workflows")), /may have succeeded/);
+    assert.equal(app.ids.get("workflows").querySelectorAll("button")[0].disabled, false);
+    app.setFailure(null);
+    await app.tick();
+    assert.equal(app.calls.filter(call => call.options.method === "POST").length, 1);
+    assert.match(text(app.ids.get("workflows")), /check deployment status/);
+    await app.ids.get("workflows").querySelectorAll("button")[0].listeners.click();
+    assert.equal(app.calls.filter(call => call.options.method === "POST").length, 2);
 });
