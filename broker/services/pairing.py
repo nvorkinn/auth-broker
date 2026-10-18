@@ -18,6 +18,7 @@ from sqlalchemy import delete, or_, select
 
 from broker.db import db
 from broker.models import Device, PairingCode
+from broker.services import device_keys
 
 # Excludes visually ambiguous characters (0/O, 1/I/L) since this gets typed in by hand.
 CODE_ALPHABET = "".join(c for c in string.ascii_uppercase + string.digits if c not in "0O1IL")
@@ -46,15 +47,28 @@ def pair_by_token(user: str, token: str) -> str:
         return "waiting"
     if device.owner not in (None, user):
         return "taken"
-    _pair(device, user)
+    previous = _pair(device, user)
     db.session.commit()
+    _forget_the_last_owners_data(device.device_id, previous, user)
     return "paired"
 
 
-def _pair(device: Device, user: str) -> None:
+def _pair(device: Device, user: str) -> str | None:
+    """Make `user` the device's owner (not committed); return the owner it had."""
+    previous = device.owner
     device.owner = user
     if device.paired_at is None:
         device.paired_at = datetime.now(UTC)
+    return previous
+
+
+def _forget_the_last_owners_data(device_id: str, previous: str | None, user: str) -> None:
+    """After the commit: if the device had no owner or someone else, delete what the store has from before.
+
+    So nothing written for its last owner (or before it was unpaired) shows on the new owner's screen.
+    """
+    if previous != user:
+        device_keys.forget(device_id)
 
 
 def issue_code(device_id: str) -> str:
@@ -101,6 +115,7 @@ def redeem_code(code: str, user: str) -> str | None:
 
     device_id = pairing_code.device_id
     db.session.delete(pairing_code)
-    _pair(db.session.get(Device, device_id), user)
+    previous = _pair(db.session.get(Device, device_id), user)
     db.session.commit()
+    _forget_the_last_owners_data(device_id, previous, user)
     return device_id

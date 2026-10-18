@@ -24,7 +24,7 @@ from .clients import weather as weather_client
 from .db import db
 from .models import Device, DeviceConfig
 from .routes.pages import _write_subscriptions_to_redis
-from .services import assignments, config_store, frame_record, pairing, weather_place
+from .services import assignments, config_store, device_keys, frame_record, pairing, weather_place
 
 devices = AppGroup("devices", help="Manual device admin for development.")
 weather = AppGroup("weather", help="The screens' weather places.")
@@ -90,10 +90,14 @@ def code(device_id: str) -> None:
 def owner(device_id: str, user: str) -> None:
     """Make a user (their Authentik user id) the owner of a device, e.g. one paired before owners existed."""
     device = _get_device(device_id)
+    previous = device.owner
     device.owner = user
     if device.paired_at is None:
         device.paired_at = datetime.now(UTC)
     db.session.commit()
+    if previous != user:
+        # Nothing the store has from before is the new owner's to see.
+        device_keys.forget(device_id)
     config_store.publish(device_id)
     click.echo(f"{device_id} now belongs to {user}.")
 
@@ -120,6 +124,9 @@ def unpair(device_id: str, *, wipe_config: bool) -> None:
         device.apple_music_plays = []
         device.frame = None
     db.session.commit()
+    # Its data in the store (energy, music, developer), so the next owner never sees the last one's. With its accounts
+    # kept (no --config), the providers write their keys again from them.
+    device_keys.forget(device_id)
     if wipe_config:
         # The renderer's copy of the frame too, so the next owner never sees the last one's screen.
         frame_record.forget(device_id)
@@ -139,6 +146,7 @@ def forget(device_id: str) -> None:
     db.session.delete(device)
     db.session.commit()
     frame_record.forget(device_id)  # and the frame the renderer keeps in Redis
+    device_keys.forget(device_id)  # and the providers' data for it
     config_store.publish(device_id)
     click.echo(f"{device_id} forgotten; delete its credentials file so it registers again.")
 

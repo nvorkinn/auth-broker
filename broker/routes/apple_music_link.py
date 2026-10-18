@@ -12,6 +12,7 @@ from broker.auth import require_paired_user
 from broker.clients import apple_music
 from broker.db import db
 from broker.models import AppleMusicPlay, AppleMusicToken
+from broker.services import device_keys
 
 if TYPE_CHECKING:
     from flask.typing import ResponseReturnValue
@@ -54,4 +55,7 @@ def disconnect() -> ResponseReturnValue:
         db.session.delete(stored)
     db.session.query(AppleMusicPlay).filter_by(device_id=g.device_id).delete()
     db.session.commit()
+    # What it last played, and the top lists counted from its plays: the music provider writes them again within a
+    # minute for whatever is still linked.
+    device_keys.delete(device_keys.music(g.device_id))
     return redirect(url_for("pages.device_config", device_id=g.device_id))
