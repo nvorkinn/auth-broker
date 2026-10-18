@@ -76,15 +76,12 @@ and how to run and deploy it.
 3. **Spotify:** from `/device`, "Connect Spotify" kicks off the OAuth flow.
    The server exchanges the code for tokens and keeps them — the Pi never
    sees a Spotify token, only its own device secret.
-4. **Ongoing:** the Pi polls `GET /api/config` (device settings +
-   shared app-level API keys like the TfL/weather ones) and `GET
-   /api/spotify/now-playing` (server refreshes the Spotify token
-   server-side and proxies back just the now-playing payload, shaped to match
-   `SpotifyClient.get_current_track()` in `countdown` so the Pi-side swap is a
-   drop-in). `GET /api/spotify/queue` works the same way and returns the
-   upcoming Spotify queue as a JSON list of the same track shape.
-   `GET /api/spotify/top/<artists|tracks>` is served the same way. With the
-   developer panel on, the developer provider fetches the owner's GitHub at a
+4. **Ongoing:** the renderer polls `GET /api/config` (device settings +
+   shared app-level API keys like the TfL/weather ones) and reads its panels'
+   data from Redis. With Spotify or Apple Music on, the music provider fetches
+   what's playing and the top lists with the tokens only the broker holds
+   (refreshing Spotify's itself) and writes them there (see "Music in the
+   store"). With the developer panel on, the developer provider fetches the owner's GitHub at a
    glance (open PRs, reviews waiting, repos failing on their default branch,
    and a Release or Deploy workflow running or just finished, with its jobs as
    GitHub's graph: `broker/clients/workflow_graph.py`) and their AI plans,
@@ -165,7 +162,7 @@ A screen therefore needs no logic beyond:
 403 for an unknown or spent token, and 409 for a secret already registered as a screen.
 
 A renderer polls `GET /api/config`, which carries its `device_id` and a `pairing_code` to draw. From
-then on it can use the ID-less routes for everything (`PUT /api/frame`, `/api/spotify/...`), so it
+then on it can use the ID-less routes for everything (`PUT /api/frame`), so it
 never has to handle its `device_id`. The broker still logs each request with
 the `device_id` it found from the secret. A screen can also ask for a pairing code
 (`POST /api/devices/pairing-code`), which a screen with no renderer yet has nothing
@@ -214,7 +211,6 @@ hasn't made a request (`devices.display_last_seen_at`) for 24 hours becomes `sus
 | Route | Roles |
 |---|---|
 | `GET /api/config` | renderer |
-| `GET /api/spotify/<now-playing \| queue \| top/<artists\|tracks>>` | renderer |
 | `POST /api/devices/pairing-code` | renderer, display |
 | `PUT /api/frame` (raw 800x480 1-bit, 48000 bytes) | renderer |
 | `GET /api/frame` (ETag / `If-None-Match` → 304) | renderer, display |
@@ -934,18 +930,20 @@ that breaks the other shows up in both. To see it on the host: `docker logs -f d
 ## Music in the store
 
 `broker/spotify_provider.py` is the music provider: a long-running process that fetches what each screen's Spotify
-and Apple Music are playing, and their top lists, and writes them to Redis, so the renderers on the server read them
-from there rather than calling `/api/spotify` and `/api/apple-music`. It runs from the broker's image with the
-broker's settings and `data/`, and calls the services with the same code as those routes, so the tokens never leave
-the broker and a token it refreshes is stored just as the routes store it. The routes stay: standalone Pis can't
-reach Redis and keep calling them.
+and Apple Music are playing, and their top lists, and writes them to Redis, which is the only place the renderers get
+them from. It runs from the broker's image with the broker's settings and `data/`, and calls the services with the
+broker's own clients (`broker/clients/spotify.py`, `broker/services/music.py`), so the tokens never leave the broker,
+and a Spotify token it refreshes is stored back in the database.
+
+Apple Music has no top lists of its own, so the broker counts them from the plays it has seen (`apple_music_plays`).
+The provider is what logs them: each minute's read of the recently played list logs the songs ahead of where the
+last read picks up (`apple_music.record_plays`), so a list read again logs nothing.
 
 Its loop follows pi-dashboard's providers (`countdown/providers/README.md` there): a cycle on start, then on every
 epoch-aligned minute, or at once on a `v1:sub:changed` message (a config was saved). Each cycle reads the devices
 from the database: Spotify switched on and linked, or Apple Music switched on (connected or not; the latter stored as
-nothing playing, as the route answers it). A device whose fetch fails (a revoked token, Spotify down) is logged and
-left out, so its keys expire; an unreachable Redis is logged and tried again next minute. SIGTERM stops it between
-devices.
+nothing playing). A device whose fetch fails (a revoked token, Spotify down) is logged and left out, so its keys
+expire; an unreachable Redis is logged and tried again next minute. SIGTERM stops it between devices.
 
 | Key | TTL | Fetched | Holds |
 |---|---|---|---|
@@ -953,8 +951,9 @@ devices.
 | `v1:spotify-top:<device id>` | 2 h | every 30 min, and at once for a device new to it | `{"fetched_at", "spotify", "apple_music"}`: each service's top lists |
 | `v1:art:<sha1 of the image URL>` | 5 min, renewed every minute while a player key shows it | once, when a player key first shows it (before that key is written) | the playing track's cover: the image file's raw bytes, as its host served it (see [Covers](#covers)) |
 
-Each service's part is exactly what its route answers the renderer, so the renderer reads it with the models it
-already has; the only new definition is the wrapper (pi-dashboard's `countdown_core/store/music.py`):
+Each service's part is in Spotify's shapes: Spotify's own answers, and Apple Music's made to look like them, so the
+renderer reads both with the same models; the only definition of its own is the wrapper (pi-dashboard's
+`countdown_core/store/music.py`):
 
 ```json
 {
@@ -975,9 +974,9 @@ already has; the only new definition is the wrapper (pi-dashboard's `countdown_c
 }
 ```
 
-- A part is `null` when the service is switched off or its fetch failed; the renderer then keeps its last panel, as
-  when a route call fails. Top lists short of a service are written only if there's no copy yet: a full older one
-  is kept, and the fetch is tried again next minute.
+- A part is `null` when the service is switched off or its fetch failed; the renderer then keeps its last panel.
+  Top lists short of a service are written only if there's no copy yet: a full older one is kept, and the fetch is
+  tried again next minute.
 - Nothing playing is a queue with `"currently_playing": null` (and `"queue": []` for Spotify's 204), not a missing
   key: a missing key means the provider is down.
 - The top lists are Spotify's `/me/top/{tracks,artists}?time_range=<long_term|short_term>&limit=5`, the two time
@@ -987,8 +986,7 @@ already has; the only new definition is the wrapper (pi-dashboard's `countdown_c
 
 A minute is as often as a renderer moves its music panel on today, and it shows the player only every other page, so
 the provider makes no more Spotify calls than the renderers it stands in for: one a minute per device, plus four
-every half hour, and an image host call only when a cover is new to the store. It also fetches the devices of
-standalone Pis (the database can't tell which renderers read the store), which still call the routes too.
+every half hour, and an image host call only when a cover is new to the store.
 
 To see it on the host: `docker logs -f spotify-provider`, and
 `docker exec -it redis sh -c 'REDISCLI_AUTH="$REDIS_PASSWORD" redis-cli GET v1:spotify:<device id>'`. Locally, with

@@ -1,4 +1,4 @@
-"""The music area's data in the shapes the screen reads, shared by the proxy routes and the music provider.
+"""The music area's data in the shapes the screen reads, which the music provider (broker/spotify_provider.py) stores.
 
 Spotify's are Spotify's own (broker/clients/spotify.py hands them over as they come); Apple Music's are made to look
 like them (broker/clients/apple_music.py), so the screen draws both with the same panels.
