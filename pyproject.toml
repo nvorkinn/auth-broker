@@ -1,0 +1,48 @@
+[project]
+name = "auth-broker"
+# Releases are git tags (see .github/workflows/release.yml), not this; nothing builds a package from it.
+version = "0.0.0"
+requires-python = ">=3.14"
+dependencies = [
+    "flask",
+    "requests",
+    "gunicorn",
+    "cryptography",
+    "flask-sqlalchemy",
+    "flask-migrate",
+    "sqlalchemy",
+    "alembic",
+    "werkzeug",
+    "click",
+    "maxminddb",
+    "pydantic",
+    # The workflow files the developer panel's release graph is drawn from.
+    "pyyaml",
+    "redis",
+    # The IANA time zones for zoneinfo (the glow-provider asks Glowmarkt in each screen's), whatever the image has.
+    "tzdata",
+    # The API contract and the code generated from it: the vendor/countdown-api submodule, installed editable
+    # (see [tool.uv.sources]).
+    "countdown-api[server]",
+]
+
+[dependency-groups]
+dev = [
+    "pytest",
+    "pytest-cov",
+    "pytest-xdist",
+    # CI splits the tests across parallel jobs: `--num-shards N --shard-id I` runs one share of them.
+    "pytest-shard",
+    # lua: the render queue's script (services/render_jobs.py) runs in fakeredis too.
+    "fakeredis[lua]",
+    "responses",
+    # Keep in step with the ruff-pre-commit rev in .pre-commit-config.yaml.
+    "ruff==0.17.1",
+]
+
+[tool.uv]
+# An app, not a library: `uv sync` installs its dependencies, never the broker itself.
+package = false
+
+[tool.uv.sources]
+countdown-api = { path = "vendor/countdown-api", editable = true }

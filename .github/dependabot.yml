@@ -5,7 +5,8 @@
 
 version: 2
 updates:
-  - package-ecosystem: "pip"
+  # pyproject.toml and uv.lock. Ruff is also pinned in .pre-commit-config.yaml, which this doesn't update: keep it in step.
+  - package-ecosystem: "uv"
     directory: "/"
     schedule:
       interval: "daily"

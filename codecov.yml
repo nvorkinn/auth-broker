@@ -1,3 +1,9 @@
+# The tests run in 3 shards (see .github/workflows/tests.yml), each uploading its own report: wait for all of them
+# before reporting, or the first would look like a fall in coverage.
+codecov:
+  notify:
+    after_n_builds: 3
+
 coverage:
   status:
     project:
@@ -11,3 +17,4 @@ coverage:
 comment:
   layout: "condensed_header, diff, files"
   require_changes: false
+  after_n_builds: 3

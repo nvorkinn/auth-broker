@@ -5,17 +5,23 @@ FROM --platform=$BUILDPLATFORM python:3.14-slim AS geodata
 COPY scripts/fetch_geodata.py /
 RUN python /fetch_geodata.py /geodata
 
+# uv itself, to install the dependencies with.
+FROM ghcr.io/astral-sh/uv:0.13.1 AS uv
+
 FROM python:3.14-slim
 
 WORKDIR /app
 
 ENV PYTHONUNBUFFERED=1
 
-# requirements.txt installs vendor/countdown-api (the API contract and its generated code) from here, editable,
-# so it has to stay where it is.
+# The dependencies, exactly as uv.lock pins them (no dev group), in /app/.venv. vendor/countdown-api (the API contract
+# and its generated code) is installed from here, editable, so it has to stay where it is. uv is only mounted for this,
+# and keeps no cache, so neither is left in the image.
+ENV UV_COMPILE_BYTECODE=1 UV_LINK_MODE=copy UV_PYTHON_DOWNLOADS=never
 COPY vendor/countdown-api/ vendor/countdown-api/
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+COPY pyproject.toml uv.lock ./
+RUN --mount=from=uv,source=/uv,target=/usr/local/bin/uv uv sync --locked --no-dev --no-cache
+ENV PATH="/app/.venv/bin:$PATH"
 
 COPY --from=geodata /geodata geodata/
 COPY broker/ broker/
