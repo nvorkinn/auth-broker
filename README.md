@@ -564,7 +564,7 @@ External calls (Spotify, TfL) are mocked in tests — nothing hits the network.
 `.github/workflows/tests.yml` runs this on every push/PR to `main`, split into
 3 parallel jobs with [pytest-shard](https://pypi.org/project/pytest-shard/)
 (`--num-shards 3 --shard-id 0` runs the first third locally), with uv's cache
-kept between runs by `actions/cache` until `pyproject.toml` or `uv.lock`
+kept between runs by setup-uv until `pyproject.toml` or `uv.lock`
 changes. Each shard uploads its `coverage.xml` to
 [Codecov](https://app.codecov.io/gh/nvorkinn/auth-broker), which merges them and
 posts a coverage comment and status check on each PR (config in
