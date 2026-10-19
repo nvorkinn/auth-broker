@@ -5,4 +5,4 @@ pytest-xdist
 # lua: the render queue's script (services/render_jobs.py) runs in fakeredis too.
 fakeredis[lua]
 responses
-ruff==0.17.0
+ruff==0.17.1
