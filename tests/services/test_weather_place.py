@@ -1,8 +1,7 @@
-import json
-from pathlib import Path
 from unittest.mock import patch
 
 import pytest
+from countdown_api import fixtures
 
 from broker.clients.weather import GeocodingUnavailableError
 from broker.models import DeviceConfig
@@ -82,7 +81,7 @@ def test_weather_key_of_free_text_with_nothing_to_slug_is_the_text_so_the_screen
 
 
 # The keys pi-dashboard's weather provider is written for: its tests read the same file.
-WEATHER_KEYS = json.loads((Path(__file__).parent.parent / "fixtures" / "weather_keys.json").read_text())["keys"]
+WEATHER_KEYS = fixtures.load("weather_keys.json")["keys"]
 
 
 @pytest.mark.parametrize("example", WEATHER_KEYS, ids=[example["key"] for example in WEATHER_KEYS])

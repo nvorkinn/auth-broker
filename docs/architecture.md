@@ -25,7 +25,7 @@ this page is the map. [The database](database.md) has the tables.
 | **glow-provider** | this repository (`broker/providers/glow.py`), the broker's image, deployed with the broker | Reads the devices' Glowmarkt accounts from the database (read-only), fetches their readings from Glowmarkt and writes them to Redis (`v1:energy:<device id>`), so the passwords never leave the broker. See [the energy provider](../README.md#the-energy-provider). |
 | **spotify-provider** | this repository (`broker/spotify_provider.py`), the broker's image with another command | Fetches each screen's Spotify and Apple Music with the broker's own tokens and code, and writes them to Redis, with the playing tracks' covers (one copy per image; see "Music in the store" in the README). Deployed with the broker. |
 | **developer-provider** | this repository (`broker/developer_provider.py`), the broker's image with another command | Reads the devices and their GitHub tokens from the database (read-only, like the glow-provider). Polls each screen's GitHub and AI plans for as long as its developer panel is on, writes them to Redis, and asks for a faster screen refresh (`v1:pace:developer:<device id>`) while a release runs, queueing a render on each such cycle. Deployed with the broker. See [Pace](#pace). |
-| **countdown-api** | [countdown-api](https://github.com/nvorkinn/countdown-api), the `vendor/countdown-api` submodule | The shape of a screen's config (`ConfigResponse`), as the broker writes it to the store and the pool reads it, and the models generated from it. |
+| **countdown-api** | [countdown-api](https://github.com/nvorkinn/countdown-api), the `vendor/countdown-api` submodule | The store contract: every Redis key the broker and pi-dashboard share (`countdown_api.keys`), the models of their values (the config's `ConfigResponse` among them), the enqueue script both run, and the canonical examples both sides' tests read. |
 
 ## Who calls the broker, and how
 
@@ -418,7 +418,7 @@ sequenceDiagram
 
 - **What's stored.** `v1:config:<device id>` holds the screen's config, the contract's `ConfigResponse`, with no
   pairing code (`pairing_code` is null). No API key is in it, and no Glowmarkt, GitHub, Spotify or Apple Music
-  credential. `tests/fixtures/config_store.json` pins the shape, and pi-dashboard's tests read the same file.
+  credential. The store contract's `config_store.json` pins the shape, and pi-dashboard's tests read the same file.
 - **When.** The whole set is rebuilt from the database on every config save, as the broker starts (gunicorn's
   `post_worker_init`, in `gunicorn.conf.py`), every minute in each gunicorn worker (`config_store.start_resync`, a
   daemon thread `post_worker_init` starts), by `flask weather backfill` and by `flask config publish`; one device's
@@ -431,20 +431,20 @@ sequenceDiagram
   screen from. Written whenever a code is issued, over the last one's; deleted when the code is used, the device is
   paired by token or given an owner (both drop its codes), unpaired or forgotten. Plaintext, by decision: any Redis
   reader on the host can see a live code (pi-dashboard's `docs/stateless-renderers.md`, "The pairing screen").
-  `tests/fixtures/pairing_key.json` pins the shape. Redis down never stops a code being issued or used.
+  The store contract's `pairing_key.json` pins the shape. Redis down never stops a code being issued or used.
 - **Render jobs** (`services/render_jobs.py`): the broker queues a job on `v1:render:jobs` for every screen whose copy
   changed, after the write and after the pool's list is rewritten (so a screen that has just left it gets none), for
   the screen whose config was saved even if its copy didn't change (an account replaced), for a screen newly listed,
   and when a code is issued (after its `v1:pairing:` key is written) or spent (after the key's deleted). The script
   is pi-dashboard's `render_queue` enqueue, byte for byte: a screen is queued at most once (its
-  `v1:render:queued:<id>` flag, 60 s TTL), and only if it's in `v1:render:screens`. `tests/fixtures/render_queue.json`
+  `v1:render:queued:<id>` flag, 60 s TTL), and only if it's in `v1:render:screens`. The store contract's `render_queue.json`
   pins the script's SHA1 and keys; pi-dashboard's tests read the same file. Redis down never fails a save or a code:
   the error's type is logged, and the pool's ticker draws the screen within the minute.
 - **The render pool's screens** (`services/render_screens.py`): `v1:render:screens`, a hash of device id to slug (the
   slug is the `device` label of the pool's metrics), which the pool's worker and ticker read and nothing else writes.
   Rewritten whole (only what differs) with the configs, and when a screen is named. A screen is listed while it has a
   slug, settings, is paired or has a live code to show, and has been seen within a day (`assignments.is_quiet`); a
-  screen newly listed gets a render job at once. `tests/fixtures/render_screens.json` pins the shape; pi-dashboard's
+  screen newly listed gets a render job at once. The store contract's `render_screens.json` pins the shape; pi-dashboard's
   tests read the same file.
 - **No TTL** on the configs or the list, as they're rebuilt from the database. `maxmemory-policy volatile-lru` evicts
   only keys with a TTL, so these are never evicted, and they count against `maxmemory 128mb` for good: about 700 bytes

@@ -1,6 +1,6 @@
 """Removing a device's own data from the store when its accounts change or it changes hands.
 
-The providers write each device's data under keys of its own (pi-dashboard's store/keys.py has them all):
+The providers write each device's data under keys of its own (the store contract's, countdown_api.keys):
 
     v1:energy:<device id>         the glow-provider's Glowmarkt readings (TTL about a day)
     v1:spotify:<device id>        the music provider's player (3 min)
@@ -30,6 +30,7 @@ its commands), and the keys lapse by their TTLs.
 
 import logging
 
+from countdown_api import keys as store_keys
 from flask import current_app
 from redis import Redis, RedisError
 
@@ -40,17 +41,17 @@ logger = logging.getLogger(__name__)
 
 def energy(device_id: str) -> list[str]:
     """Return the keys made from the device's Glowmarkt account (the glow-provider's energy_key)."""
-    return [f"v1:energy:{device_id}"]
+    return [store_keys.energy(device_id)]
 
 
 def music(device_id: str) -> list[str]:
     """Return the keys made from the device's Spotify and Apple Music accounts (the music provider's)."""
-    return [f"v1:spotify:{device_id}", f"v1:spotify-top:{device_id}"]
+    return [store_keys.spotify(device_id), store_keys.spotify_top(device_id)]
 
 
 def developer(device_id: str) -> list[str]:
     """Return the keys made from the device's GitHub token and AI plans (the developer provider's)."""
-    return [f"v1:developer:{device_id}", f"v1:pace:developer:{device_id}"]
+    return [store_keys.developer(device_id), store_keys.pace(store_keys.DEVELOPER, device_id)]
 
 
 def delete(keys: list[str]) -> None:

@@ -367,7 +367,6 @@ broker/
   services/   the broker's own logic that more than one route needs (pairing, registration, setup)
   clients/    everything that talks to an outside API (Spotify, TfL, Open-Meteo)
   models.py   the schema; db.py and migrations/ manage it
-  api.py      the routes of the countdown API contract (vendor/countdown-api): the registry they are served from
   auth.py     the decorators that guard routes
   config.py   environment variables → app.config
   cli.py      `flask devices ...` admin commands
@@ -383,7 +382,7 @@ broker/
 ## Running locally
 
 Python 3.14 and [uv](https://docs.astral.sh/uv/) are needed: `pyproject.toml` lists the dependencies and `uv.lock`
-pins them. `vendor/countdown-api` is a git submodule (the API contract and the code generated from it), installed from
+pins them. `vendor/countdown-api` is a git submodule (the store contract and the code generated from it), installed from
 there in editable mode, so clone with it and update it with the repository:
 
 ```bash
@@ -479,19 +478,20 @@ before gunicorn starts. A database from before migrations existed is adopted
 by the first migration on its first start, keeping its data.
 `test_migrations_match_the_models` fails if a model changes without a migration.
 
-## The config contract
+## The store contract
 
-The shape of a screen's config, as the broker writes it to the store and pi-dashboard's render pool reads it, is one
-OpenAPI file in [nvorkinn/countdown-api](https://github.com/nvorkinn/countdown-api): its `ConfigResponse`, which both
-sides use as the submodule `vendor/countdown-api`. [openapi-codegen](https://github.com/nvorkinn/openapi-codegen)
-turns it into the Pydantic models, and the result is committed there. The broker builds the config with them
-(`broker/services/renderer_config.py`) for `v1:config:<device id>` and `v1:pairing:<device id>`.
+The broker and pi-dashboard share only Redis, and what crosses between them is one contract:
+[nvorkinn/countdown-api](https://github.com/nvorkinn/countdown-api)'s `store.yaml`, used here as the submodule
+`vendor/countdown-api`. From it come the Python package's `countdown_api.keys` (every key and channel that crosses:
+the subscriptions, `v1:config:`, `v1:pairing:`, the render queue's, `v1:frame:`, the providers' energy, music, cover,
+developer and pace keys, with their TTLs), `countdown_api.models` (a Pydantic model of each value: the broker builds
+the config with `ConfigResponse` in `broker/services/renderer_config.py`), `countdown_api.scripts` (the enqueue script
+both sides run, `broker/services/render_jobs.py`) and `countdown_api.fixtures`, the canonical examples both sides'
+tests read: `tests/test_store_contract.py` round-trips the broker's writers and readers through them.
 
-The contract still describes the operation it began with, `GET /api/config`, which the per-screen renderers polled;
-the broker no longer serves it (the render pool reads the store), so it registers none of the contract's routes, and
-only its models are used. Changing the shape is a PR in countdown-api, then here:
-`git -C vendor/countdown-api fetch && git -C vendor/countdown-api checkout <commit>`, commit the new pointer
-(Dependabot opens that PR weekly). Change the format by adding fields: a renderer that's older ignores fields it
+Changing a stored shape is a PR in countdown-api, then here:
+`git -C vendor/countdown-api fetch && git -C vendor/countdown-api checkout <commit>`, `uv lock`, commit the new pointer
+(Dependabot opens that PR weekly). Change the format by adding fields: a reader that's older ignores fields it
 doesn't know.
 
 The broker's routes are plain Flask blueprints and not in the contract.
@@ -1038,9 +1038,9 @@ time to UTC (BST is `-60`): Glowmarkt labels each bucket with its local
 wall-clock start as if it were UTC, and the renderer relabels them with it. The
 renderer cuts each page to its window as of when it draws, so a value up to an
 hour old still draws the right 24 hours, 31 days and year, missing at most the
-readings since `fetched_at`. `tests/fixtures/glow_energy.json` is one fetch,
-from Glowmarkt's answers to the stored value; pi-dashboard's tests read the
-same file, so change both together.
+readings since `fetched_at`. The store contract's `glow_energy.json` (countdown-api's
+`countdown_api.fixtures`) is one fetch, from Glowmarkt's answers to the stored value;
+pi-dashboard's tests read the same file.
 
 It runs the broker's image, so `deploy.sh` recreates it with the broker on
 every `deploy-config`, pinned by the same `AUTH_BROKER_VERSION`. To see it on
@@ -1060,7 +1060,7 @@ it):
 
 - **The value** is the screen's config (the contract's `ConfigResponse`), with no pairing code (`pairing_code`
   null). It carries no API key: neither the weather's nor TfL's is in the config at all any more.
-  `tests/fixtures/config_store.json` is an example; pi-dashboard's tests read the same file, so change both together.
+  The store contract's `config_store.json` is an example; pi-dashboard's tests read the same file.
 - **Written** for every device on every config save, as the broker starts (gunicorn's `post_worker_init`, in
   `gunicorn.conf.py`, which writes the subscriptions too), every minute in each broker process
   (`config_store.start_resync`), by `flask weather backfill` and by `flask config publish`; and for one device when
@@ -1091,7 +1091,7 @@ keeps no copy. It's one latest value per screen, like the providers' keys:
 
 - **The record** is a hash: `frame`, the 48,000 raw bytes (read with `app.extensions["redis_bytes"]`, a client that
   doesn't decode values); `etag`, the frame's BLAKE2b in hex, the screen's ETag; `rendered_at`, when the pool first
-  wrote the picture. `tests/fixtures/frame_record.json` (with `frame_record.bin`) pins it; pi-dashboard's tests read
+  wrote the picture. The store contract's `frame_record.json` (with `frame_record.bin`) pins it; pi-dashboard's tests read
   the same files, so change both together.
 - **Served** to the screen, and on the config page's preview and its "Drawn" time. A screen with the picture already
   gets its 304 from `etag` without the 48 KB being read. With no record (not drawn yet, or one that can't be read, or
@@ -1131,7 +1131,7 @@ about 750 calls over a ten-minute release, against the 5,000 an hour a token get
 
 For a screen pi-dashboard's render pool draws (its docs/stateless-renderers.md), each of those 20-second cycles
 queues a render of it, once the new data is written (`broker/services/render_jobs.py`: the pool's own enqueue script,
-copied byte for byte and pinned by `tests/fixtures/render_enqueue.json`), and so does the cycle that finds the release
+the store contract's `countdown_api.scripts.ENQUEUE`), and so does the cycle that finds the release
 gone, to take it off the screen. Outside a release it queues nothing: the pool's ticker draws every screen on the
 minute. Only screens in the pool's `v1:render:screens` are queued, and a job that can't be queued is logged by its
 error's type and left to the tick.
@@ -1151,8 +1151,8 @@ SQLite's default rollback-journal mode, where a reader only takes shared locks o
 it): in WAL mode every reader has to create a `-shm` file beside it, and can't. As it doesn't migrate, a cycle that runs
 while the broker is still migrating after a deploy can fail on the new schema; the next tick tries again.
 
-`tests/fixtures/developer.json` is the stored shape, copied into pi-dashboard's tests too, so a change to either side
-that breaks the other shows up in both. To see it on the host: `docker logs -f developer-provider`. Locally,
+The store contract's `developer.json` is the stored shape, which pi-dashboard's tests read too, so a change to either
+side that breaks the other shows up in both. To see it on the host: `docker logs -f developer-provider`. Locally,
 `python -m broker.developer_provider`. `deploy.sh` recreates it with the broker.
 
 ## Music in the store
@@ -1210,8 +1210,8 @@ renderer reads both with the same models; the only definition of its own is the 
   key: a missing key means the provider is down.
 - The top lists are Spotify's `/me/top/{tracks,artists}?time_range=<long_term|short_term>&limit=5`, the two time
   ranges the renderer shows, and Apple Music's counted equivalents.
-- `tests/fixtures/music_player.json` and `music_top.json` are an example of each; pi-dashboard's tests read copies
-  of the same files, so keep them in step.
+- The store contract's `music_player.json` and `music_top.json` are an example of each; pi-dashboard's tests read the
+  same files.
 
 A minute is as often as a renderer moves its music panel on today, and it shows the player only every other page, so
 the provider makes no more Spotify calls than the renderers it stands in for: one a minute per device, plus four
@@ -1254,8 +1254,8 @@ alive within the 5 minutes, about 400 KB. For 50 devices that's 3 MB as a rule a
 like that, less where screens share albums: small beside `maxmemory 128mb`. Every cover has a TTL, so under
 `volatile-lru` it can be evicted like the providers' data, and is then just fetched again.
 
-`tests/fixtures/music_art.json` is the keys stored for `music_player.json` (each holding `music_art.jpg` in the tests);
-pi-dashboard's tests read copies of all three. To see them on the host (a cover still shown has a TTL of 240 to 300):
+The store contract's `music_art.json` is the keys stored for `music_player.json` (each holding `music_art.jpg` in the
+tests); pi-dashboard's tests read the same three files. To see them on the host (a cover still shown has a TTL of 240 to 300):
 
 ```sh
 docker exec redis sh -c 'REDISCLI_AUTH="$REDIS_PASSWORD" redis-cli -h 127.0.0.1 --scan --pattern "v1:art:*" | head'

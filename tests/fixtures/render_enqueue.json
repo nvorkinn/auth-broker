@@ -1,4 +1,0 @@
-{
-  "about": "The render pool's enqueue script, as pi-dashboard runs it: countdown_core.store.render_queue._ENQUEUE in countdown/core/src/countdown_core/store/render_queue.py, copied byte for byte (from pi-dashboard 0599fef, #222). KEYS: v1:render:queued:<device id>, v1:render:jobs. ARGV: the device id, the queued flag's TTL in ms. auth-broker's broker/services/render_jobs.py runs the same script, and its tests check it against this copy: change the two together, and this copy whenever pi-dashboard's changes.",
-  "script": "local t = redis.call('TIME')\nlocal now_ms = t[1] .. string.format('%03d', math.floor(t[2] / 1000))\n\nif redis.call('SET', KEYS[1], now_ms, 'NX', 'PX', ARGV[2]) then\n  redis.call('LPUSH', KEYS[2], ARGV[1])\n  return 1\nend\nreturn 0\n"
-}

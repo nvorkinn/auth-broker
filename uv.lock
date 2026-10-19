@@ -32,7 +32,7 @@ source = { virtual = "." }
 dependencies = [
     { name = "alembic" },
     { name = "click" },
-    { name = "countdown-api", extra = ["server"] },
+    { name = "countdown-api" },
     { name = "cryptography" },
     { name = "flask" },
     { name = "flask-migrate" },
@@ -63,7 +63,7 @@ dev = [
 requires-dist = [
     { name = "alembic" },
     { name = "click" },
-    { name = "countdown-api", extras = ["server"], editable = "vendor/countdown-api" },
+    { name = "countdown-api", editable = "vendor/countdown-api" },
     { name = "cryptography" },
     { name = "flask" },
     { name = "flask-migrate" },
@@ -287,11 +287,6 @@ dependencies = [
     { name = "pydantic" },
 ]
 
-[package.optional-dependencies]
-server = [
-    { name = "flask" },
-]
-
 [package.metadata]
 requires-dist = [
     { name = "flask", marker = "extra == 'server'", specifier = ">=3.1" },
@@ -302,8 +297,10 @@ provides-extras = ["client", "server"]
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "jsonschema", specifier = ">=4.25" },
     { name = "openapi-codegen", extras = ["yaml"], url = "https://github.com/nvorkinn/openapi-codegen/releases/download/v2.0.0/openapi_codegen-2.0.0-py3-none-any.whl" },
     { name = "pre-commit" },
+    { name = "pytest", specifier = ">=8.4" },
     { name = "ruff" },
 ]
 

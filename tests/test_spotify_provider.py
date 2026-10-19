@@ -1,7 +1,7 @@
 """The music provider (broker/spotify_provider.py): what it writes to the store, and how it copes with failures.
 
-tests/fixtures/music_player.json and music_top.json are the stored contract: pi-dashboard's renderer tests read the
-same two files (copied into its tests), so a change to either side that breaks the other shows up in both. So is
+The store contract's music_player.json and music_top.json (countdown_api.fixtures) are the stored values: pi-dashboard's
+renderer tests read the same two files, so a change to either side that breaks the other shows up in both. So is
 music_art.json, the covers stored for music_player.json (each music_art.jpg's bytes here); tests/test_album_art.py has
 the rest of the covers' tests.
 """
@@ -10,13 +10,13 @@ import json
 import threading
 import time
 from datetime import UTC, datetime
-from pathlib import Path
 from unittest.mock import Mock, patch
 
 import fakeredis
 import pytest
 import requests
 import responses
+from countdown_api import fixtures
 from sqlalchemy import select
 
 from broker import spotify_provider
@@ -35,11 +35,10 @@ from broker.spotify_provider import (
 )
 from tests.conftest import apple_song
 
-FIXTURES = Path(__file__).parent / "fixtures"
-PLAYER = json.loads((FIXTURES / "music_player.json").read_text())
-TOP = json.loads((FIXTURES / "music_top.json").read_text())
-COVERS = json.loads((FIXTURES / "music_art.json").read_text())
-ART = (FIXTURES / "music_art.jpg").read_bytes()
+PLAYER = fixtures.load("music_player.json")
+TOP = fixtures.load("music_top.json")
+COVERS = fixtures.load("music_art.json")
+ART = fixtures.read_bytes("music_art.jpg")
 FETCHED_AT = datetime.fromisoformat(PLAYER["fetched_at"]).timestamp()
 SPOTIFY_API = "https://api.spotify.com/v1"
 APPLE_SONGS = [apple_song("1", name="Efecto"), apple_song("2", name="Tití Me Preguntó")]

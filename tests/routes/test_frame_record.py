@@ -1,29 +1,27 @@
 """The screen served from the render pool's frame record in Redis (services/frame_record.py), through the real app.
 
 Every test runs create_app()'s app with its test client: the record is written as pi-dashboard's render pool does (the
-shape tests/fixtures/frame_record.json pins, shared with pi-dashboard's tests), and the screen polls GET and POST
+shape the store contract's frame_record.json pins, shared with pi-dashboard's tests), and the screen polls GET and POST
 /api/frame with If-None-Match, as the ESP32 firmware does (countdown-esp32's frame_client.cpp: it keeps the ETag header
 as sent, quotes and all, and draws only a 200).
 """
 
-import json
 from datetime import UTC, datetime, timedelta
 from hashlib import blake2b
-from pathlib import Path
 from unittest.mock import MagicMock
 
 import fakeredis
 import pytest
 import redis
+from countdown_api import fixtures
 
 from broker import create_app
 from broker.db import db
 from broker.models import Device
 from broker.services import frame_image, frame_record, pace
 
-FIXTURES = Path(__file__).parent.parent / "fixtures"
-FIXTURE = json.loads((FIXTURES / "frame_record.json").read_text())
-FIXTURE_FRAME = (FIXTURES / FIXTURE["fields"]["frame"]["file"]).read_bytes()
+FIXTURE = fixtures.load("frame_record.json")
+FIXTURE_FRAME = fixtures.read_bytes(FIXTURE["fields"]["frame"]["file"])
 
 SECRET = "a-very-long-device-secret-value"  # register_device's default
 LONG_AGO = datetime(2026, 1, 1, tzinfo=UTC)

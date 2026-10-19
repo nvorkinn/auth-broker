@@ -13,7 +13,7 @@ A screen is listed while the pool has something to draw for it:
 - it has been seen in the last assignments.SUSPEND_AFTER (assignments.is_quiet). A screen that's back is listed
   again within config_store.RESYNC_S.
 
-tests/fixtures/render_screens.json pins the hash's shape (pi-dashboard's countdown_core.store.render_queue reads it:
+The contract's render_screens.json pins the hash's shape (pi-dashboard's countdown_core.store.render_queue reads it:
 `screens()`, and the claim script's HGET).
 
 The hash is written whole, only where it differs (HDEL and HSET in one transaction), whenever the configs are

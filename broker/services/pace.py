@@ -25,6 +25,7 @@ from datetime import UTC, datetime, timedelta
 from itertools import batched
 from typing import TYPE_CHECKING
 
+from countdown_api import keys as store_keys
 from flask import current_app
 from redis import Redis, RedisError
 
@@ -99,11 +100,11 @@ def _cycle_s(now: datetime, hints: Sequence[Hint]) -> int:
 
 
 def key(source: str, item_id: str) -> str:
-    """Return the key where `source` asks for a faster refresh while `item_id` is bursty (pi-dashboard's keys.pace).
+    """Return the key where `source` asks for a faster refresh while `item_id` is bursty (the store contract's).
 
     For example `v1:pace:developer:<device id>`, which developer_provider.pace_key writes.
     """
-    return f"v1:pace:{source}:{item_id}"
+    return store_keys.pace(source, item_id)
 
 
 def hint_keys(config: DeviceConfig | None) -> list[str]:

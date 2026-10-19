@@ -1,17 +1,17 @@
 """The glow-provider: Glowmarkt mocked (responses), Redis faked (fakeredis), the broker's database a real one.
 
-tests/fixtures/glow_energy.json is the contract with pi-dashboard, whose tests read the same file: what Glowmarkt
+The store contract's glow_energy.json (countdown_api.fixtures), which pi-dashboard's tests read too: what Glowmarkt
 answers, what the provider asks it, and the `v1:energy:<device id>` value that comes of it.
 """
 
 import json
 from datetime import UTC, datetime
-from pathlib import Path
 
 import fakeredis
 import pytest
 import redis
 import responses
+from countdown_api import fixtures
 
 from broker.clients import glowmarkt
 from broker.db import db
@@ -19,7 +19,7 @@ from broker.models import Device, DeviceConfig, GlowmarktCredentials
 from broker.provider_loop import read_only_app
 from broker.providers import glow
 
-FIXTURE = json.loads((Path(__file__).parent.parent / "fixtures" / "glow_energy.json").read_text())
+FIXTURE = fixtures.load("glow_energy.json")
 DEVICE = FIXTURE["device_id"]
 RESOURCE = FIXTURE["stored"]["resource_id"]
 READINGS_URL = f"{glowmarkt.BASE_URL}/resource/{RESOURCE}/readings"

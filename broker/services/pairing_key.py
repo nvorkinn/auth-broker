@@ -5,7 +5,7 @@ at all while the device has a code to show. A render in the pool (pi-dashboard's
 only the store, so while a code is live the broker keeps this key: the screen's config (the contract's
 ConfigResponse, made by renderer_config.build) with the code in it. That's everything the pool needs to draw the
 pairing screen in the screen's own size and language; the screen stays in the pool's list while it has a live code
-(services/render_screens.py). tests/fixtures/pairing_key.json pins the shape (pi-dashboard's store.pairing reads
+(services/render_screens.py). The store contract's pairing_key.json pins the shape (pi-dashboard's store.pairing reads
 it).
 
 Plaintext, by Nikolai's decision (stateless-renderers.md, "The pairing screen"): every Redis reader on the host can
@@ -21,6 +21,7 @@ just doesn't show the code. Under `volatile-lru` Redis may evict the key too, wi
 import logging
 from typing import TYPE_CHECKING
 
+from countdown_api import keys as store_keys
 from flask import current_app
 from redis import Redis, RedisError
 
@@ -32,12 +33,12 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-PREFIX = "v1:pairing:"
+PREFIX = store_keys.PAIRING_PREFIX
 
 
 def key(device_id: str) -> str:
-    """Return the key of a device's live pairing code, e.g. `v1:pairing:a1b2c3d4e5f6` (pi-dashboard's keys.pairing)."""
-    return f"{PREFIX}{device_id}"
+    """Return the key of a device's live pairing code, e.g. `v1:pairing:a1b2c3d4e5f6` (the store contract's)."""
+    return store_keys.pairing(device_id)
 
 
 def write(device_id: str, code: str, expires_at: datetime) -> None:
