@@ -10,10 +10,9 @@ and pinned by tests/fixtures/render_enqueue.json, a copy of pi-dashboard's): `SE
 QUEUED_TTL_MS, and only if that set it, `LPUSH v1:render:jobs <id>`. So a screen is in the queue at most once however
 many ask.
 
-Only the screens the pool renders are queued: those in `v1:render:screens` (the orchestrator's hash of them), read
-first. The pool's worker would drop a job for any other (one that still has its own renderer), but until a pool runs
-nothing takes jobs off the list at all, and it has no TTL, so jobs for every screen would pile up in it. So this is safe
-before, during and after the migration: with no pool, or none of a device's screens in it, nothing is written.
+Only the screens the pool renders are queued: those in `v1:render:screens` (services/render_screens.py), read first.
+The pool's worker would drop a job for any other, and with no pool running nothing would take jobs off the list, which
+has no TTL; so a screen the pool doesn't draw gets nothing written.
 
 A job is only ever a hint: a Redis that can't be asked is logged by the error's type (never a failed command's text,
 which quotes its keys and values) and not raised, and the next minute's tick draws the screen anyway.

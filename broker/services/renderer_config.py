@@ -1,8 +1,9 @@
-"""What a renderer is sent as its config: the countdown API contract's ConfigResponse, made from a device's settings.
+"""A screen's config as the render pool reads it: the countdown API contract's ConfigResponse, made from its settings.
 
-GET /api/config answers with it (routes/devices.py), and the store keeps a copy of it per screen for the renderers to
-read instead (services/config_store.py). Both are made here, the same way, so a renderer reading either draws the same
-screen; the store's copy only leaves out what mustn't go to Redis (for_store).
+The store keeps it per screen (services/config_store.py, `v1:config:<device id>`, without a pairing code), and with
+the screen's live code while it has one (services/pairing_key.py, `v1:pairing:<device id>`). Both are made here, the
+same way. The contract (vendor/countdown-api) is the shape pi-dashboard's renderer reads them with; the broker no
+longer serves it over HTTP (GET /api/config went with the per-screen renderers).
 """
 
 from countdown_api.models import (
@@ -75,14 +76,13 @@ def build(config: DeviceConfig, *, pairing_code: str | None) -> ConfigResponse:
 
 
 def for_store(device: Device) -> ConfigResponse | None:
-    """Return the copy of the device's config the store keeps for its renderer, or None if it keeps none.
+    """Return the copy of the device's config the store keeps for the render pool, or None if it keeps none.
 
-    It is the config GET /api/config answers with, less the pairing code (null), which mustn't be in Redis, where
-    every provider and renderer can read it: a code proves someone is at the screen, and hands the screen to whoever
-    types it.
+    It is build()'s config with no pairing code (null): the code goes in its own key (services/pairing_key.py), so
+    it's never in a copy that outlives it.
 
-    None while the renderer has a code to show (the device isn't paired, or a code was asked for and is still live):
-    only GET /api/config gives it one, and issues it, so with no copy in the store the renderer asks the broker.
+    None while the device isn't paired, or has a live code to show: the pool draws the pairing screen from the code's
+    key then, or nothing.
     """
     if device.config is None or device.paired_at is None or pairing.live_code(device.device_id):
         return None

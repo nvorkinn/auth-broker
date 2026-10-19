@@ -28,7 +28,7 @@ def post_worker_init(worker: Worker) -> None:
 
     Redis keeps nothing on disk, so after it restarts, or the first time a broker that writes the configs starts, this
     puts back what the renderers and providers read; the same as `flask config publish`. Redis being down is logged,
-    and the broker serves regardless (the renderers then ask GET /api/config).
+    and the broker serves regardless (the render pool draws nothing new until the store has them).
 
     Then it starts the thread that rewrites the configs and the render pool's screens every minute
     (config_store.start_resync), so a Redis that restarts while the broker runs gets them back too.

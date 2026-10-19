@@ -26,8 +26,9 @@ LAST_SEEN_RESOLUTION = timedelta(minutes=1)
 
 
 # The roles a device's secrets can hold, in the order a presented secret is checked against them.
-# Each has its own column, devices.<role>_secret_hash.
-ROLES = ("renderer", "display")
+# Each has its own column, devices.<role>_secret_hash. Only the screen's is left: the render pool, which draws every
+# screen, needs no secret (its frames go through Redis).
+ROLES = ("display",)
 
 
 def hash_secret(secret: str) -> str:
@@ -77,13 +78,13 @@ def authenticate_device(authorization: str, roles: Collection[str] = frozenset(R
         raise DeviceAuthError(403, "forbidden")
 
     g.device_id, g.role = device.device_id, role
-    # device_name is just the Pi's own DEVICE_ID, echoed back here purely so a log line
-    # reads as a name instead of an opaque id -- never used for anything else.
+    # The screen's name (its slug), or the name an older device reported, purely so a log line reads as a name
+    # instead of an opaque id -- never used for anything else.
     current_app.logger.info(
         "%s %s device=%s (%s) role=%s",
         request.method,
         request.path,
-        device.device_name or "unnamed",
+        device.assignment.slug if device.assignment else device.device_name or "unnamed",
         device.device_id,
         role,
     )
@@ -94,8 +95,7 @@ def authenticate_device(authorization: str, roles: Collection[str] = frozenset(R
 def require_device_auth(roles: Collection[str] = frozenset(ROLES)) -> Callable[[View], View]:
     """Protect device-facing endpoints with one of the device's own bearer secrets.
 
-    Checked as authenticate_device does, and passes device_id to the view. For the routes of the countdown API
-    contract (vendor/countdown-api) the same check is its `deviceSecret` authenticator, in api.py.
+    Checked as authenticate_device does, and passes device_id to the view.
     """
 
     def decorator(view: View) -> View:
@@ -164,9 +164,8 @@ def _require_bearer_token(config_key: str) -> Callable[[View], View]:
     return decorator
 
 
-# The read-only status endpoint's own token, and the orchestrator's: neither is a device secret.
+# The read-only status endpoint's own token, which isn't a device secret.
 require_status_token = _require_bearer_token("STATUS_TOKEN")
-require_orchestrator_token = _require_bearer_token("ORCHESTRATOR_TOKEN")
 
 
 def current_user() -> str | None:
@@ -208,14 +207,11 @@ def paired_device_id() -> str | None:
 def screen_label(device: Device) -> str:
     """Return what a screen is called on the pages.
 
-    That is its name (the slug), "New screen" while it's waiting to be named, or what it reports, or a piece of
-    its id.
+    That is its name (the slug), or "New screen" while it's waiting to be named.
     """
     if device.assignment:
         return device.assignment.slug
-    if device.renderer_secret_hash is None:
-        return "New screen"  # not named yet, so it has no renderer to report a name
-    return device.device_name or device.device_id[:6]
+    return "New screen"
 
 
 def require_user(view: View) -> View:

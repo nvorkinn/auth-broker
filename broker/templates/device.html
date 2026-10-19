@@ -313,11 +313,6 @@
                 <button type="submit" form="displayUnlinkForm" class="btn-action btn-delete">Unlink screen</button>
             {% endif %}
         </div>
-        {% if assignment and assignment.status in ('pending', 'suspended') %}
-            <p class="card-subtitle">Starting up. Your screen shows its first picture in a minute or two.</p>
-        {% elif assignment and assignment.status == 'failed' %}
-            <p class="card-subtitle">Something went wrong starting your screen; we'll keep trying.</p>
-        {% endif %}
     </div>
 
     <button type="submit" class="btn-save">Save</button>

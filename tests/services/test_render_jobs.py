@@ -16,7 +16,7 @@ import shutil
 import socket
 import subprocess
 import time
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from unittest.mock import patch
 
@@ -26,7 +26,7 @@ import redis
 
 from broker.db import db
 from broker.models import Device
-from broker.services import config_store, pairing, pairing_key, render_jobs, render_screens
+from broker.services import assignments, config_store, pairing, pairing_key, render_jobs, render_screens
 from broker.services.render_jobs import JOBS, QUEUED_TTL_MS, SCREENS, enqueue, queued_key
 
 FIXTURES = Path(__file__).parent.parent / "fixtures"
@@ -39,7 +39,7 @@ OTHER = "0f9e8d7c6b5a"
 
 @pytest.fixture
 def pool():
-    """Return a pool where the pool renders screens a, b and a1b2c3d4e5f6 (as the orchestrator lists them)."""
+    """Return a pool where the pool renders screens a, b and a1b2c3d4e5f6 (as the broker lists them)."""
     pool = fakeredis.FakeRedis(decode_responses=True)
     pool.hset(SCREENS, mapping={"a": "screen-a", "b": "screen-b", "a1b2c3d4e5f6": "screen-c"})
     return pool
@@ -174,7 +174,7 @@ def store(app):
 
 
 def _pool(store, *device_ids):
-    """Put the screens in the pool, as the orchestrator does."""
+    """Put the screens in the pool, as the broker lists them (services/render_screens.py)."""
     store.hset(render_jobs.SCREENS, mapping=dict.fromkeys(device_ids, "nvorkinn-test"))
 
 
@@ -250,18 +250,14 @@ def test_a_screen_the_pool_doesnt_render_is_not_queued(redis_client):
 # --- a config save --------------------------------------------------------------------------------------------------
 
 
-def test_a_config_save_queues_the_screen_and_still_nudges_it(store, paired_client):
+def test_a_config_save_queues_the_screen(store, paired_client):
     client, device_id, _ = paired_client
     _pool(store, device_id)
     _take_jobs(store)
-    pubsub = store.pubsub()
-    pubsub.subscribe(config_store.CHANGED)
-    pubsub.get_message(timeout=1)
 
     client.post("/device", data={"style": "card"})
 
     assert _jobs(store) == [device_id]
-    assert pubsub.get_message(timeout=1)["data"] == device_id  # today's per-screen renderers still need it
     # After the write: the job's render reads the new config.
     assert json.loads(store.get(config_store.key(device_id)))["style"] == "card"
 
@@ -296,9 +292,11 @@ def test_a_rebuild_queues_only_the_screens_whose_copy_changed(app, store, paired
 
 def test_a_save_of_a_screen_the_pool_doesnt_draw_queues_nothing(app, store, paired_client):
     client, device_id, _ = paired_client
-    # A screen with no slug isn't in the pool's list (services/render_screens.py).
+    # A screen unseen for a day isn't in the pool's list (services/render_screens.py).
+    long_ago = datetime.now(UTC) - assignments.SUSPEND_AFTER - timedelta(hours=1)
     with app.app_context():
-        db.session.delete(db.session.get(Device, device_id).assignment)
+        device = db.session.get(Device, device_id)
+        device.display_last_seen_at = device.created_at = device.assignment.created_at = long_ago
         db.session.commit()
         render_screens.write()
     assert store.hgetall(render_jobs.SCREENS) == {}
@@ -324,7 +322,7 @@ def test_a_rejected_save_queues_nothing(store, paired_client):
 
 
 def test_issuing_a_code_queues_the_screen_after_writing_its_key(app, store, paired_client):
-    client, device_id, secret = paired_client
+    _client, device_id, _secret = paired_client
     _pool(store, device_id)
     _take_jobs(store)
     seen = []
@@ -334,27 +332,18 @@ def test_issuing_a_code_queues_the_screen_after_writing_its_key(app, store, pair
         seen.append(store.get(pairing_key.key(device_id)) is not None)
         return enqueue_(client, device_ids)
 
-    with patch.object(render_jobs, "enqueue", side_effect=enqueue_and_look):
-        client.post("/api/devices/pairing-code", headers=_headers(secret))
+    with patch.object(render_jobs, "enqueue", side_effect=enqueue_and_look), app.app_context():
+        pairing.issue_code(device_id)
 
     assert _jobs(store) == [device_id]
     assert seen[0] is True  # the first job (pairing.issue_code's) already sees the code's key
 
 
-def test_a_code_issued_by_get_api_config_queues_the_screen(store, client, register_device):
-    device_id, secret = register_device()
+def test_using_the_code_queues_the_screen_after_deleting_its_key(app, store, paired_client):
+    client, device_id, _secret = paired_client
     _pool(store, device_id)
-
-    client.get("/api/config", headers=_headers(secret))  # unpaired, so this issues the code
-
-    assert store.get(pairing_key.key(device_id)) is not None
-    assert _jobs(store) == [device_id]
-
-
-def test_using_the_code_queues_the_screen_after_deleting_its_key(store, paired_client):
-    client, device_id, secret = paired_client
-    _pool(store, device_id)
-    code = client.post("/api/devices/pairing-code", headers=_headers(secret)).get_json()["code"]
+    with app.app_context():
+        code = pairing.issue_code(device_id)
     _take_jobs(store)
     seen = []
     enqueue_ = render_jobs.enqueue
@@ -406,25 +395,23 @@ def _down_redis():
     return fakeredis.FakeRedis(server=server, decode_responses=True)
 
 
-def test_redis_down_never_fails_a_save_or_a_code(app, client, register_device):
-    _device_id, secret = register_device()
+def test_redis_down_never_fails_a_save_or_a_code(app, client, register_device, cli):
+    device_id, _secret = register_device()
     app.extensions["redis"] = _down_redis()
 
     with patch.object(render_jobs, "logger") as logger:
-        code = client.get("/api/config", headers=_headers(secret)).get_json()["pairing_code"]
-        asked = client.post("/api/devices/pairing-code", headers=_headers(secret))
-        used = client.post("/pair", data={"code": asked.get_json()["code"]})
+        issued = cli("code", device_id)
+        code = issued.output.split(":")[0]
+        used = client.post("/pair", data={"code": code})
         saved = client.post("/device", data={"style": "card"})
 
-    assert code
-    assert asked.status_code == 200
+    assert issued.exit_code == 0
     assert used.status_code == 302
     assert saved.status_code == 302
-    assert logger.warning.call_count == 4  # the two codes issued, the one spent and the save
+    assert logger.warning.call_count == 3  # the code issued, the one spent and the save
     for call in logger.warning.call_args_list:
         assert call.args[1:] == (1, "ConnectionError")
         assert code not in str(call)
-        assert asked.get_json()["code"] not in str(call)
 
 
 def test_a_redis_error_from_the_script_itself_is_logged_not_raised(store):

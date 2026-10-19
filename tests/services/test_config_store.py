@@ -1,4 +1,4 @@
-"""The screens' configs in the store: `v1:config:<device id>`, written from the database, and the nudge on change."""
+"""The screens' configs in the store: `v1:config:<device id>`, written from the database, and a render job on change."""
 
 import json
 import runpy
@@ -13,7 +13,7 @@ import redis
 
 from broker.db import db
 from broker.models import Device, DeviceConfig, GitHubToken, GlowmarktCredentials, SpotifyToken
-from broker.services import config_store, pairing
+from broker.services import config_store, pairing, render_jobs
 
 ROOT = Path(__file__).parent.parent.parent
 # The stored shape, which pi-dashboard's renderer reads: both repositories' tests read this file.
@@ -30,18 +30,18 @@ def store(app):
 
 @pytest.fixture
 def nudges(store):
-    """Return a function giving the device ids published on v1:config:changed so far."""
-    pubsub = store.pubsub()
-    pubsub.subscribe(config_store.CHANGED)
-    pubsub.get_message(timeout=1)  # the subscription's own confirmation
+    """Return a function giving the device ids queued for a render since it was last called (and taking the jobs).
 
-    def published() -> list[str]:
-        found = []
-        while (message := pubsub.get_message(timeout=0.1)) is not None:
-            found.append(message["data"])
+    A change to a screen's config queues a render of it, for the render pool (services/render_jobs.py), if the pool
+    draws it (services/render_screens.py).
+    """
+
+    def queued() -> list[str]:
+        found = list(reversed(store.lrange(render_jobs.JOBS, 0, -1)))
+        store.delete(render_jobs.JOBS, *(render_jobs.queued_key(device_id) for device_id in found))
         return found
 
-    return published
+    return queued
 
 
 def _add_fixture_device(app) -> str:
@@ -65,10 +65,6 @@ def _stored(store, device_id):
     return None if value is None else json.loads(value)
 
 
-def _get_config(client, secret):
-    return client.get("/api/config", headers={"Authorization": f"Bearer {secret}"}).get_json()
-
-
 # --- the stored value ---------------------------------------------------------------------------------------------
 
 
@@ -79,18 +75,15 @@ def test_the_stored_config_is_the_shape_the_renderer_reads(app, store):
         config_store.publish(device_id)
 
     assert config_store.key(device_id) == FIXTURE["key"]
-    assert FIXTURE["channel"] == config_store.CHANGED
     assert _stored(store, device_id) == FIXTURE["value"]
 
 
-def test_the_stored_config_is_what_get_api_config_answers(app, store, paired_client):
-    client, device_id, secret = paired_client
+def test_the_stored_config_is_the_renderers_config_with_no_code(app, store, paired_client, config_of):
+    client, device_id, _secret = paired_client
     client.post("/device", data={"stops_order": "940GZZLUEUS,NSR:StopPlace:58366", "postcode": "SE17 3LL"})
 
-    answered = _get_config(client, secret)
-
-    assert answered["pairing_code"] is None  # paired, so there's a copy, and it has no code to leave out
-    assert _stored(store, device_id) == answered
+    assert _stored(store, device_id) == config_of(device_id)
+    assert _stored(store, device_id)["pairing_code"] is None
 
 
 def test_the_stored_config_carries_no_secret(app, store, paired_client, monkeypatch):
@@ -133,7 +126,7 @@ def test_the_stored_config_is_small(app, store):
 # --- saving -------------------------------------------------------------------------------------------------------
 
 
-def test_saving_the_config_rewrites_the_key_and_nudges_the_renderer(app, store, nudges, paired_client):
+def test_saving_the_config_rewrites_the_key_and_queues_a_render(app, store, nudges, paired_client):
     client, device_id, _ = paired_client
     nudges()  # pairing's
 
@@ -145,7 +138,7 @@ def test_saving_the_config_rewrites_the_key_and_nudges_the_renderer(app, store, 
     assert nudges() == [device_id]
 
 
-def test_a_save_nudges_only_the_screens_whose_config_changed(app, store, nudges, paired_client, register_device):
+def test_a_save_queues_only_the_screens_whose_config_changed(app, store, nudges, paired_client, register_device):
     client, device_id, _ = paired_client
     other_id, _ = register_device("another-very-long-device-secret")
     with app.app_context():
@@ -156,18 +149,20 @@ def test_a_save_nudges_only_the_screens_whose_config_changed(app, store, nudges,
 
     client.post("/device", data={"style": "card"})
 
+    # The saved screen's, once for its changed copy (the save's own job finds it queued already).
     assert nudges() == [device_id]
     assert _stored(store, other_id) is not None
 
 
-def test_a_save_that_changes_nothing_nudges_no_one(store, nudges, paired_client):
-    client, _, _ = paired_client
+def test_a_save_that_changes_nothing_queues_only_the_saved_screen(store, nudges, paired_client):
+    client, device_id, _ = paired_client
     client.post("/device", data={"style": "card"})
     nudges()
 
     client.post("/device", data={"style": "card"})
 
-    assert nudges() == []
+    # An account replaced changes no copy, but what the screen shows: so the saved screen is drawn regardless.
+    assert nudges() == [device_id]
 
 
 def test_a_rejected_save_writes_nothing(store, nudges, paired_client):
@@ -204,13 +199,14 @@ def test_an_unpaired_device_has_no_stored_config(app, store, register_device):
     with app.app_context():
         config_store.publish_all()
 
-    # Its renderer asks GET /api/config, which gives it the code to show.
+    # Nothing for the pool to draw until it's paired, or has a code to show (its own key).
     assert _stored(store, device_id) is None
 
 
-def test_pairing_with_a_code_stores_the_config_and_nudges(app, store, nudges, client, register_device):
-    device_id, secret = register_device()
-    code = _get_config(client, secret)["pairing_code"]
+def test_pairing_with_a_code_stores_the_config_and_queues_a_render(app, store, nudges, client, register_device):
+    device_id, _secret = register_device()
+    with app.app_context():
+        code = pairing.issue_code(device_id)
 
     client.post("/pair", data={"code": code})
 
@@ -228,19 +224,20 @@ def test_pairing_by_token_stores_the_config(app, store, nudges, client):
     assert client.post("/pair/token", json={"token": token}).status_code == 200
 
     assert _stored(store, device_id)["pairing_code"] is None
-    assert nudges() == [device_id]
+    assert nudges() == []  # not named yet, so the pool doesn't draw it
 
 
-def test_asking_for_a_code_takes_the_config_out_of_the_store_until_it_is_used(store, nudges, paired_client):
-    client, device_id, secret = paired_client
+def test_a_code_takes_the_config_out_of_the_store_until_it_is_used(app, store, nudges, paired_client):
+    client, device_id, _secret = paired_client
     nudges()
 
-    code = client.post("/api/devices/pairing-code", headers={"Authorization": f"Bearer {secret}"}).get_json()["code"]
+    with app.app_context():
+        code = pairing.issue_code(device_id)
+        config_store.publish(device_id)
 
-    # The renderer, nudged, finds no config in the store and asks GET /api/config, which has the code.
+    # The pool draws the pairing screen from the code's own key meanwhile.
     assert _stored(store, device_id) is None
     assert nudges() == [device_id]
-    assert _get_config(client, secret)["pairing_code"] == code
 
     client.post("/pair", data={"code": code})
 
@@ -249,15 +246,16 @@ def test_asking_for_a_code_takes_the_config_out_of_the_store_until_it_is_used(st
 
 
 def test_a_code_that_lapses_unused_leaves_the_config_out_until_the_next_rebuild(app, store, paired_client):
-    client, device_id, secret = paired_client
-    client.post("/api/devices/pairing-code", headers={"Authorization": f"Bearer {secret}"})
+    _client, device_id, _secret = paired_client
     with app.app_context():
+        pairing.issue_code(device_id)
+        config_store.publish(device_id)
         for code in db.session.get(Device, device_id).pairing_codes:
             code.expires_at = datetime(2020, 1, 1, tzinfo=UTC)
         db.session.commit()
         assert pairing.live_code(device_id) is None
 
-        config_store.publish_all()  # any config save, the broker starting, or `flask config publish`
+        config_store.publish_all()  # any config save, the broker starting, the minute's resync, `flask config publish`
 
     assert _stored(store, device_id) is not None
 
@@ -269,7 +267,7 @@ def _cli(app, *args):
     return app.test_cli_runner().invoke(args=list(args))
 
 
-def test_unpair_removes_the_stored_config_and_nudges(app, store, nudges, paired_client):
+def test_unpair_removes_the_stored_config_and_draws_the_code(app, store, nudges, paired_client):
     _, device_id, _ = paired_client
     nudges()
 
@@ -279,14 +277,14 @@ def test_unpair_removes_the_stored_config_and_nudges(app, store, nudges, paired_
     assert nudges() == [device_id]
 
 
-def test_forget_removes_the_stored_config_and_nudges(app, store, nudges, paired_client):
+def test_forget_removes_the_stored_config(app, store, nudges, paired_client):
     _, device_id, _ = paired_client
     nudges()
 
     assert _cli(app, "devices", "forget", device_id).exit_code == 0
 
     assert _stored(store, device_id) is None
-    assert nudges() == [device_id]
+    assert nudges() == []  # gone from the pool's list first: nothing to draw
 
 
 def test_a_code_from_the_cli_takes_the_config_out_of_the_store(app, store, paired_client):
@@ -326,7 +324,7 @@ def test_a_rebuild_removes_the_configs_of_devices_that_are_gone(app, store, nudg
         config_store.publish_all()
 
     assert store.get(config_store.key("deadbeef0000")) is None
-    assert nudges() == ["deadbeef0000"]
+    assert nudges() == []  # not a screen the pool draws
 
 
 def test_the_weather_backfill_rewrites_the_configs_with_the_new_weather_key(app, store, paired_client):
@@ -348,8 +346,10 @@ def test_the_broker_writes_the_store_as_it_starts(app, store, paired_client):
     store.flushall()  # Redis restarted, or the broker is the first to write the configs
     hooks = runpy.run_path(str(ROOT / "gunicorn.conf.py"))
 
-    hooks["post_worker_init"](SimpleNamespace(wsgi=app))  # the app gunicorn loaded
+    with patch.object(config_store, "start_resync") as start_resync:
+        hooks["post_worker_init"](SimpleNamespace(wsgi=app))  # the app gunicorn loaded
 
+    start_resync.assert_called_once_with(app)  # and every minute from then on
     assert _stored(store, device_id)["departures"]["stops"] == [{"source": "tfl", "id": "940GZZLUEUS"}]
     assert store.smembers("v1:sub:tfl") == {"940GZZLUEUS"}
 
@@ -358,7 +358,7 @@ def test_the_broker_starts_even_when_redis_is_down(app, paired_client):
     app.extensions["redis"] = redis.Redis(host="127.0.0.1", port=1, socket_connect_timeout=0.1)
     hooks = runpy.run_path(str(ROOT / "gunicorn.conf.py"))
 
-    with patch.object(config_store, "logger") as logger:
+    with patch.object(config_store, "logger") as logger, patch.object(config_store, "start_resync"):
         hooks["post_worker_init"](SimpleNamespace(wsgi=app))
 
     logger.warning.assert_called_once()

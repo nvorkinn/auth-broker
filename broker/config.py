@@ -40,9 +40,6 @@ def load(app: Flask) -> None:
     app.config["CREDENTIAL_ENCRYPTION_KEY"] = os.environ["CREDENTIAL_ENCRYPTION_KEY"]
     # Unset (the default) turns GET /api/status/devices off.
     app.config["STATUS_TOKEN"] = os.environ.get("STATUS_TOKEN", "")
-    # Bearer token for the orchestrator that starts renderers (/api/orchestrator/...). Unset (the
-    # default) turns those endpoints off.
-    app.config["ORCHESTRATOR_TOKEN"] = os.environ.get("ORCHESTRATOR_TOKEN", "")
     # The personal GitHub dashboard is off until both are set. The PAT stays on the server.
     app.config["GITHUB_DASHBOARD_TOKEN"] = os.environ.get("GITHUB_DASHBOARD_TOKEN", "")
     app.config["GITHUB_DASHBOARD_USER_ID"] = os.environ.get("GITHUB_DASHBOARD_USER_ID", "")

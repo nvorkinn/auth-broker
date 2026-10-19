@@ -1,6 +1,6 @@
-"""Test registration: POST /api/devices/register (screens) and POST /api/renderers/claim (renderers).
+"""Test registration: POST /api/devices/register (screens).
 
-Also the ID-less endpoints a registered client polls.
+Also the ID-less endpoints a registered screen polls.
 """
 
 import threading
@@ -12,12 +12,11 @@ from sqlalchemy import select
 from broker.auth import hash_secret
 from broker.db import db
 from broker.models import Device, DeviceConfig
-from broker.routes.frames import FRAME_BYTES
 from broker.services import pace, registration
+from broker.services.frame_record import FRAME_BYTES
 from broker.services.pair_throttle import MAX_REGISTRATION_LOCKOUT_SECONDS, REGISTRATIONS_PER_MINUTE, PairThrottle
 
 USER = "user-1"
-RENDERER = "renderer-secret-0123456789"
 DISPLAY = "display-secret-0123456789"
 
 
@@ -55,7 +54,6 @@ def test_a_screen_becomes_a_device_at_once(app, client):
     assert response.status_code == 201
     device = _device(app, response.get_json()["device_id"])
     assert device.display_secret_hash == hash_secret(DISPLAY)
-    assert device.renderer_secret_hash is None
     with app.app_context():
         assert db.session.get(DeviceConfig, device.device_id) is not None
 
@@ -66,12 +64,6 @@ def test_registering_a_screen_again_returns_its_device(client):
     response = _register(client, DISPLAY)
 
     assert (response.status_code, response.get_json()) == (200, {"device_id": device_id})
-
-
-def test_a_renderers_secret_cannot_register_as_a_screen(client, split_device):
-    _, renderer_secret, _ = split_device
-
-    assert _register(client, renderer_secret).status_code == 409
 
 
 def test_screens_nobody_has_paired_are_capped_and_expire(app, client, monkeypatch):
@@ -154,76 +146,6 @@ def test_a_simultaneous_repeat_of_the_same_secret_is_answered_as_a_repeat(client
     assert (response.status_code, response.get_json()) == (200, {"device_id": device_id})
 
 
-# --- renderers ------------------------------------------------------------------------------------
-
-
-def test_a_renderer_claims_its_screens_device(app, split_device):
-    device_id, renderer_secret, display_secret = split_device
-
-    device = _device(app, device_id)
-    assert (device.renderer_secret_hash, device.display_secret_hash) == (
-        hash_secret(renderer_secret),
-        hash_secret(display_secret),
-    )
-
-
-def test_a_claim_names_the_device_after_its_renderer(app, split_device):
-    """Its slug: the DEVICE_NAME the orchestrator starts it with, which a renderer reading the store never sends."""
-    device_id, _, _ = split_device
-
-    with app.app_context():
-        device = db.session.get(Device, device_id)
-        assert device.device_name == device.assignment.slug
-
-
-def test_a_claim_keeps_a_name_the_device_already_has(app, client, register_device, claim_renderer):
-    screen = client.post("/api/devices/register", json={"secret": "display-secret-0123456789", "width": 1, "height": 1})
-    device_id = screen.get_json()["device_id"]
-    with app.app_context():
-        db.session.get(Device, device_id).device_name = "camilla"
-        db.session.commit()
-
-    claim_renderer("display-secret-0123456789", "renderer-secret-0123456789")
-
-    assert _device(app, device_id).device_name == "camilla"
-
-
-def test_claiming_again_returns_the_same_device_without_a_token(client, split_device):
-    device_id, renderer_secret, _ = split_device
-
-    response = client.post("/api/renderers/claim", json={"secret": renderer_secret, "claim_token": "spent"})
-
-    assert (response.status_code, response.get_json()) == (200, {"device_id": device_id})
-
-
-def test_a_screens_secret_cannot_claim(client, split_device):
-    _, _, display_secret = split_device
-
-    assert client.post("/api/renderers/claim", json={"secret": display_secret, "claim_token": "x"}).status_code == 409
-
-
-@pytest.mark.parametrize(
-    "body",
-    [{"secret": "short", "claim_token": "x"}, {"secret": RENDERER}, {"secret": RENDERER, "claim_token": 5}],
-)
-def test_a_claim_needs_a_secret_and_a_token(client, body):
-    assert client.post("/api/renderers/claim", json=body).status_code == 400
-
-
-def test_an_unknown_claim_token_is_refused(client):
-    assert client.post("/api/renderers/claim", json={"secret": RENDERER, "claim_token": "nonsense"}).status_code == 403
-
-
-def test_a_claim_is_not_throttled(app, client):
-    app.extensions["register_throttle"] = PairThrottle(max_events=1)
-
-    for _ in range(5):
-        assert client.post("/api/renderers/claim", json={"secret": RENDERER, "claim_token": "x"}).status_code == 403
-
-
-# --- throttling -----------------------------------------------------------------------------------
-
-
 @pytest.fixture
 def register_throttle(app):
     """Put back the real /register limit the app fixture lifts."""
@@ -245,93 +167,45 @@ def test_register_is_throttled_per_ip_counting_every_call(client):
 
 
 @pytest.mark.usefixtures("register_throttle")
-def test_polling_is_not_throttled(client, split_device):
-    _, renderer_secret, _ = split_device
+def test_polling_is_not_throttled(client, register_device):
+    _, secret = register_device()
     for _ in range(REGISTRATIONS_PER_MINUTE * 2):
-        assert client.get("/api/config", headers=_auth(renderer_secret)).status_code == 200
+        assert client.post("/api/frame", headers=_auth(secret)).status_code == 404  # authenticated: no frame yet
 
 
 # --- the ID-less endpoints ------------------------------------------------------------------------
 
 
-def test_a_matched_display_polls_frames_without_knowing_its_device_id(client, split_device):
-    _device_id, renderer_secret, display_secret = split_device
-    assert client.get("/api/frame", headers=_auth(display_secret)).status_code == 404
+def test_a_screen_polls_frames_without_knowing_its_device_id(client, register_device, draw):
+    device_id, secret = register_device()
+    assert client.post("/api/frame", headers=_auth(secret)).status_code == 404
 
     frame = bytes([0x5A]) * FRAME_BYTES
-    put = client.put("/api/frame", data=frame, headers=_auth(renderer_secret))
-    assert put.status_code == 204
+    draw(device_id, frame)
 
-    response = client.get("/api/frame", headers=_auth(display_secret))
+    response = client.post("/api/frame", headers=_auth(secret))
     assert response.status_code == 200
     assert response.data == frame
-    again = client.get("/api/frame", headers={**_auth(display_secret), "If-None-Match": response.headers["ETag"]})
+    again = client.post("/api/frame", headers={**_auth(secret), "If-None-Match": response.headers["ETag"]})
     assert again.status_code == 304
 
 
-def test_a_matched_renderer_learns_its_device_id_and_pairing_code_from_config(client, split_device):
-    device_id, renderer_secret, _ = split_device
-
-    body = client.get("/api/config", headers=_auth(renderer_secret)).get_json()
-
-    assert body["device_id"] == device_id
-    assert len(body["pairing_code"]) == 6
+def test_id_less_endpoints_reject_unknown_and_missing_secrets(client, register_device):
+    register_device()
+    assert client.post("/api/frame").status_code == 401
+    assert client.post("/api/frame", headers=_auth("not-a-registered-secret")).status_code == 401
+    assert client.post("/api/frame", headers={"Authorization": "Bearer "}).status_code == 401
 
 
-def test_config_is_forbidden_to_the_display(client, split_device):
-    _, _, display_secret = split_device
-    assert client.get("/api/config", headers=_auth(display_secret)).status_code == 403
-
-
-@pytest.mark.parametrize("path", ["/api/frame", "/api/config"])
-def test_id_less_endpoints_reject_unknown_and_missing_secrets(client, split_device, path):
-    assert client.get(path).status_code == 401
-    assert client.get(path, headers=_auth("not-a-registered-secret")).status_code == 401
-    assert client.get(path, headers={"Authorization": "Bearer "}).status_code == 401
-
-
-def test_a_renderer_can_use_the_id_less_config(client, register_device):
+def test_id_less_requests_are_logged_with_the_device_id(app, client, register_device, caplog):
     device_id, secret = register_device()
-    assert client.get("/api/config", headers=_auth(secret)).get_json()["device_id"] == device_id
-
-
-# --- the renderer's ID-less routes ----------------------------------------------------------------
-
-
-def test_a_renderer_puts_frames_without_its_device_id(client, split_device):
-    _device_id, renderer_secret, display_secret = split_device
-    frame = bytes([0x3C]) * FRAME_BYTES
-
-    assert client.put("/api/frame", data=frame, headers=_auth(renderer_secret)).status_code == 204
-
-    assert client.get("/api/frame", headers=_auth(display_secret)).data == frame
-    assert client.get("/api/frame", headers=_auth(display_secret)).data == frame
-
-
-def test_an_id_less_put_is_forbidden_to_the_display(app, client, split_device):
-    _device_id, _, display_secret = split_device
-
-    response = client.put("/api/frame", data=bytes(FRAME_BYTES), headers=_auth(display_secret))
-
-    assert response.status_code == 403
-    assert client.get("/api/frame", headers=_auth(display_secret)).status_code == 404
-
-
-def test_an_id_less_put_checks_the_frame_size(client, split_device):
-    _, renderer_secret, _ = split_device
-    assert client.put("/api/frame", data=b"short", headers=_auth(renderer_secret)).status_code == 400
-
-
-@pytest.mark.parametrize(("method", "path"), [("get", "/api/config"), ("put", "/api/frame")])
-def test_id_less_requests_are_logged_with_the_device_id(app, client, split_device, caplog, method, path):
-    device_id, renderer_secret, _ = split_device
     with app.app_context():
         slug = db.session.get(Device, device_id).assignment.slug
 
     with caplog.at_level("INFO"):
-        getattr(client, method)(path, data=bytes(FRAME_BYTES), headers=_auth(renderer_secret))
+        client.post("/api/frame", headers=_auth(secret))
 
-    assert f"{method.upper()} {path} device={slug} ({device_id}) role=renderer" in caplog.messages
+    assert f"POST /api/frame device={slug} ({device_id}) role=display" in caplog.messages
 
 
 # --- Retry-After: how often to poll (services/pace.py; tests/routes/test_frames.py has the rest) ---------------------
@@ -343,23 +217,24 @@ def frozen(monkeypatch):
 
 
 @pytest.mark.usefixtures("frozen")
-def test_no_frame_yet_is_a_json_404_with_the_usual_retry(client, split_device):
-    _, _, display_secret = split_device
+def test_no_frame_yet_is_a_json_404_asking_again_soon(client, register_device):
+    _, secret = register_device()
 
-    response = client.get("/api/frame", headers=_auth(display_secret))
+    response = client.post("/api/frame", headers=_auth(secret))
 
     assert response.status_code == 404
     assert response.get_json() == {"error": "no frame yet"}
-    assert response.headers["Retry-After"] == "23"  # until 12:00:33, just after the next half-minute
+    # Not until 12:00:33, just after the next half-minute: the pool's first render lands within the minute.
+    assert response.headers["Retry-After"] == "10"
 
 
 @pytest.mark.usefixtures("frozen")
-def test_a_frame_says_to_poll_again_just_after_the_next_half_minute(app, client, split_device):
-    _device_id, renderer_secret, display_secret = split_device
-    client.put("/api/frame", data=bytes(FRAME_BYTES), headers=_auth(renderer_secret))
+def test_a_frame_says_to_poll_again_just_after_the_next_half_minute(app, client, register_device, draw):
+    device_id, display_secret = register_device()
+    draw(device_id, bytes(FRAME_BYTES))
 
-    first = client.get("/api/frame", headers=_auth(display_secret))
-    unchanged = client.get("/api/frame", headers={**_auth(display_secret), "If-None-Match": first.headers["ETag"]})
+    first = client.post("/api/frame", headers=_auth(display_secret))
+    unchanged = client.post("/api/frame", headers={**_auth(display_secret), "If-None-Match": first.headers["ETag"]})
 
     assert (first.status_code, first.headers["Retry-After"]) == (200, "23")
     assert (unchanged.status_code, unchanged.headers["Retry-After"]) == (304, "23")

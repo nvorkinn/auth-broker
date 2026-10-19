@@ -5,8 +5,8 @@ import fakeredis
 
 from broker.db import db
 from broker.models import DeviceConfig
-from broker.routes.frames import FRAME_BYTES
 from broker.services import frame_image
+from broker.services.frame_record import FRAME_BYTES
 
 
 def _frame_with_black_pixel(x: int, y: int) -> bytes:
@@ -47,7 +47,7 @@ def test_a_landscape_frame_is_drawn_as_is():
 
 
 def test_an_upright_frame_is_turned_back_to_portrait():
-    # The renderer turned the portrait picture a quarter anticlockwise: portrait (x, y) is at landscape (y, 479 - x).
+    # The render turned the portrait picture a quarter anticlockwise: portrait (x, y) is at landscape (y, 479 - x).
     portrait_x, portrait_y = 10, 3
     size, black = _black_pixels(frame_image.to_png(_frame_with_black_pixel(portrait_y, 479 - portrait_x), upright=True))
 
@@ -55,14 +55,9 @@ def test_an_upright_frame_is_turned_back_to_portrait():
     assert black == [(portrait_x, portrait_y)]
 
 
-def _upload(client, secret, frame):
-    response = client.put("/api/frame", data=frame, headers={"Authorization": f"Bearer {secret}"})
-    assert response.status_code == 204
-
-
-def test_screen_page_shows_the_picture_and_polls_at_the_screens_interval(app, paired_client):
-    client, device_id, secret = paired_client
-    _upload(client, secret, bytes(FRAME_BYTES))
+def test_screen_page_shows_the_picture_and_polls_at_the_screens_interval(app, paired_client, draw):
+    client, device_id, _secret = paired_client
+    draw(device_id, bytes(FRAME_BYTES))
 
     response = client.get(f"/device/{device_id}/screen")
 
@@ -74,9 +69,9 @@ def test_screen_page_shows_the_picture_and_polls_at_the_screens_interval(app, pa
     assert 'width="480" height="800"' in html
 
 
-def test_screen_page_polls_as_fast_as_the_screen_while_a_provider_asks(app, paired_client):
-    client, device_id, secret = paired_client
-    _upload(client, secret, bytes(FRAME_BYTES))
+def test_screen_page_polls_as_fast_as_the_screen_while_a_provider_asks(app, paired_client, draw):
+    client, device_id, _secret = paired_client
+    draw(device_id, bytes(FRAME_BYTES))
     with app.app_context():
         db.session.get(DeviceConfig, device_id).developer_enabled = True
         db.session.commit()
@@ -105,9 +100,9 @@ def test_settings_page_links_to_the_screen(paired_client):
     assert f'href="/device/{device_id}/screen"' in html
 
 
-def test_frame_png_is_the_frame_upright_and_conditional(paired_client):
-    client, device_id, secret = paired_client
-    _upload(client, secret, _frame_with_black_pixel(3, 479 - 10))
+def test_frame_png_is_the_frame_upright_and_conditional(paired_client, draw):
+    client, device_id, _secret = paired_client
+    draw(device_id, _frame_with_black_pixel(3, 479 - 10))
 
     response = client.get(f"/device/{device_id}/screen/frame.png")
 
@@ -123,9 +118,9 @@ def test_frame_png_is_the_frame_upright_and_conditional(paired_client):
     assert "X-Rendered-At" in again.headers
 
 
-def test_frame_png_follows_a_horizontal_screen(app, paired_client):
-    client, device_id, secret = paired_client
-    _upload(client, secret, _frame_with_black_pixel(10, 3))
+def test_frame_png_follows_a_horizontal_screen(app, paired_client, draw):
+    client, device_id, _secret = paired_client
+    draw(device_id, _frame_with_black_pixel(10, 3))
     upright = client.get(f"/device/{device_id}/screen/frame.png")
     with app.app_context():
         db.session.get(DeviceConfig, device_id).orientation = "horizontal"
@@ -137,9 +132,9 @@ def test_frame_png_follows_a_horizontal_screen(app, paired_client):
     assert _black_pixels(response.data) == ((800, 480), [(10, 3)])
 
 
-def test_the_screen_is_only_its_owners(app, paired_client, anonymous_client):
-    client, device_id, secret = paired_client
-    _upload(client, secret, bytes(FRAME_BYTES))
+def test_the_screen_is_only_its_owners(app, paired_client, anonymous_client, draw):
+    _client, device_id, _secret = paired_client
+    draw(device_id, bytes(FRAME_BYTES))
     stranger = app.test_client()
     stranger.environ_base["HTTP_X_AUTHENTIK_UID"] = "someone-else"
 

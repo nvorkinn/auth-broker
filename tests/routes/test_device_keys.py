@@ -62,11 +62,6 @@ def test_the_keys_are_the_ones_the_providers_write():
 # --- Changing hands: unpaired, re-paired, given an owner, forgotten -------------------------------------------------
 
 
-def _code(client, secret: str) -> str:
-    response = client.post("/api/devices/pairing-code", headers={"Authorization": f"Bearer {secret}"})
-    return response.get_json()["code"]
-
-
 def test_forgetting_a_device_deletes_all_its_data_and_no_one_elses(store, paired_client, register_device, cli):
     _client, device_id, _ = paired_client
     other_id, _ = register_device("another-very-long-device-secret")
@@ -92,7 +87,7 @@ def test_unpairing_deletes_all_its_data(store, paired_client, cli, args):
     assert not store.exists(config_store.key(device_id))  # an unpaired device has no config in the store
 
 
-def test_unpairing_alone_still_keeps_the_frame_record_as_it_keeps_the_row(store, paired_client, cli):
+def test_unpairing_alone_still_keeps_the_frame_record(store, paired_client, cli):
     _client, device_id, _ = paired_client
     store.hset(frame_record.key(device_id), mapping={"etag": "0" * 16})
 
@@ -114,11 +109,12 @@ def test_a_code_that_hands_the_device_to_someone_else_deletes_the_last_owners_da
     assert store.exists(config_store.key(device_id))  # paired again: its config is back in the store
 
 
-def test_pairing_again_as_the_same_owner_keeps_its_data(store, paired_client):
-    client, device_id, secret = paired_client
+def test_pairing_again_as_the_same_owner_keeps_its_data(store, paired_client, cli):
+    client, device_id, _secret = paired_client
     _provide(store, device_id)
+    code = cli("code", device_id).output.split(":")[0]
 
-    assert client.post("/pair", data={"code": _code(client, secret)}).status_code == 302
+    assert client.post("/pair", data={"code": code}).status_code == 302
 
     assert _left(store, device_id) == EVERYTHING
 

@@ -31,16 +31,12 @@ def store(app):
     return app.extensions["redis"]
 
 
-def _headers(secret):
-    return {"Authorization": f"Bearer {secret}"}
-
-
-def _get_config(client, secret):
-    return client.get("/api/config", headers=_headers(secret)).get_json()
-
-
-def _ask_for_code(client, secret) -> str:
-    return client.post("/api/devices/pairing-code", headers=_headers(secret)).get_json()["code"]
+def _ask_for_code(app, device_id) -> str:
+    """Issue the device a code, as `flask devices code` does; return it."""
+    with app.app_context():
+        code = pairing.issue_code(device_id)
+        config_store.publish(device_id)
+    return code
 
 
 def _stored(store, device_id):
@@ -74,23 +70,14 @@ def test_the_stored_code_is_the_shape_the_renderer_reads(app, store):
     assert timedelta(seconds=FIXTURE["ttl_s"]) == pairing.CODE_TTL
 
 
-def test_the_stored_code_is_what_get_api_config_answers(store, client, register_device):
-    device_id, secret = register_device()
+def test_the_stored_code_is_the_config_with_the_code_in_it(app, store, register_device, config_of):
+    device_id, _secret = register_device()
 
-    answered = _get_config(client, secret)  # unpaired, so this issues the code
+    code = _ask_for_code(app, device_id)
 
-    assert answered["pairing_code"]
-    assert _stored(store, device_id) == answered
+    assert _stored(store, device_id) == {**config_of(device_id), "pairing_code": code}
     # And the config's own copy still never has it: there's none while a code is live.
     assert store.get(config_store.key(device_id)) is None
-
-
-def test_a_live_code_answered_again_is_not_issued_again(store, client, register_device):
-    device_id, secret = register_device()
-    code = _get_config(client, secret)["pairing_code"]
-
-    assert _get_config(client, secret)["pairing_code"] == code
-    assert _stored(store, device_id)["pairing_code"] == code
 
 
 def test_a_device_with_no_settings_has_no_key(app, store):
@@ -105,19 +92,19 @@ def test_a_device_with_no_settings_has_no_key(app, store):
 # --- replaced, used, paired, unpaired, forgotten --------------------------------------------------------------------
 
 
-def test_a_new_code_replaces_the_last_ones_key(store, paired_client):
-    client, device_id, secret = paired_client
-    first = _ask_for_code(client, secret)
+def test_a_new_code_replaces_the_last_ones_key(app, store, paired_client):
+    _client, device_id, _secret = paired_client
+    first = _ask_for_code(app, device_id)
 
-    second = _ask_for_code(client, secret)
+    second = _ask_for_code(app, device_id)
 
     assert second != first
     assert _stored(store, device_id)["pairing_code"] == second
 
 
-def test_using_the_code_deletes_its_key(store, paired_client):
-    client, device_id, secret = paired_client
-    code = _ask_for_code(client, secret)
+def test_using_the_code_deletes_its_key(app, store, paired_client):
+    client, device_id, _secret = paired_client
+    code = _ask_for_code(app, device_id)
     assert _stored(store, device_id) is not None
 
     client.post("/pair", data={"code": code})
@@ -126,9 +113,9 @@ def test_using_the_code_deletes_its_key(store, paired_client):
     assert store.get(config_store.key(device_id)) is not None  # its config back in the store, without the code
 
 
-def test_a_code_used_by_a_new_owner_deletes_its_key(store, client, register_device):
-    device_id, secret = register_device()
-    code = _get_config(client, secret)["pairing_code"]
+def test_a_code_used_by_a_new_owner_deletes_its_key(app, store, client, register_device):
+    device_id, _secret = register_device()
+    code = _ask_for_code(app, device_id)
 
     client.post("/pair", data={"code": code})
 
@@ -140,7 +127,7 @@ def test_pairing_by_token_drops_the_code_and_its_key(app, store, client):
     device_id = client.post("/api/devices/register", json={"secret": display_secret, "width": 800, "height": 480})
     device_id = device_id.get_json()["device_id"]
     with app.app_context():
-        pairing.issue_code(device_id)  # as GET /api/config would have, before its owner's browser paired it
+        pairing.issue_code(device_id)  # as `flask devices code` would have, before its owner's browser paired it
         token = db.session.get(Device, device_id).pairing_token
 
     assert client.post("/pair/token", json={"token": token}).status_code == 200
@@ -168,18 +155,20 @@ def test_pairing_by_token_again_as_the_same_owner_drops_the_code(app, store, cli
 
 
 @pytest.mark.parametrize("command", [["unpair"], ["unpair", "--config"], ["forget"], ["owner", "user-2"]])
-def test_a_device_changing_hands_loses_its_codes_key(store, paired_client, cli, command):
-    client, device_id, secret = paired_client
-    _ask_for_code(client, secret)
+def test_a_device_changing_hands_loses_its_codes_key(app, store, paired_client, cli, command):
+    _client, device_id, _secret = paired_client
+    code = _ask_for_code(app, device_id)
 
     assert cli(command[0], device_id, *command[1:]).exit_code == 0
 
-    assert _stored(store, device_id) is None
+    # Unpairing issues a new code to show; the old one's key is gone either way.
+    stored = _stored(store, device_id)
+    assert stored is None or stored["pairing_code"] != code
 
 
 def test_an_owner_set_again_to_the_same_user_drops_the_code(app, store, paired_client, cli):
-    client, device_id, secret = paired_client
-    _ask_for_code(client, secret)
+    _client, device_id, _secret = paired_client
+    _ask_for_code(app, device_id)
 
     assert cli("owner", device_id, "user-1").exit_code == 0
 
@@ -197,11 +186,11 @@ def test_the_code_command_stores_the_code_it_prints(store, paired_client, cli):
     assert result.output.startswith(_stored(store, device_id)["pairing_code"])
 
 
-def test_only_this_devices_key_goes(store, paired_client, register_device, client):
-    _client, _device_id, secret = paired_client
-    other_id, other_secret = register_device("another-very-long-device-secret")
-    other_code = _get_config(client, other_secret)["pairing_code"]
-    code = _ask_for_code(client, secret)
+def test_only_this_devices_key_goes(app, store, paired_client, register_device, client):
+    _client, device_id, _secret = paired_client
+    other_id, _other_secret = register_device("another-very-long-device-secret")
+    other_code = _ask_for_code(app, other_id)
+    code = _ask_for_code(app, device_id)
 
     client.post("/pair", data={"code": code})
 
@@ -226,36 +215,34 @@ class _DownRedis:
         return self.__getattr__("evalsha")
 
 
-def test_redis_down_never_stops_a_code_being_issued_or_used(app, client, register_device):
-    _device_id, secret = register_device()
+def test_redis_down_never_stops_a_code_being_issued_or_used(app, client, register_device, cli):
+    device_id, _secret = register_device()
     app.extensions["redis"] = _DownRedis()
 
     with (
         patch.object(pairing_key, "logger") as logger,
         patch("broker.services.device_keys.logger") as keys_logger,
     ):
-        code = _get_config(client, secret)["pairing_code"]
-        asked = client.post("/api/devices/pairing-code", headers=_headers(secret))
-        used = client.post("/pair", data={"code": asked.get_json()["code"]})
+        issued = cli("code", device_id)
+        code = issued.output.split(":")[0]
+        used = client.post("/pair", data={"code": code})
 
-    assert code
-    assert asked.status_code == 200
+    assert issued.exit_code == 0
     assert used.status_code == 302
-    assert logger.warning.call_count == 2  # the two writes
+    assert logger.warning.call_count == 1  # the write
     assert keys_logger.warning.call_count == 1  # and the delete, with the last owner's data (device_keys.forget)
     for call in [*logger.warning.call_args_list, *keys_logger.warning.call_args_list]:
         assert call.args[1:] == ("ConnectionError",)
         assert code not in str(call)
-        assert asked.get_json()["code"] not in str(call)
 
 
 def test_no_code_is_ever_logged(app, store, paired_client, cli):
-    client, device_id, secret = paired_client
+    client, device_id, _secret = paired_client
     with (
         patch.object(pairing_key, "logger") as logger,
         patch("broker.services.device_keys.logger") as keys_logger,
     ):
-        code = _ask_for_code(client, secret)
+        code = _ask_for_code(app, device_id)
         client.post("/pair", data={"code": code})
         cli("code", device_id)
         cli("forget", device_id)

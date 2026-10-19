@@ -1,21 +1,16 @@
-"""A screen's frames: the renderer uploads them, and the screen polls for them and reports its logs and metrics."""
+"""A screen's frames: the screen polls for the one the render pool drew, and reports its logs and metrics."""
 
 import json
 import logging
 import os
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
-from hashlib import blake2b
-from http import HTTPStatus
 from typing import TYPE_CHECKING
 
 import requests
-from flask import Blueprint, Response, abort, jsonify, request
-from sqlalchemy.dialects.sqlite import insert
+from flask import Blueprint, Response, jsonify, request
 
 from broker.auth import require_device_auth
-from broker.db import db
-from broker.models import Frame
 from broker.services import frame_record, pace
 
 if TYPE_CHECKING:
@@ -23,7 +18,9 @@ if TYPE_CHECKING:
 
 bp = Blueprint("frames", __name__, url_prefix="/api")
 
-FRAME_BYTES = 800 * 480 // 8  # 1-bit packed; better to share this via the protocol package
+# How long a screen with no frame to be shown sleeps at most: there's none until the pool's first render of it (a
+# screen just named, or a Redis that restarted), which lands within the minute, so it asks again soon.
+NO_FRAME_RETRY_S = 10
 
 # Where a screen's reports go. Logs: VictoriaLogs' JSON lines endpoint, with the fields the dashboards
 # group by (see the README's Logs section). Telemetry: VictoriaMetrics' InfluxDB line protocol endpoint.
@@ -45,46 +42,15 @@ logger = logging.getLogger(__name__)
 _executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="forward")
 
 
-@bp.put("/frame")
-@require_device_auth(roles={"renderer"})
-def update_frame(device_id: str) -> ResponseReturnValue:
-    """Store the renderer's latest frame for its screen."""
-    frame = request.get_data()
-    if len(frame) != FRAME_BYTES:
-        abort(400)
-    etag = blake2b(frame, digest_size=8).hexdigest()
-    # rendered_at moves even when the frame is unchanged: it says the renderer is still alive.
-    values = {"device_id": device_id, "frame": frame, "etag": etag, "rendered_at": datetime.now(UTC)}
-    # Every upload restates whether a provider's data is bursty: no header means it isn't (any more).
-    pace.store_hint(values, pace.parse_hint(request.headers.get(pace.HINT_HEADER)))
-    stmt = insert(Frame).values(**values)
-    stmt = stmt.on_conflict_do_update(
-        index_elements=[Frame.device_id],
-        set_={key: stmt.excluded[key] for key in values if key != "device_id"},
-    )
-    db.session.execute(stmt)
-    db.session.commit()
-    return "", 204
-
-
-@bp.get("/frame")
-@require_device_auth(roles={"display", "renderer"})
-def get_frame(device_id: str) -> ResponseReturnValue:
-    """Serve the screen its current frame.
-
-    The screen polls this. Every answer it should keep polling after carries Retry-After, so its loop is
-    just "handle the status, sleep Retry-After": until just after the next render, before the first frame too (see
-    services/pace.py, the only place a sleep is worked out).
-    """
-    return _frame_response(device_id)
-
-
 @bp.post("/frame")
-@require_device_auth(roles={"display", "renderer"})
+@require_device_auth()
 def post_frame(device_id: str) -> ResponseReturnValue:
-    """Answer as the GET does, and forward what the screen logged and measured since its last poll.
+    """Serve the screen its current frame, and forward what it logged and measured since its last poll.
 
-    The screen reports both here to save it a request. Both are forwarded without making the screen wait.
+    The screen polls this, with If-None-Match once it has a frame: 200 with the frame, 304 if it has it, 404 with none
+    yet. Every answer carries Retry-After, so its loop is just "handle the status, sleep Retry-After" (see
+    services/pace.py, the only place a sleep is worked out). It reports its logs and metrics here to save it a
+    request; both are forwarded without making the screen wait.
     """
     body = request.get_json(silent=True)
     if isinstance(body, dict):
@@ -154,31 +120,32 @@ def _post(url: str, request_kwargs: dict[str, object]) -> None:
         logger.warning("could not forward to %s", url, exc_info=True)
 
 
-def _frame_response(device_id: str, *, use_record: bool = True) -> ResponseReturnValue:
-    row = db.session.get(Frame, device_id)
-    # The renderer's record in Redis when it's the current picture, else the row (services/frame_record.py).
-    shown = frame_record.current(frame_record.head(device_id) if use_record else None, row)
+def _frame_response(device_id: str) -> ResponseReturnValue:
+    # The record the render pool wrote in Redis (services/frame_record.py): the only copy of the screen's frame.
+    shown = frame_record.head(device_id)
     # How long the screen sleeps before its next poll, on every answer: the pacing function (services/pace.py).
-    retry_after = str(pace.retry_after(device_id, row))
+    sleep_s = pace.retry_after(device_id)
     if shown is None:
-        return jsonify(error="no frame yet"), 404, {"Retry-After": retry_after}
+        return _no_frame(sleep_s)
     resp = Response(mimetype="application/octet-stream")
     resp.set_etag(shown.etag)
-    resp.headers["Retry-After"] = retry_after
-    if request.method == "POST":
-        # make_conditional only looks at GET and HEAD, so a POST has to answer 304 itself.
-        if request.if_none_match.contains_weak(shown.etag):
-            return Response(
-                status=304, headers={"ETag": resp.headers["ETag"], "Retry-After": resp.headers["Retry-After"]}
-            )
-    else:
-        resp = resp.make_conditional(request)
-        if resp.status_code != HTTPStatus.OK:  # a 304 needs no frame
-            return resp
+    resp.headers["Retry-After"] = str(sleep_s)
+    # make_conditional only looks at GET and HEAD, so a POST answers its 304 itself.
+    if request.if_none_match.contains_weak(shown.etag):
+        return Response(status=304, headers={"ETag": resp.headers["ETag"], "Retry-After": resp.headers["Retry-After"]})
     # Only now the 48 KB: a screen that has the picture already never costs reading the record's.
-    frame = shown.frame if shown is row else frame_record.frame_of(device_id, shown.etag)
+    frame = frame_record.frame_of(device_id, shown.etag)
     if frame is None:
-        # The record went, or changed, since its etag was read: answer as if there had been none.
-        return _frame_response(device_id, use_record=False)
+        # The record went, or changed, since its etag was read: serve it whole as it is now, if there is one.
+        latest = frame_record.read(device_id)
+        if latest is None:
+            return _no_frame(sleep_s)
+        resp.set_etag(latest.etag)
+        frame = latest.frame
     resp.set_data(frame)
     return resp
+
+
+def _no_frame(sleep_s: int) -> ResponseReturnValue:
+    """Answer a screen that has no frame to be shown yet: 404, and ask again in at most NO_FRAME_RETRY_S."""
+    return jsonify(error="no frame yet"), 404, {"Retry-After": str(min(sleep_s, NO_FRAME_RETRY_S))}

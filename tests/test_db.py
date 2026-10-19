@@ -14,7 +14,7 @@ from broker import create_app
 from broker import db as db_module
 from broker.auth import hash_secret
 from broker.db import db
-from broker.models import Device, DeviceConfig, Frame, PairingCode, SpotifyToken
+from broker.models import Device, DeviceConfig, PairingCode, SpotifyToken
 
 
 def _current_revision(app):
@@ -46,7 +46,21 @@ def _ddl(app):
 def test_schema_creates_expected_tables(app):
     with app.app_context():
         tables = set(inspect(db.engine).get_table_names())
-    assert {"devices", "pairing_codes", "device_config", "spotify_tokens", "glowmarkt_credentials", "frames"} <= tables
+    assert {"devices", "pairing_codes", "device_config", "spotify_tokens", "glowmarkt_credentials"} <= tables
+    assert "frames" not in tables  # the frames are the render pool's, in Redis (0023)
+
+
+def _downgrade(revision: str) -> None:
+    """Downgrade to `revision`, past 0023 giving every device a renderer secret, which the schema before 0006 needs.
+
+    (0006's downgrade makes the renderer's secret NOT NULL again; 0023's brings the column back empty.) Needs an app
+    context.
+    """
+    downgrade(revision="0022")
+    with db.engine.begin() as conn:
+        conn.exec_driver_sql("UPDATE devices SET renderer_secret_hash = 'renderer-' || device_id")
+    if revision != "0022":
+        downgrade(revision=revision)
 
 
 def test_a_fresh_db_is_migrated_to_head(app):
@@ -68,7 +82,7 @@ def test_migrations_downgrade_and_upgrade_again(app):
 
 def test_concurrent_app_startup_serializes_migrations(app, monkeypatch):
     with app.app_context():
-        downgrade(revision="0005")
+        _downgrade("0005")
         db.engine.dispose()
 
     first_upgrade_started = Event()
@@ -221,8 +235,8 @@ def test_a_legacy_db_keeps_its_data(adopt):
         config = db.session.get(DeviceConfig, "d")
         assert (config.tfl_stop_ids, config.spotify_enabled) == (["S1"], True)
         assert config.clock_format == "24h"
-        frame = db.session.get(Frame, "d")
-        assert (frame.frame, frame.rendered_at) == (b"\xaa\x55", datetime(2026, 1, 3, tzinfo=UTC))
+        # Its frame went with the frames table (0023): the render pool draws it again.
+        assert "frames" not in inspect(db.engine).get_table_names()
 
 
 def test_a_legacy_db_ends_up_with_the_same_schema_as_a_fresh_one(app, adopt):
@@ -292,7 +306,7 @@ def test_starting_twice_leaves_an_adopted_db_alone(adopt, monkeypatch):
 def _at_0001_with(app, statements: str) -> None:
     """Take the DB back to 0001, where timestamps were strings, and insert rows there."""
     with app.app_context():
-        downgrade(revision="0001")
+        _downgrade("0001")
         with db.engine.begin() as conn:
             for statement in filter(str.strip, statements.split(";")):
                 conn.exec_driver_sql(statement)
@@ -326,7 +340,6 @@ def test_0002_converts_every_string_timestamp_shape_to_utc(app):
         assert date_only.paired_at == datetime(2026, 1, 1, 9, 15, tzinfo=UTC)  # no zone: taken as UTC
 
         assert db.session.get(PairingCode, "ABC234").expires_at == datetime(2026, 3, 2, 8, 10, tzinfo=UTC)
-        assert db.session.get(Frame, "zulu").rendered_at == datetime(2026, 3, 2, 8, 5, tzinfo=UTC)
         assert db.session.get(SpotifyToken, "offset").expires_at == 1793865600.5
         assert db.session.get(SpotifyToken, "zulu").expires_at is None
 
@@ -352,12 +365,12 @@ def test_0002_converted_timestamps_compare_correctly_in_queries(app):
 
 def test_0002_downgrade_gives_back_iso_strings(app):
     with app.app_context():
-        db.session.add(Device(device_id="d", renderer_secret_hash="h", created_at=datetime(2026, 3, 1, 12, tzinfo=UTC)))
+        db.session.add(Device(device_id="d", created_at=datetime(2026, 3, 1, 12, tzinfo=UTC)))
         db.session.add(SpotifyToken(device_id="d", refresh_token="r", expires_at=1793865600.5))
         db.session.commit()
         db.session.remove()
 
-        downgrade(revision="0001")
+        _downgrade("0001")
         with db.engine.connect() as conn:
             assert conn.exec_driver_sql("SELECT created_at, paired_at FROM devices").one() == (
                 "2026-03-01T12:00:00+00:00",
@@ -381,7 +394,7 @@ def test_0002_fails_on_a_timestamp_it_cannot_read_and_changes_nothing(app):
 def test_utc_datetime_refuses_a_naive_datetime(app):
     with app.app_context():
         naive = datetime(2026, 1, 1)  # noqa: DTZ001 -- the naive datetime is what is under test
-        db.session.add(Device(device_id="d", renderer_secret_hash="h", created_at=naive))
+        db.session.add(Device(device_id="d", created_at=naive))
         with pytest.raises(Exception, match="naive datetime"):
             db.session.commit()
 
@@ -392,32 +405,35 @@ def test_utc_datetime_refuses_a_naive_datetime(app):
 def test_0004_keeps_existing_devices_and_their_secret_as_the_renderer(app):
     secret = "a-pi-secret-from-before-roles"
     with app.app_context():
-        downgrade(revision="0003")
+        _downgrade("0003")
         with db.engine.begin() as conn:
             conn.exec_driver_sql(
                 "INSERT INTO devices (device_id, device_secret_hash, created_at, paired_at) VALUES (?, ?, ?, ?)",
                 ("old-pi", hash_secret(secret), "2026-03-01 12:00:00", "2026-03-01 12:05:00"),
             )
             conn.exec_driver_sql("INSERT INTO device_config (device_id) VALUES ('old-pi')")
+        upgrade(revision="0004")
+
+        with db.engine.connect() as conn:
+            row = conn.exec_driver_sql(
+                "SELECT renderer_secret_hash, display_secret_hash, paired_at FROM devices WHERE device_id = 'old-pi'"
+            ).one()
+        assert row[:2] == (hash_secret(secret), None)
+        assert row[2].startswith("2026-03-01 12:05:00")
         upgrade()
 
-        device = db.session.get(Device, "old-pi")
-        assert device.renderer_secret_hash == hash_secret(secret)
-        assert device.display_secret_hash is None
-        assert device.paired_at == datetime(2026, 3, 1, 12, 5, tzinfo=UTC)
 
-
-def test_0004_downgrade_and_upgrade_keep_split_devices(app, split_device):
-    device_id, _, _display_secret = split_device
+def test_0004_downgrade_and_upgrade_keep_devices(app, register_device):
+    device_id, _ = register_device()
     with app.app_context():
-        downgrade(revision="0003")
+        _downgrade("0003")
         upgrade()
         assert db.session.get(Device, device_id).display_secret_hash is None  # the column went away and back
 
 
 def test_0008_backfills_existing_devices_with_a_480_by_800_screen(app):
     with app.app_context():
-        downgrade(revision="0007")
+        _downgrade("0007")
         with db.engine.begin() as conn:
             conn.exec_driver_sql(
                 "INSERT INTO devices (device_id, created_at, renderer_secret_hash) VALUES (?, ?, ?)",
@@ -438,7 +454,7 @@ def test_0012_backfills_clock_format_and_keeps_existing_settings(app, register_d
         db.session.commit()
         db.session.remove()
 
-        downgrade(revision="0011")
+        _downgrade("0011")
         assert "clock_format" not in {column["name"] for column in inspect(db.engine).get_columns("device_config")}
         upgrade()
 
@@ -472,7 +488,7 @@ def test_0013_backfills_english_and_keeps_existing_settings(app, register_device
         db.session.commit()
         db.session.remove()
 
-        downgrade(revision="0012")
+        _downgrade("0012")
         assert "language" not in {column["name"] for column in inspect(db.engine).get_columns("device_config")}
         upgrade()
 
@@ -500,7 +516,7 @@ def _insert_device(conn, device_id, **columns):
 
 def test_0015_moves_classic_devices_to_hero_and_keeps_the_others(app):
     with app.app_context():
-        downgrade(revision="0014")
+        _downgrade("0014")
         with db.engine.begin() as conn:
             _insert_device(conn, "old", tfl_style="classic", spotify_style="classic")
             _insert_device(conn, "picked", tfl_style="card", spotify_style="airy")
@@ -514,7 +530,7 @@ def test_0015_moves_classic_devices_to_hero_and_keeps_the_others(app):
 
 def test_0016_starts_every_device_on_the_hero_notices_style(app):
     with app.app_context():
-        downgrade(revision="0015")
+        _downgrade("0015")
         assert "notices_style" not in {column["name"] for column in inspect(db.engine).get_columns("device_config")}
         with db.engine.begin() as conn:
             _insert_device(conn, "screen", postcode="SW1A 1AA", spotify_style="card")
@@ -529,7 +545,7 @@ def test_0016_starts_every_device_on_the_hero_notices_style(app):
 def test_0017_gives_each_device_the_style_of_its_departures(app):
     """Grouped is airy's old name; the Spotify and notice board styles give way to the departures'."""
     with app.app_context():
-        downgrade(revision="0016")
+        _downgrade("0016")
         with db.engine.begin() as conn:
             _insert_device(conn, "grouped", tfl_style="grouped", spotify_style="card", notices_style="hero")
             _insert_device(conn, "card", tfl_style="card", spotify_style="airy", notices_style="boxed")
@@ -549,7 +565,7 @@ def test_0017_downgrade_gives_every_panel_the_one_style(app, register_device):
         db.session.commit()
         db.session.remove()
 
-        downgrade(revision="0016")
+        _downgrade("0016")
 
         assert _styles(("tfl_style", "spotify_style", "notices_style")) == {airy: ("grouped", "airy", "airy")}
 
@@ -559,7 +575,7 @@ def test_0017_downgrade_gives_every_panel_the_one_style(app, register_device):
 
 def test_0018_starts_new_devices_on_airy_and_keeps_the_others(app):
     with app.app_context():
-        downgrade(revision="0017")
+        _downgrade("0017")
         with db.engine.begin() as conn:
             _insert_device(conn, "before")
             _insert_device(conn, "picked", style="card")
@@ -575,7 +591,7 @@ def test_0018_starts_new_devices_on_airy_and_keeps_the_others(app):
 
 def test_0021_keeps_existing_weather_locations_and_leaves_their_place_to_the_backfill(app):
     with app.app_context():
-        downgrade(revision="0020")
+        _downgrade("0020")
         assert "weather_place_id" not in {column["name"] for column in inspect(db.engine).get_columns("device_config")}
         with db.engine.begin() as conn:
             _insert_device(conn, "old", weather_location="Tromsø", postcode="9008")
@@ -584,3 +600,59 @@ def test_0021_keeps_existing_weather_locations_and_leaves_their_place_to_the_bac
         config = db.session.get(DeviceConfig, "old")
         assert (config.weather_location, config.postcode) == ("Tromsø", "9008")
         assert (config.weather_place_id, config.weather_place_name, config.weather_lat) == (None, None, None)
+
+
+# --- 0023: the per-screen renderers retired --------------------------------------------------------------------------
+
+
+def test_0023_keeps_each_screen_and_its_name_and_drops_the_rest(app):
+    with app.app_context():
+        downgrade(revision="0022")
+        with db.engine.begin() as conn:
+            for device_id, renderer in (("named", "r1"), ("gone", None)):
+                conn.exec_driver_sql(
+                    "INSERT INTO devices (device_id, renderer_secret_hash, created_at, display_secret_hash) "
+                    "VALUES (?, ?, '2026-10-01 12:00:00', ?)",
+                    (device_id, renderer, f"display-{device_id}"),
+                )
+            conn.exec_driver_sql(
+                "INSERT INTO renderer_assignments (id, device_id, slug, claim_token, status, detail, created_at) "
+                "VALUES ('a1', 'named', 'nvorkinn-kitchen', NULL, 'provisioned', '', '2026-10-01 12:00:00'), "
+                "('a2', NULL, 'nvorkinn-old', NULL, 'deleting', '', '2026-10-01 12:00:00')"
+            )
+            conn.exec_driver_sql(
+                "INSERT INTO frames (device_id, frame, etag, rendered_at) VALUES ('named', x'00', 'e', '2026-10-01')"
+            )
+        upgrade()
+
+        device = db.session.get(Device, "named")
+        assert (device.display_secret_hash, device.assignment.slug) == ("display-named", "nvorkinn-kitchen")
+        # A forgotten device's assignment was only waiting for the orchestrator to remove its renderer.
+        assert db.session.scalars(select(text("slug")).select_from(text("renderer_assignments"))).all() == [
+            "nvorkinn-kitchen"
+        ]
+        tables = set(inspect(db.engine).get_table_names())
+        assert "frames" not in tables
+        assert "renderer_secret_hash" not in {c["name"] for c in inspect(db.engine).get_columns("devices")}
+        assert {c["name"] for c in inspect(db.engine).get_columns("renderer_assignments")} == {
+            "id",
+            "device_id",
+            "slug",
+            "created_at",
+        }
+
+
+def test_0023_downgrade_gives_each_named_screen_a_pending_assignment(app, register_device):
+    device_id, _ = register_device()
+    with app.app_context():
+        slug = db.session.get(Device, device_id).assignment.slug
+        db.session.remove()
+
+        downgrade(revision="0022")
+
+        with db.engine.connect() as conn:
+            row = conn.exec_driver_sql(
+                "SELECT slug, status, claim_token, detail FROM renderer_assignments WHERE device_id = ?", (device_id,)
+            ).one()
+        assert tuple(row) == (slug, "pending", None, "")
+        upgrade()
