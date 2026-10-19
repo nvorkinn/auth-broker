@@ -285,8 +285,9 @@ sequenceDiagram
     Note over R,B: Reads its config from Redis (v1:config:DEVICE_ID, written when the screen was paired); GET /api/config only without it
 ```
 
-- A new screen's owner is sent to the naming page before anything else works. The slug is
-  `<username up to 16 characters>-<what they typed>`, at most 32 characters, unique across the whole broker.
+- A screen is named automatically when it's paired, by its own id (`assignments.auto_name`); its owner gives it a
+  friendly name on its settings page whenever they like. Screens named before that kept the
+  `<username up to 16 characters>-<what they typed>` slug they chose. See the README's "Naming a screen".
 - The orchestrator asks every 10 s. The `docker run` is the orchestrator's own action; the broker only hears
   `provisioned` afterwards. Capacity (`MAX_RENDERERS`) can hold an assignment at `pending`.
 - The claim matches the renderer to its screen immediately: there is no waiting room. A repeat claim with the same

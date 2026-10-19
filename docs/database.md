@@ -23,7 +23,7 @@ erDiagram
         string owner "Authentik uid, not an FK"
         datetime created_at
         datetime paired_at "NULL until paired"
-        string device_name "from X-Device-Name"
+        string device_name "the friendly name its owner gave it (settings page)"
         datetime last_seen_at "any role, 1 min resolution"
         datetime display_last_seen_at "screen only: drives suspension"
     }
@@ -113,14 +113,14 @@ Things the diagram can't say:
 
 | Table | One row per | Written by | Read by |
 |---|---|---|---|
-| `devices` | screen and its renderer | `POST /api/devices/register` (insert, and deletes unpaired screens older than 24 h), `POST /api/renderers/claim` (`renderer_secret_hash`), pairing (`owner`, `paired_at`), config polls (`device_name`), every device call (`last_seen_at`, and `display_last_seen_at` for the screen), "Unlink screen", the CLI | every device call (secret lookup), the pages, `GET /api/status/devices`, the CLI |
+| `devices` | screen and its renderer | `POST /api/devices/register` (insert, and deletes unpaired screens older than 24 h), `POST /api/renderers/claim` (`renderer_secret_hash`), pairing (`owner`, `paired_at`), the settings page (`device_name`, the friendly name), every device call (`last_seen_at`, and `display_last_seen_at` for the screen), "Unlink screen", the CLI | every device call (secret lookup), the pages, `GET /api/status/devices`, the CLI |
 | `device_config` | device | created at registration (with the screen's size), `POST /device` (settings), `unpair --config` | `GET /api/config`, `Retry-After` on frame polls, the music provider, `/device` |
 | `pairing_codes` | live code | `POST /api/devices/pairing-code`, `flask devices code`, `GET /api/config` while unpaired; deleted on use, on expiry (swept on each new code) and by `unpair` | `POST /pair`, `GET /api/config` |
 | `spotify_tokens` | device that connected Spotify | `/auth/spotify/callback`, lazy refresh in the music provider | the music provider; deleted by Disconnect, `unpair --config`, `forget` |
 | `glowmarkt_credentials` | device | `POST /device` | `GET /api/config`, `/device` |
 | `github_tokens` | device given a GitHub token | `POST /device`; deleted by "Remove token", `unpair --config`, `forget` | the developer-provider, `/device` |
 | `frames` | device | `PUT /api/frame` | `GET` and `POST /api/frame` |
-| `renderer_assignments` | named screen | the naming page and `POST /api/displays/{id}/renderer` (insert), `POST /api/renderers/claim` (`claim_token` to NULL), the orchestrator's list (**suspension and un-suspension happen here**), its status reports, `forget` (`deleting`) | the orchestrator's list, the pages |
+| `renderer_assignments` | named screen | pairing (insert: the slug is the device id), the settings page for a screen paired before that, `POST /api/displays/{id}/renderer` (insert), `POST /api/renderers/claim` (`claim_token` to NULL), the orchestrator's list (**suspension and un-suspension happen here**), its status reports, `forget` (`deleting`) | the orchestrator's list, the pages |
 
 ## What each action changes
 

@@ -77,13 +77,13 @@ def authenticate_device(authorization: str, roles: Collection[str] = frozenset(R
         raise DeviceAuthError(403, "forbidden")
 
     g.device_id, g.role = device.device_id, role
-    # device_name is just the Pi's own DEVICE_ID, echoed back here purely so a log line
-    # reads as a name instead of an opaque id -- never used for anything else.
+    # The screen's slug, purely so a log line reads as a name instead of an opaque id. Not its friendly name
+    # (device_name): that's whatever its owner typed, which could name a place, and nothing logged may.
     current_app.logger.info(
         "%s %s device=%s (%s) role=%s",
         request.method,
         request.path,
-        device.device_name or "unnamed",
+        device.assignment.slug if device.assignment else "unnamed",
         device.device_id,
         role,
     )
@@ -208,14 +208,14 @@ def paired_device_id() -> str | None:
 def screen_label(device: Device) -> str:
     """Return what a screen is called on the pages.
 
-    That is its name (the slug), "New screen" while it's waiting to be named, or what it reports, or a piece of
-    its id.
+    That is the name its owner gave it, else the slug they chose when screens were named by one, else "Screen" and a
+    piece of its id (its slug, if it has one, is then that id: never shown).
     """
-    if device.assignment:
+    if device.device_name:
+        return device.device_name
+    if device.assignment and device.assignment.slug != device.device_id:
         return device.assignment.slug
-    if device.renderer_secret_hash is None:
-        return "New screen"  # not named yet, so it has no renderer to report a name
-    return device.device_name or device.device_id[:6]
+    return f"Screen {device.device_id[:6]}"
 
 
 def require_user(view: View) -> View:

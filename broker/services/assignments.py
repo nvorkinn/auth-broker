@@ -42,6 +42,10 @@ class InvalidSlugError(ValueError):
     """The chosen name isn't one the orchestrator accepts, or makes too long a slug."""
 
 
+class NameTooLongError(ValueError):
+    """The friendly name is longer than NAME_MAX."""
+
+
 class SlugTakenError(ValueError):
     """Another screen already has the slug."""
 
@@ -77,6 +81,38 @@ def full_slug(username: str | None, suffix: str) -> str:
 def max_suffix_length(username: str | None) -> int:
     """Return how long a suffix the user can choose, after their prefix and its dash."""
     return SLUG_MAX - len(slug_prefix(username)) - 1
+
+
+# The longest name an owner may give a screen (devices.device_name): it's only shown, in the screen switcher.
+NAME_MAX = 40
+
+
+def auto_name(device: Device) -> RendererAssignment | None:
+    """Give a device its stable internal name, if it has none yet; return the assignment made (None if it had one).
+
+    The slug is the device's own id, which no owner's slug can be (theirs have a dash in them). It's never shown: the
+    owner calls the screen whatever they like (devices.device_name, on its settings page), and this stays what the
+    render pool lists it under and labels its metrics with (services/render_screens.py), so a rename never breaks a
+    series. Added to the session, not committed.
+    """
+    if device.assignment is not None:
+        return None
+    assignment = RendererAssignment(
+        id=secrets.token_hex(6), device=device, slug=device.device_id, created_at=datetime.now(UTC)
+    )
+    db.session.add(assignment)
+    return assignment
+
+
+def clean_name(name: str) -> str | None:
+    """Return the friendly name an owner typed, as stored: its spaces trimmed, None for none.
+
+    Raises NameTooLongError if it's longer than NAME_MAX.
+    """
+    name = " ".join(name.split())
+    if len(name) > NAME_MAX:
+        raise NameTooLongError(name)
+    return name or None
 
 
 def needs_renderer(device: Device) -> bool:

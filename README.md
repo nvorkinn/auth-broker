@@ -99,7 +99,7 @@ run is discovered, then links directly to its workflow run rather than to the Gi
    (`devices.owner`, the user id the login proxy passes in `X-Authentik-Uid`) and
    sees its settings at `/device` after logging in. A screen is a device from its first
    `POST /api/devices/register`, so it can be paired before any renderer exists. A new screen's
-   owner is sent to `/device/name` first to name it (see [Naming a screen](#naming-a-screen)).
+   screen is named automatically when it's paired (see [Naming a screen](#naming-a-screen)).
    There are two ways in:
    - **Token (main path).** After WiFi setup the device redirects its owner's
      browser to `/pair#<token>`, where `token` is the hex SHA-256 of
@@ -254,17 +254,23 @@ What anyone can add is bounded:
 
 ### Naming a screen
 
-A new screen's owner is sent to `/device/name` right after pairing, because the
-screen's renderer is started per screen and named after it. They pick the end of a
-**slug**; the broker puts their username in front, as `<username>-<their choice>`
-(the username lowercased, anything but `a-z 0-9 _ -` turned into a dash, and cut to
-16 characters, or `user` if nothing is left). The whole slug is at most 32
-characters (`[a-z0-9][a-z0-9_-]{1,31}`), unique across the broker, and fixed once
-set, even if their username changes later. It creates a *renderer assignment* (also
-`POST /api/displays/<device_id>/renderer {"slug": ...}` for a signed-in owner, where
-the slug is again just their part: 201 with the full slug, 400 bad slug, 404 not
-theirs, 409 taken or already assigned). `/device` shows nothing else until then. The slug lives in the
-broker, not Authentik: it belongs to a screen, and a user can have several.
+A screen has two names:
+
+- **Its stable name, the slug**, given the moment it's paired (by token, by code or `flask devices owner`;
+  `assignments.auto_name`): its own device id, kept as its *renderer assignment*. It's what the render pool lists it
+  under in `v1:render:screens` and labels its metrics with (`device`), so it never changes, and it's never shown.
+  Pairing lists the screen and queues its first render, so it's drawn at once. Screens named before this keep the
+  `<username>-<their choice>` slug they picked; one paired with no name gets its slug the next time its settings page
+  is opened.
+- **Its friendly name**, whatever its owner types in **Screen → Name** on its settings page (up to 40 characters,
+  spaces tidied; blank for none), kept in `devices.device_name`. It's what the screen switcher shows: the friendly
+  name, else a slug its owner chose, else "Screen" and the start of its id. Renaming changes nothing in the store, and
+  the name is never logged (it could name a place): log lines name a screen by its slug.
+
+`/device/name`, where a new screen used to be named first, now redirects to the settings page.
+`POST /api/displays/<device_id>/renderer {"slug": ...}` still names a screen that has no name by a slug (it goes
+with the per-screen renderers, auth-broker #215). The names live in the broker, not Authentik: they belong to a
+screen, and a user can have several.
 
 The [orchestrator](https://github.com/nvorkinn/pi-dashboard/blob/main/countdown/orchestrator/README.md)
 polls the assignments with `Authorization: Bearer <ORCHESTRATOR_TOKEN>`

@@ -140,17 +140,13 @@ def test_disconnecting_spotify_and_unlinking_act_on_the_chosen_screen(app, clien
 
 
 def test_a_second_screen_is_named_on_its_own_page(app, client, two_screens):
-    _, second = two_screens
-    with app.app_context():
-        db.session.delete(db.session.get(Device, second).assignment)
-        db.session.get(Device, second).renderer_secret_hash = None
-        db.session.get(Device, second).display_secret_hash = "c" * 64
-        db.session.commit()
+    first, second = two_screens
 
-    assert client.get(f"/device/{second}").headers["Location"] == f"/device/{second}/name"
-    assert b"Name your screen" in client.get(f"/device/{second}/name").data
-    response = client.post(f"/device/{second}/name", data={"slug": "bedroom"})
-    assert response.headers["Location"] == f"/device/{second}"
+    assert client.post(f"/device/{second}", data={"screen_name": "Bedroom"}).headers["Location"] == f"/device/{second}"
+
+    with app.app_context():
+        assert db.session.get(Device, second).device_name == "Bedroom"
+        assert db.session.get(Device, first).device_name != "Bedroom"
 
 
 # --- nobody else's screen -----------------------------------------------------------------------------
@@ -291,26 +287,11 @@ def test_without_a_signed_in_user_there_are_no_screens(app):
         assert user_devices() == []
 
 
-def test_a_screen_waiting_to_be_named_is_called_new_screen(app, client, two_screens):
+def test_a_screen_with_no_name_is_called_screen_and_its_id(app, client, two_screens):
     _, second = two_screens
     with app.app_context():
-        db.session.delete(db.session.get(Device, second).assignment)
-        db.session.get(Device, second).renderer_secret_hash = None
-        db.session.get(Device, second).display_secret_hash = "d" * 64
+        db.session.get(Device, second).device_name = None
+        db.session.get(Device, second).assignment.slug = second  # named automatically, at pairing
         db.session.commit()
 
-    assert ">New screen</a>" in client.get("/device/name").data.decode()
-
-
-def test_the_name_input_is_not_styled_like_the_pairing_code(app, client, two_screens):
-    _, second = two_screens
-    with app.app_context():
-        db.session.delete(db.session.get(Device, second).assignment)
-        db.session.get(Device, second).renderer_secret_hash = None
-        db.session.get(Device, second).display_secret_hash = "e" * 64
-        db.session.commit()
-
-    page = client.get(f"/device/{second}/name").data.decode()
-
-    assert 'class="slug-input"' in page
-    assert 'class="pairing-input"' not in page
+    assert f">Screen {second[:6]}</a>" in client.get("/device").data.decode()

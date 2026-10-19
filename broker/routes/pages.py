@@ -192,9 +192,10 @@ def pair_by_token() -> ResponseReturnValue:
 def device_config() -> ResponseReturnValue:
     """Show a screen's settings page, and save the settings posted from it."""
     device_id = g.device_id
-    # A screen with no renderer yet is named first: nothing else on this page works until it has one.
-    if assignments.needs_renderer(db.session.get(Device, device_id)):
-        return redirect(url_for("pages.name_screen", device_id=device_id))
+    # A screen paired before screens were named automatically gets its stable name now, which lists it in the pool.
+    if assignments.auto_name(db.session.get(Device, device_id)) is not None:
+        db.session.commit()
+        config_store.publish(device_id)
 
     if request.method == "POST":
         return _save_device_config(device_id)
@@ -229,6 +230,10 @@ def _save_device_config(device_id: str) -> ResponseReturnValue:
     place, errors = _weather_place(config)
     if postcode is None:
         errors.append(f'"{raw_postcode.strip()}" isn\'t a valid UK or Norwegian postcode.')
+    try:
+        screen_name = assignments.clean_name(request.form["screen_name"]) if "screen_name" in request.form else None
+    except assignments.NameTooLongError:
+        errors.append(f"The screen's name can be at most {assignments.NAME_MAX} characters.")
     errors += [
         f"{label} must be one of {', '.join(allowed)}."
         for field, (allowed, label) in CHOICES.items()
@@ -245,6 +250,8 @@ def _save_device_config(device_id: str) -> ResponseReturnValue:
     config.tfl_stop_ids = stop_ids
     for field, value in choices.items():
         setattr(config, field, value)
+    if "screen_name" in request.form:
+        db.session.get(Device, device_id).device_name = screen_name
     glowmarkt_changed = _save_glowmarkt_credentials(device_id)
     github_changed = _save_github_token(device_id)
 
@@ -338,39 +345,11 @@ def _save_github_token(device_id: str) -> bool:
 @bp.route("/device/<device_id>/name", methods=["GET", "POST"])
 @require_paired_user
 def name_screen() -> ResponseReturnValue:
-    """Name a new screen, which asks for its renderer to be started (see services/assignments.py).
+    """Where a new screen used to be named before anything else: now its settings page, where its name is set.
 
-    The user is sent here right after pairing, and never again once it's done.
+    A screen is named automatically at pairing (assignments.auto_name), and its owner calls it what they like there.
     """
-    device = db.session.get(Device, g.device_id)
-    if not assignments.needs_renderer(device):
-        return redirect(url_for("pages.device_config", device_id=g.device_id))
-
-    error = None
-    slug = request.form.get("slug", "").strip().lower()
-    if request.method == "POST":
-        try:
-            assignments.create(device, slug, current_username())
-            # Its slug lists it in the render pool (services/render_screens.py).
-            render_screens.write()
-            return redirect(url_for("pages.device_config", device_id=g.device_id))
-        except assignments.InvalidSlugError:
-            error = (
-                f"Use up to {assignments.max_suffix_length(current_username())} lowercase letters, numbers, "
-                "dashes or underscores, starting with a letter or number."
-            )
-        except assignments.SlugTakenError:
-            error = "That name is taken. Try another."
-        except assignments.NotNeededError:
-            return redirect(url_for("pages.device_config", device_id=g.device_id))
-    return render_template(
-        "name_screen.html",
-        device_id=g.device_id,
-        slug=slug,
-        prefix=assignments.slug_prefix(current_username()),
-        max_length=assignments.max_suffix_length(current_username()),
-        error=error,
-    ), 400 if error else 200
+    return redirect(url_for("pages.device_config", device_id=g.device_id))
 
 
 @bp.get("/device/screen", defaults={"device_id": None})
@@ -467,6 +446,8 @@ def _render_device_config(device_id: str, errors: list[str] | None = None) -> st
         "device.html",
         device_id=device_id,
         display_attached=device.display_secret_hash is not None,
+        screen_name=device.device_name or "",
+        name_max=assignments.NAME_MAX,
         assignment=device.assignment,
         config=config,
         weather_suggestion=weather_suggestion,

@@ -16,7 +16,7 @@ import shutil
 import socket
 import subprocess
 import time
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from unittest.mock import patch
 
@@ -26,7 +26,7 @@ import redis
 
 from broker.db import db
 from broker.models import Device
-from broker.services import config_store, pairing, pairing_key, render_jobs, render_screens
+from broker.services import assignments, config_store, pairing, pairing_key, render_jobs, render_screens
 from broker.services.render_jobs import JOBS, QUEUED_TTL_MS, SCREENS, enqueue, queued_key
 
 FIXTURES = Path(__file__).parent.parent / "fixtures"
@@ -296,9 +296,11 @@ def test_a_rebuild_queues_only_the_screens_whose_copy_changed(app, store, paired
 
 def test_a_save_of_a_screen_the_pool_doesnt_draw_queues_nothing(app, store, paired_client):
     client, device_id, _ = paired_client
-    # A screen with no slug isn't in the pool's list (services/render_screens.py).
+    # A screen unseen for a day isn't in the pool's list (services/render_screens.py).
+    long_ago = datetime.now(UTC) - assignments.SUSPEND_AFTER - timedelta(hours=1)
     with app.app_context():
-        db.session.delete(db.session.get(Device, device_id).assignment)
+        device = db.session.get(Device, device_id)
+        device.display_last_seen_at = device.created_at = device.assignment.created_at = long_ago
         db.session.commit()
         render_screens.write()
     assert store.hgetall(render_jobs.SCREENS) == {}

@@ -94,6 +94,7 @@ def owner(device_id: str, user: str) -> None:
     device.owner = user
     if device.paired_at is None:
         device.paired_at = datetime.now(UTC)
+    assignments.auto_name(device)  # as pairing does, so the render pool draws it
     # It has its owner, so no code to show (as pairing does).
     device.pairing_codes.clear()
     db.session.commit()
