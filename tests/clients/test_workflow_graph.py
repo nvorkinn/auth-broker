@@ -96,10 +96,25 @@ def test_a_matrix_from_an_expression_has_no_size_and_its_runs_are_matched_by_pat
     jobs = workflow_graph.workflow_jobs(
         "jobs:\n  test:\n    strategy:\n      matrix: ${{ fromJSON(needs.x.outputs.m) }}\n"
     )
-    nodes = workflow_graph.nodes(jobs, [_run("test (3.14, linux)"), _run("test (3.13, linux)", "in_progress", None)])
+    nodes = workflow_graph.nodes(
+        jobs, [_run("test (3.14, linux)"), _run("test (3.13, linux)", "in_progress", None)], list_jobs=True
+    )
 
     assert jobs[0].size is None
-    assert nodes == [{"key": "test", "name": "test", "state": "running", "needs": [], "done": 1, "total": 2}]
+    assert nodes == [
+        {
+            "key": "test",
+            "name": "test",
+            "state": "running",
+            "needs": [],
+            "done": 1,
+            "total": 2,
+            "jobs": [
+                {"name": "test (3.14, linux)", "state": "done"},
+                {"name": "test (3.13, linux)", "state": "running"},
+            ],
+        }
+    ]
 
 
 def test_nodes_give_each_job_its_runs_state_in_the_files_order():
@@ -205,3 +220,23 @@ jobs:
 
     assert jobs[0].names is None
     assert (nodes[0]["key"], nodes[0]["done"], nodes[0]["total"]) == ("deploy", 1, 2)
+
+
+def test_a_matrix_lists_its_jobs_with_a_placeholder_for_each_not_started():
+    jobs = workflow_graph.workflow_jobs("jobs:\n  test:\n    strategy:\n      matrix:\n        v: [1, 2, 3]\n")
+    nodes = workflow_graph.nodes(jobs, [_run("test (1)", "in_progress", None)], list_jobs=True)
+
+    assert nodes[0]["jobs"] == [
+        {"name": "test (1)", "state": "running"},
+        {"name": "test (not started)", "state": "queued"},
+        {"name": "test (not started)", "state": "queued"},
+    ]
+
+
+def test_jobs_are_listed_only_when_asked_and_only_for_nodes_of_several():
+    jobs = workflow_graph.workflow_jobs(WORKFLOW)
+    runs = [_run("cleanup"), _run("images (a)"), _run("images (b)")]
+
+    assert all("jobs" not in node for node in workflow_graph.nodes(jobs, runs))
+    listed = workflow_graph.nodes(jobs, runs, list_jobs=True)
+    assert all(("jobs" in node) == (node["total"] is not None) for node in listed)

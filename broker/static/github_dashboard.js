@@ -148,7 +148,24 @@ function renderPull(pr, project) {
     return row;
 }
 
-function renderGraph(nodes) {
+// A matrix (or reusable workflow) with this many jobs or fewer is drawn as one card per job unless told otherwise.
+const MATRIX_EXPANDED_MAX = 5;
+
+function matrixExpanded(node, mode) {
+    return !!node.jobs && (mode ? mode === "expanded" : node.total <= MATRIX_EXPANDED_MAX);
+}
+
+// Replace each expanded matrix by a card per job, wired like the matrix was: same needs, needed by the same jobs.
+function explode(nodes, mode) {
+    const parts = new Map(nodes.filter(node => matrixExpanded(node, mode)).map(node => [node.key,
+        node.jobs.map((job, index) => ({ key: `${node.key}#${index}`, name: job.name, state: job.state,
+            needs: node.needs, done: null, total: null }))]));
+    const through = needs => needs.flatMap(key => parts.has(key) ? parts.get(key).map(part => part.key) : [key]);
+    return nodes.flatMap(node => (parts.get(node.key) || [node]).map(part => ({ ...part, needs: through(part.needs) })));
+}
+
+function renderGraph(allNodes, mode) {
+    const nodes = explode(allNodes, mode);
     const scroll = element("div", undefined, "graph-scroll");
     scroll.setAttribute("aria-label", "Workflow job dependency diagram");
     const graph = element("div", undefined, "graph");
@@ -221,8 +238,20 @@ function renderWorkflow(run, project) {
     title.className = "workflow-title";
     heading.append(title, badge(stateLabel(run.status), run.status));
     if (project.errorText) heading.append(badge("Stale data", "failed"));
-    section.append(element("p", `${project.repo.full_name} · ${run.branch}`, "repo-label"),
-        heading, renderGraph(run.nodes));
+    const mode = project.matrixMode.get(run.id);
+    const matrices = run.nodes.filter(node => node.jobs);
+    section.append(element("p", `${project.repo.full_name} · ${run.branch}`, "repo-label"), heading);
+    if (matrices.length) {
+        const expanded = matrices.every(node => matrixExpanded(node, mode));
+        const toggle = element("button", expanded ? "Collapse matrix jobs" : "Expand matrix jobs", "matrix-toggle");
+        toggle.type = "button";
+        toggle.addEventListener("click", () => {
+            project.matrixMode.set(run.id, expanded ? "collapsed" : "expanded");
+            renderProject(project);
+        });
+        section.append(toggle);
+    }
+    section.append(renderGraph(run.nodes, mode));
     for (const deployment of run.pending_deployments || []) {
         const key = `${run.id}:${run.attempt}:${deployment.id}`;
         const state = project.approvals.get(key);
@@ -448,7 +477,7 @@ function addProject(repo) {
     document.getElementById("projects").append(card);
     const project = { repo, card, error, result, data: null, pullRows: [], workflowRows: [],
         errorText: "", active: true, loading: false, nextRefresh: 0, approvals: new Map(), publishing: false,
-        background: !checkbox.checked, partial: null, sectionActive: { pulls: true, workflows: true } };
+        background: !checkbox.checked, partial: null, matrixMode: new Map(), sectionActive: { pulls: true, workflows: true } };
     button.addEventListener("click", () => publish(project, button));
     checkbox.addEventListener("change", () => {
         project.background = !checkbox.checked;

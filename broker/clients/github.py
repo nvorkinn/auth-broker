@@ -480,7 +480,7 @@ class Dashboard:
             "status": run["status"],
             "url": run["html_url"],
             "pending_deployments": pending_deployments,
-            "nodes": workflow_graph.nodes(definitions, jobs),
+            "nodes": workflow_graph.nodes(definitions, jobs, list_jobs=True),
             "jobs": [
                 {
                     "name": job["name"],
