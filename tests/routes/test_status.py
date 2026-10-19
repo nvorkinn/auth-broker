@@ -20,7 +20,7 @@ def _status(client, token=TOKEN):
 
 
 def _poll(client, device_id, secret, path="/api/frame"):
-    return client.get(path.format(device_id), headers={"Authorization": f"Bearer {secret}"})
+    return client.post(path.format(device_id), headers={"Authorization": f"Bearer {secret}"})
 
 
 def _last_seen(app, device_id):
@@ -97,7 +97,7 @@ def test_last_seen_at_is_unset_until_the_device_authenticates(app, client, regis
     device_id, _ = register_device()
     assert _last_seen(app, device_id) is None
 
-    client.get("/api/frame", headers={"Authorization": "Bearer wrong-secret"})
+    client.post("/api/frame", headers={"Authorization": "Bearer wrong-secret"})
 
     assert _last_seen(app, device_id) is None
 

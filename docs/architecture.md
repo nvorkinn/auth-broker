@@ -95,7 +95,7 @@ published.
 
 | Caller | Calls | Authenticates with |
 |---|---|---|
-| **ESP32 screen** | `POST /api/devices/register` (5 a minute per IP, then 429), `POST /api/frame` (the same answer as `GET`, plus a metrics and logs report) | nothing for register (the secret is in the body), otherwise the **display secret** |
+| **ESP32 screen** | `POST /api/devices/register` (5 a minute per IP, then 429), `POST /api/frame` (its poll: the frame, a 304 or a 404, and its metrics and logs report) | nothing for register (the secret is in the body), otherwise the **display secret** |
 | **Home Assistant** | `GET /api/status/devices` | `STATUS_TOKEN` |
 | **Signed-in user** | `/pair`, `POST /pair/token`, `/device[/{id}]` and `/name`, Spotify connect and disconnect, `POST /device[/{id}]/display/unlink`, `GET /api/stops/search`, `GET /api/places/search` | `X-Authentik-Uid` from Caddy |
 | **Operator** | `flask devices list \| code \| owner \| unpair \| forget`, `flask config publish` | a shell on the host |
@@ -353,9 +353,9 @@ sequenceDiagram
 | `POST /api/devices/register`, same secret again | `200 {device_id}` | every boot after the first | run |
 | `POST /api/devices/register` without `width` and `height` | `400` | the size is required | run |
 | Any device call with an unknown or deleted secret | `401 {error: unauthorized}` | the ESP32 registers again | run |
-| `GET` or `POST /api/frame` with no record | `404` with `Retry-After` of at most 10 | the pool hasn't drawn it (yet, or since Redis restarted) | run |
+| `POST /api/frame` with no record | `404` with `Retry-After` of at most 10 | the pool hasn't drawn it (yet, or since Redis restarted) | run |
 | `POST /api/frame` with the current `ETag` | `304` with `ETag` and `Retry-After` | nothing new | run |
-| `PUT /api/frame` | `405` | the frames are the pool's, in Redis | run |
+| `GET` or `PUT /api/frame` | `405` | the screen polls with `POST`; the frames are the pool's, in Redis | run |
 | `POST /pair/token`, screen not registered yet | `202 {status: waiting}` | try again | run |
 | `POST /pair`, wrong code | `200`, the page with an error | 10 wrong codes a minute per IP, then `429` | run, code |
 | `GET /api/config`, `POST /api/devices/pairing-code`, `/api/renderers/*`, `/api/orchestrator/*` | `404` | gone with the per-screen renderers | run |
@@ -377,7 +377,7 @@ If the code changes, these pages do not: check a diagram against the code before
 ## Pace
 
 How long a screen sleeps after each poll isn't a setting: one pure function in the broker works it out, and nothing
-else does (`services/pace.py`, `sleep_s(now, hints)`). Every `GET` and `POST /api/frame` answer the screen keeps
+else does (`services/pace.py`, `sleep_s(now, hints)`). Every `POST /api/frame` answer the screen keeps
 polling after (`200` and `304`) carries it as `Retry-After`, in whole seconds, from the broker's clock; a `404` (no
 frame yet) carries it too, but never over 10 s (`routes/frames.NO_FRAME_RETRY_S`). The ESP32 has no clock: it sleeps
 what it's told.

@@ -626,14 +626,14 @@ def test_unlink_screen_clears_the_display_secret(app, client, paired_client):
     client, device_id, secret = paired_client
     frame_headers = {"Authorization": f"Bearer {secret}"}
     assert "Unlink screen" in client.get("/device").get_data(as_text=True)
-    assert client.get("/api/frame", headers=frame_headers).status_code == 404  # authenticated, no frame yet
+    assert client.post("/api/frame", headers=frame_headers).status_code == 404  # authenticated, no frame yet
 
     response = client.post("/device/display/unlink")
 
     assert response.status_code == 302
     with app.app_context():
         assert db.session.get(Device, device_id).display_secret_hash is None
-    assert client.get("/api/frame", headers=frame_headers).status_code == 401
+    assert client.post("/api/frame", headers=frame_headers).status_code == 401
     assert "Unlink screen" not in client.get("/device").get_data(as_text=True)
 
 

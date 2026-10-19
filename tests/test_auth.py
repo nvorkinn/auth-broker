@@ -6,19 +6,19 @@ from broker.auth import require_device_auth
 
 def test_require_device_auth_rejects_missing_header(client, register_device):
     _device_id, _ = register_device()
-    response = client.get("/api/frame")
+    response = client.post("/api/frame")
     assert response.status_code == 401
 
 
 def test_require_device_auth_rejects_non_bearer_header(client, register_device):
     _device_id, secret = register_device()
-    response = client.get("/api/frame", headers={"Authorization": secret})
+    response = client.post("/api/frame", headers={"Authorization": secret})
     assert response.status_code == 401
 
 
 def test_require_device_auth_accepts_correct_secret(client, register_device):
     _device_id, secret = register_device()
-    response = client.get("/api/frame", headers={"Authorization": f"Bearer {secret}"})
+    response = client.post("/api/frame", headers={"Authorization": f"Bearer {secret}"})
     # Let in: there's just no frame yet.
     assert response.status_code == 404
     assert response.get_json() == {"error": "no frame yet"}
@@ -38,7 +38,7 @@ def test_require_paired_user_allows_the_paired_user(paired_client):
 
 def test_require_device_auth_rejects_an_empty_bearer_secret(client, register_device):
     _device_id, _ = register_device()
-    response = client.get("/api/frame", headers={"Authorization": "Bearer "})
+    response = client.post("/api/frame", headers={"Authorization": "Bearer "})
     assert response.status_code == 401
 
 

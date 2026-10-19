@@ -170,7 +170,7 @@ def test_register_is_throttled_per_ip_counting_every_call(client):
 def test_polling_is_not_throttled(client, register_device):
     _, secret = register_device()
     for _ in range(REGISTRATIONS_PER_MINUTE * 2):
-        assert client.get("/api/frame", headers=_auth(secret)).status_code == 404  # authenticated: no frame yet
+        assert client.post("/api/frame", headers=_auth(secret)).status_code == 404  # authenticated: no frame yet
 
 
 # --- the ID-less endpoints ------------------------------------------------------------------------
@@ -178,23 +178,23 @@ def test_polling_is_not_throttled(client, register_device):
 
 def test_a_screen_polls_frames_without_knowing_its_device_id(client, register_device, draw):
     device_id, secret = register_device()
-    assert client.get("/api/frame", headers=_auth(secret)).status_code == 404
+    assert client.post("/api/frame", headers=_auth(secret)).status_code == 404
 
     frame = bytes([0x5A]) * FRAME_BYTES
     draw(device_id, frame)
 
-    response = client.get("/api/frame", headers=_auth(secret))
+    response = client.post("/api/frame", headers=_auth(secret))
     assert response.status_code == 200
     assert response.data == frame
-    again = client.get("/api/frame", headers={**_auth(secret), "If-None-Match": response.headers["ETag"]})
+    again = client.post("/api/frame", headers={**_auth(secret), "If-None-Match": response.headers["ETag"]})
     assert again.status_code == 304
 
 
 def test_id_less_endpoints_reject_unknown_and_missing_secrets(client, register_device):
     register_device()
-    assert client.get("/api/frame").status_code == 401
-    assert client.get("/api/frame", headers=_auth("not-a-registered-secret")).status_code == 401
-    assert client.get("/api/frame", headers={"Authorization": "Bearer "}).status_code == 401
+    assert client.post("/api/frame").status_code == 401
+    assert client.post("/api/frame", headers=_auth("not-a-registered-secret")).status_code == 401
+    assert client.post("/api/frame", headers={"Authorization": "Bearer "}).status_code == 401
 
 
 def test_id_less_requests_are_logged_with_the_device_id(app, client, register_device, caplog):
@@ -203,9 +203,9 @@ def test_id_less_requests_are_logged_with_the_device_id(app, client, register_de
         slug = db.session.get(Device, device_id).assignment.slug
 
     with caplog.at_level("INFO"):
-        client.get("/api/frame", headers=_auth(secret))
+        client.post("/api/frame", headers=_auth(secret))
 
-    assert f"GET /api/frame device={slug} ({device_id}) role=display" in caplog.messages
+    assert f"POST /api/frame device={slug} ({device_id}) role=display" in caplog.messages
 
 
 # --- Retry-After: how often to poll (services/pace.py; tests/routes/test_frames.py has the rest) ---------------------
@@ -220,7 +220,7 @@ def frozen(monkeypatch):
 def test_no_frame_yet_is_a_json_404_asking_again_soon(client, register_device):
     _, secret = register_device()
 
-    response = client.get("/api/frame", headers=_auth(secret))
+    response = client.post("/api/frame", headers=_auth(secret))
 
     assert response.status_code == 404
     assert response.get_json() == {"error": "no frame yet"}
@@ -233,8 +233,8 @@ def test_a_frame_says_to_poll_again_just_after_the_next_half_minute(app, client,
     device_id, display_secret = register_device()
     draw(device_id, bytes(FRAME_BYTES))
 
-    first = client.get("/api/frame", headers=_auth(display_secret))
-    unchanged = client.get("/api/frame", headers={**_auth(display_secret), "If-None-Match": first.headers["ETag"]})
+    first = client.post("/api/frame", headers=_auth(display_secret))
+    unchanged = client.post("/api/frame", headers={**_auth(display_secret), "If-None-Match": first.headers["ETag"]})
 
     assert (first.status_code, first.headers["Retry-After"]) == (200, "23")
     assert (unchanged.status_code, unchanged.headers["Retry-After"]) == (304, "23")

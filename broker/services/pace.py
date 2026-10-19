@@ -1,8 +1,8 @@
 """How long a screen sleeps after each poll: the one place any poll or refresh time is worked out.
 
 The screen (the ESP32) has no clock: it sleeps for the whole seconds each answer's `Retry-After` gives it. So every
-`GET` and `POST /api/frame` answer, with a frame, a 304 or a 404, carries `sleep_s(now, hints)`, worked out afresh from
-the server's clock, and nothing else computes a poll or refresh time.
+`POST /api/frame` answer (the screen's poll), with a frame, a 304 or a 404, carries `sleep_s(now, hints)`, worked out
+afresh from the server's clock, and nothing else computes a poll or refresh time.
 
 - Renders happen on the minute: a render boundary is every multiple of RENDER_INTERVAL_S from the epoch.
 - The screen polls POLLS_PER_RENDER times as often, LEAD_S after each boundary of that shorter period, so it wakes just

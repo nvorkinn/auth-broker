@@ -73,8 +73,8 @@ def _write(store, device_id: str, picture: bytes, at: datetime, **fields) -> Non
     store.expire(frame_record.key(device_id), FIXTURE["ttl_s"])
 
 
-def _get(client, secret=SECRET, **headers):
-    return client.get("/api/frame", headers={"Authorization": f"Bearer {secret}", **headers})
+def _bare_poll(client, secret=SECRET, **headers):
+    return client.post("/api/frame", headers={"Authorization": f"Bearer {secret}", **headers})
 
 
 def _poll(client, secret=SECRET, **headers):
@@ -96,7 +96,7 @@ def test_the_key_and_the_frame_are_the_fixtures():
     assert _etag(FIXTURE_FRAME) == FIXTURE["fields"]["etag"]
 
 
-@pytest.mark.parametrize("poll", [_get, _poll], ids=["GET", "POST"])
+@pytest.mark.parametrize("poll", [_bare_poll, _poll], ids=["bare", "with a report"])
 def test_the_fixtures_record_is_served_as_it_is(client, register_device, frames_redis, poll):
     device_id, _ = register_device()
     frames_redis.hset(
@@ -134,7 +134,7 @@ def test_the_app_reads_the_frames_with_a_client_that_doesnt_decode():
 # --- serving the record ---------------------------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("poll", [_get, _poll], ids=["GET", "POST"])
+@pytest.mark.parametrize("poll", [_bare_poll, _poll], ids=["bare", "with a report"])
 def test_a_new_record_replaces_the_last(client, register_device, frames_redis, poll):
     device_id, _ = register_device()
     _write(frames_redis, device_id, _frame(0x11), LONG_AGO)
@@ -184,7 +184,7 @@ def test_a_304_from_the_record_never_reads_its_frame(client, register_device, fr
     monkeypatch.setattr(frames_redis, "hmget", recording_hmget)
 
     assert _poll(client, **{"If-None-Match": _quoted(_frame(0x22))}).status_code == 304
-    assert _get(client, **{"If-None-Match": _quoted(_frame(0x22))}).status_code == 304
+    assert _bare_poll(client, **{"If-None-Match": _quoted(_frame(0x22))}).status_code == 304
     assert asked == [["etag", "rendered_at"], ["etag", "rendered_at"]]
 
     asked.clear()
@@ -192,19 +192,7 @@ def test_a_304_from_the_record_never_reads_its_frame(client, register_device, fr
     assert asked == [["etag", "rendered_at"], ["frame"]]
 
 
-def test_head_answers_from_the_record_without_a_body(client, register_device, frames_redis):
-    device_id, _ = register_device()
-    _write(frames_redis, device_id, _frame(0x22), LATER)
-
-    response = client.head("/api/frame", headers={"Authorization": f"Bearer {SECRET}"})
-
-    assert response.status_code == 200
-    assert response.data == b""
-    assert response.headers["ETag"] == _quoted(_frame(0x22))
-    assert response.headers["Content-Length"] == str(frame_record.FRAME_BYTES)
-
-
-@pytest.mark.parametrize("poll", [_get, _poll], ids=["GET", "POST"])
+@pytest.mark.parametrize("poll", [_bare_poll, _poll], ids=["bare", "with a report"])
 def test_a_wildcard_if_none_match_is_a_304_from_the_record(client, register_device, frames_redis, poll):
     device_id, _ = register_device()
     _write(frames_redis, device_id, _frame(0x22), LATER)
@@ -237,7 +225,7 @@ CORRUPT = {
 
 
 @pytest.mark.parametrize("fields", CORRUPT.values(), ids=CORRUPT.keys())
-@pytest.mark.parametrize("poll", [_get, _poll], ids=["GET", "POST"])
+@pytest.mark.parametrize("poll", [_bare_poll, _poll], ids=["bare", "with a report"])
 def test_a_record_that_cant_be_read_is_no_frame_yet(client, register_device, frames_redis, fields, poll):
     device_id, _ = register_device()
     _write(frames_redis, device_id, _frame(0x22), LATER, **fields)
@@ -296,7 +284,7 @@ def test_an_expired_record_is_no_frame_yet(client, register_device, frames_redis
     assert (response.status_code, response.headers["Retry-After"]) == (404, NO_FRAME_RETRY_AFTER)
 
 
-@pytest.mark.parametrize("poll", [_get, _poll], ids=["GET", "POST"])
+@pytest.mark.parametrize("poll", [_bare_poll, _poll], ids=["bare", "with a report"])
 def test_redis_down_is_no_frame_yet_and_logs_only_why(app, client, register_device, logged, poll):
     register_device()
     server = fakeredis.FakeServer()

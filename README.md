@@ -201,7 +201,7 @@ A screen therefore needs no logic beyond:
 
 1. On boot: `POST /api/devices/register {"secret": ..., "width": ..., "height": ...}`
    (201 straight away).
-2. Loop on `GET /api/frame` with `If-None-Match`, handling the status and then
+2. Loop on `POST /api/frame` with `If-None-Match` (and its logs and metrics in the body), handling the status and then
    sleeping for the response's `Retry-After` seconds:
    - 200: draw the frame. `Retry-After` is the refresh interval: 60 s, or 20-59 s while a provider's data is bursty
      (a release is running). Nobody sets it; see [Pace](docs/architecture.md#pace).
@@ -250,8 +250,7 @@ the slug.
 
 | Route | Roles |
 |---|---|
-| `GET /api/frame` (ETag / `If-None-Match` → 304) | display |
-| `POST /api/frame` (JSON `{"metrics": "<InfluxDB line protocol>", "logs": [...]}`; answers like the GET) | display |
+| `POST /api/frame` (JSON `{"metrics": "<InfluxDB line protocol>", "logs": [...]}`; the frame, ETag / `If-None-Match` → 304, or 404) | display |
 
 `POST /api/frame` is the screen's poll with its report attached. The broker forwards
 `metrics` to VictoriaMetrics' `/write` after replacing every literal `{device_id}` in it with the

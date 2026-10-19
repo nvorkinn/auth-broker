@@ -56,8 +56,8 @@ def _put(_client, device_id, frame, at=None):
     )
 
 
-def _get(client, device_id, secret, **headers):
-    return client.get(_url(device_id), headers={"Authorization": f"Bearer {secret}", **headers})
+def _bare_poll(client, device_id, secret, **headers):
+    return client.post(_url(device_id), headers={"Authorization": f"Bearer {secret}", **headers})
 
 
 def _recorded(device_id):
@@ -68,51 +68,51 @@ def test_frame_size_is_one_bit_packed_800x480():
     assert FRAME_BYTES == 48_000
 
 
-@pytest.mark.parametrize("method", ["put", "patch", "delete"])
+@pytest.mark.parametrize("method", ["get", "head", "put", "patch", "delete"])
 def test_frame_endpoint_rejects_other_methods(client, register_device, method):
     device_id, _ = register_device()
     response = getattr(client, method)(_url(device_id), headers=_auth())
     assert response.status_code == 405
 
 
-# --- GET: device auth -----------------------------------------------------------------------------
+# --- the poll: device auth -----------------------------------------------------------------------------
 
 
-def test_get_requires_auth(client, register_device):
+def test_a_poll_requires_auth(client, register_device):
     device_id, _ = register_device()
     _put(client, device_id, _frame())
 
-    response = client.get(_url(device_id))
+    response = client.post(_url(device_id))
 
     assert response.status_code == 401
     assert response.get_json() == {"error": "unauthorized"}
 
 
-def test_get_rejects_wrong_secret(client, register_device):
+def test_a_poll_rejects_wrong_secret(client, register_device):
     device_id, _ = register_device()
     _put(client, device_id, _frame())
 
-    assert _get(client, device_id, "wrong-secret").status_code == 401
+    assert _bare_poll(client, device_id, "wrong-secret").status_code == 401
 
 
-def test_get_unknown_device_is_unauthorized_not_not_found(client):
-    assert _get(client, "does-not-exist", "a-very-long-device-secret-value").status_code == 401
+def test_a_poll_unknown_device_is_unauthorized_not_not_found(client):
+    assert _bare_poll(client, "does-not-exist", "a-very-long-device-secret-value").status_code == 401
 
 
-# --- GET: serving frames --------------------------------------------------------------------------
+# --- the poll: serving frames --------------------------------------------------------------------------
 
 
-def test_get_returns_404_before_any_frame_is_rendered(client, register_device):
+def test_a_poll_returns_404_before_any_frame_is_rendered(client, register_device):
     device_id, secret = register_device()
-    assert _get(client, device_id, secret).status_code == 404
+    assert _bare_poll(client, device_id, secret).status_code == 404
 
 
-def test_get_returns_the_stored_frame(client, register_device):
+def test_a_poll_returns_the_stored_frame(client, register_device):
     device_id, secret = register_device()
     frame = bytes(i % 256 for i in range(FRAME_BYTES))
     _put(client, device_id, frame)
 
-    response = _get(client, device_id, secret)
+    response = _bare_poll(client, device_id, secret)
 
     assert response.status_code == 200
     assert response.data == frame
@@ -121,104 +121,93 @@ def test_get_returns_the_stored_frame(client, register_device):
     assert response.headers["ETag"] == f'"{_etag(frame)}"'
 
 
-def test_get_returns_the_latest_frame_after_an_update(client, register_device):
+def test_a_poll_returns_the_latest_frame_after_an_update(client, register_device):
     device_id, secret = register_device()
     _put(client, device_id, _frame(0x00))
     _put(client, device_id, _frame(0xFF))
 
-    response = _get(client, device_id, secret)
+    response = _bare_poll(client, device_id, secret)
 
     assert response.data == _frame(0xFF)
     assert response.headers["ETag"] == f'"{_etag(_frame(0xFF))}"'
 
 
-def test_get_only_returns_the_devices_own_frame(client, register_device):
+def test_a_poll_only_returns_the_devices_own_frame(client, register_device):
     device_a, secret_a = register_device()
     device_b, secret_b = register_device("another-very-long-device-secret")
     _put(client, device_a, _frame(0x11))
 
-    assert _get(client, device_a, secret_a).data == _frame(0x11)
-    assert _get(client, device_b, secret_b).status_code == 404
+    assert _bare_poll(client, device_a, secret_a).data == _frame(0x11)
+    assert _bare_poll(client, device_b, secret_b).status_code == 404
 
 
-def test_head_returns_headers_without_body(client, register_device):
+# --- the poll: conditional requests --------------------------------------------------------------------
+
+
+def test_a_poll_with_matching_etag_returns_304(client, register_device):
     device_id, secret = register_device()
     _put(client, device_id, _frame())
+    etag = _bare_poll(client, device_id, secret).headers["ETag"]
 
-    response = client.head(_url(device_id), headers={"Authorization": f"Bearer {secret}"})
-
-    assert response.status_code == 200
-    assert response.data == b""
-    assert response.headers["ETag"] == f'"{_etag(_frame())}"'
-
-
-# --- GET: conditional requests --------------------------------------------------------------------
-
-
-def test_get_with_matching_etag_returns_304(client, register_device):
-    device_id, secret = register_device()
-    _put(client, device_id, _frame())
-    etag = _get(client, device_id, secret).headers["ETag"]
-
-    response = _get(client, device_id, secret, **{"If-None-Match": etag})
+    response = _bare_poll(client, device_id, secret, **{"If-None-Match": etag})
 
     assert response.status_code == 304
     assert response.data == b""
     assert response.headers["ETag"] == etag
 
 
-def test_get_with_stale_etag_returns_new_frame(client, register_device):
+def test_a_poll_with_stale_etag_returns_new_frame(client, register_device):
     device_id, secret = register_device()
     _put(client, device_id, _frame(0x00))
-    stale = _get(client, device_id, secret).headers["ETag"]
+    stale = _bare_poll(client, device_id, secret).headers["ETag"]
     _put(client, device_id, _frame(0xFF))
 
-    response = _get(client, device_id, secret, **{"If-None-Match": stale})
+    response = _bare_poll(client, device_id, secret, **{"If-None-Match": stale})
 
     assert response.status_code == 200
     assert response.data == _frame(0xFF)
     assert response.headers["ETag"] != stale
 
 
-def test_get_with_unchanged_frame_rerendered_still_returns_304(client, register_device):
+def test_a_poll_with_unchanged_frame_rerendered_still_returns_304(client, register_device):
     device_id, secret = register_device()
     _put(client, device_id, _frame())
-    etag = _get(client, device_id, secret).headers["ETag"]
+    etag = _bare_poll(client, device_id, secret).headers["ETag"]
     _put(client, device_id, _frame())
 
-    assert _get(client, device_id, secret, **{"If-None-Match": etag}).status_code == 304
+    assert _bare_poll(client, device_id, secret, **{"If-None-Match": etag}).status_code == 304
 
 
-def test_get_with_one_of_several_etags_matching_returns_304(client, register_device):
+def test_a_poll_with_one_of_several_etags_matching_returns_304(client, register_device):
     device_id, secret = register_device()
     _put(client, device_id, _frame())
-    etag = _get(client, device_id, secret).headers["ETag"]
+    etag = _bare_poll(client, device_id, secret).headers["ETag"]
 
-    response = _get(client, device_id, secret, **{"If-None-Match": f'"0000000000000000", {etag}'})
+    response = _bare_poll(client, device_id, secret, **{"If-None-Match": f'"0000000000000000", {etag}'})
 
     assert response.status_code == 304
 
 
-def test_get_with_wildcard_if_none_match_returns_304(client, register_device):
+def test_a_poll_with_wildcard_if_none_match_returns_304(client, register_device):
     device_id, secret = register_device()
     _put(client, device_id, _frame())
 
-    assert _get(client, device_id, secret, **{"If-None-Match": "*"}).status_code == 304
+    assert _bare_poll(client, device_id, secret, **{"If-None-Match": "*"}).status_code == 304
 
 
-def test_conditional_get_still_requires_auth(client, register_device):
+def test_a_conditional_poll_still_requires_auth(client, register_device):
     device_id, secret = register_device()
     _put(client, device_id, _frame())
-    etag = _get(client, device_id, secret).headers["ETag"]
+    etag = _bare_poll(client, device_id, secret).headers["ETag"]
 
-    response = client.get(_url(device_id), headers={"If-None-Match": etag})
+    response = client.post(_url(device_id), headers={"If-None-Match": etag})
 
     assert response.status_code == 401
 
 
-def test_conditional_get_before_any_frame_is_404(client, register_device):
+def test_a_conditional_poll_before_any_frame_is_404(client, register_device):
     device_id, secret = register_device()
-    assert _get(client, device_id, secret, **{"If-None-Match": "*"}).status_code == 404
+    assert _bare_poll(client, device_id, secret, **{"If-None-Match": "*"}).status_code == 404
 
 
 # --- schema and admin -----------------------------------------------------------------------------
@@ -249,7 +238,7 @@ def test_cli_unpair_keeps_the_devices_frame(client, register_device, cli):
 
     assert cli("unpair", device_id).exit_code == 0
 
-    assert _get(client, device_id, secret).data == _frame()
+    assert _bare_poll(client, device_id, secret).data == _frame()
 
 
 def test_cli_unpair_with_config_deletes_the_devices_frame(client, register_device, cli):
@@ -260,7 +249,7 @@ def test_cli_unpair_with_config_deletes_the_devices_frame(client, register_devic
 
     assert cli("unpair", device_id, "--config").exit_code == 0
 
-    assert _get(client, device_id, secret).status_code == 404
+    assert _bare_poll(client, device_id, secret).status_code == 404
     assert _recorded(other_id)
 
 
@@ -713,14 +702,14 @@ def _developer_panel(app, device_id, *, on=True):
 
 
 def _retry_after(client, secret=SECRET):
-    return _get(client, None, secret).headers["Retry-After"]
+    return _bare_poll(client, None, secret).headers["Retry-After"]
 
 
 def _answers(client, device_id):
     """Return (status, Retry-After) of each way a screen polls: GET and POST, plain and with the current ETag."""
-    plain_get = _get(client, device_id, SECRET)
+    plain_get = _bare_poll(client, device_id, SECRET)
     etag = plain_get.headers.get("ETag", '"none"')
-    answers = [plain_get, _get(client, device_id, SECRET, **{"If-None-Match": etag})]
+    answers = [plain_get, _bare_poll(client, device_id, SECRET, **{"If-None-Match": etag})]
     answers += [_post(client, {"logs": []}), _post(client, {"logs": []}, **{"If-None-Match": etag})]
     return [(response.status_code, response.headers.get("Retry-After")) for response in answers]
 

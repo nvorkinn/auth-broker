@@ -115,7 +115,7 @@ def test_forget_deletes_the_device_so_it_must_register_again(app, client, regist
 
     assert cli("forget", device_id).exit_code == 0
 
-    assert client.get("/api/frame", headers=_headers(secret)).status_code == 401
+    assert client.post("/api/frame", headers=_headers(secret)).status_code == 401
     with app.app_context():
         # Its name (the assignment) goes too.
         for table in db.metadata.sorted_tables:
@@ -128,7 +128,7 @@ def test_forget_leaves_other_devices_alone(app, client, register_device, cli):
 
     cli("forget", gone)
 
-    assert client.get("/api/frame", headers=_headers(kept_secret)).status_code == 404  # known, with no frame yet
+    assert client.post("/api/frame", headers=_headers(kept_secret)).status_code == 404  # known, with no frame yet
     with app.app_context():
         assert db.session.get(Device, kept).assignment is not None
 

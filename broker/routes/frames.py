@@ -5,7 +5,6 @@ import logging
 import os
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
-from http import HTTPStatus
 from typing import TYPE_CHECKING
 
 import requests
@@ -43,24 +42,15 @@ logger = logging.getLogger(__name__)
 _executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="forward")
 
 
-@bp.get("/frame")
-@require_device_auth()
-def get_frame(device_id: str) -> ResponseReturnValue:
-    """Serve the screen its current frame.
-
-    The screen polls this. Every answer it should keep polling after carries Retry-After, so its loop is
-    just "handle the status, sleep Retry-After": until just after the next render, before the first frame too (see
-    services/pace.py, the only place a sleep is worked out).
-    """
-    return _frame_response(device_id)
-
-
 @bp.post("/frame")
 @require_device_auth()
 def post_frame(device_id: str) -> ResponseReturnValue:
-    """Answer as the GET does, and forward what the screen logged and measured since its last poll.
+    """Serve the screen its current frame, and forward what it logged and measured since its last poll.
 
-    The screen reports both here to save it a request. Both are forwarded without making the screen wait.
+    The screen polls this, with If-None-Match once it has a frame: 200 with the frame, 304 if it has it, 404 with none
+    yet. Every answer carries Retry-After, so its loop is just "handle the status, sleep Retry-After" (see
+    services/pace.py, the only place a sleep is worked out). It reports its logs and metrics here to save it a
+    request; both are forwarded without making the screen wait.
     """
     body = request.get_json(silent=True)
     if isinstance(body, dict):
@@ -140,16 +130,9 @@ def _frame_response(device_id: str) -> ResponseReturnValue:
     resp = Response(mimetype="application/octet-stream")
     resp.set_etag(shown.etag)
     resp.headers["Retry-After"] = str(sleep_s)
-    if request.method == "POST":
-        # make_conditional only looks at GET and HEAD, so a POST has to answer 304 itself.
-        if request.if_none_match.contains_weak(shown.etag):
-            return Response(
-                status=304, headers={"ETag": resp.headers["ETag"], "Retry-After": resp.headers["Retry-After"]}
-            )
-    else:
-        resp = resp.make_conditional(request)
-        if resp.status_code != HTTPStatus.OK:  # a 304 needs no frame
-            return resp
+    # make_conditional only looks at GET and HEAD, so a POST answers its 304 itself.
+    if request.if_none_match.contains_weak(shown.etag):
+        return Response(status=304, headers={"ETag": resp.headers["ETag"], "Retry-After": resp.headers["Retry-After"]})
     # Only now the 48 KB: a screen that has the picture already never costs reading the record's.
     frame = frame_record.frame_of(device_id, shown.etag)
     if frame is None:
