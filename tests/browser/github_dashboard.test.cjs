@@ -500,3 +500,53 @@ test("Refresh for a section skips background projects and asks for everything wh
     await app.ids.get("refresh-pulls").listeners.click();
     assert.equal(app.calls.at(-1).url, "/github/repositories/alice/project");
 });
+
+function matrixRun(total, jobs = total) {
+    return {
+        id: 9, name: "Release", number: 6, status: "in_progress", branch: "main", attempt: 1,
+        url: "https://github.com/run/9", jobs: [],
+        nodes: [
+            { key: "test", name: "test", state: "running", needs: [], done: 1, total,
+                jobs: Array.from({ length: jobs }, (_, index) => ({ name: `test (${index})`, state: index ? "queued" : "done" })) },
+            { key: "deploy", name: "deploy", state: "queued", needs: ["test"], done: null, total: null },
+        ],
+    };
+}
+const cards = app => app.ids.get("workflows").querySelectorAll(".node");
+const toggle = app => app.ids.get("workflows").querySelectorAll(".matrix-toggle")[0];
+
+test("a matrix of five or fewer jobs is drawn as a card per job, each feeding what needs the matrix", async () => {
+    const app = await harness({ ...idle, active: true, workflows: [matrixRun(5)] });
+    assert.equal(cards(app).length, 6);
+    assert.deepEqual(cards(app).slice(0, 5).map(card => card.title), ["test (0)", "test (1)", "test (2)", "test (3)", "test (4)"]);
+    assert.equal(app.ids.get("workflows").querySelectorAll("path").length, 5);
+    assert.equal(toggle(app).textContent, "Collapse matrix jobs");
+});
+
+test("a matrix of more than five jobs stays one card with a count until expanded", async () => {
+    const app = await harness({ ...idle, active: true, workflows: [matrixRun(6)] });
+    assert.equal(cards(app).length, 2);
+    assert.match(text(cards(app)[0]), /1\/6/);
+    assert.equal(toggle(app).textContent, "Expand matrix jobs");
+    await toggle(app).listeners.click();
+    assert.equal(cards(app).length, 7);
+    assert.equal(toggle(app).textContent, "Collapse matrix jobs");
+});
+
+test("the matrix choice survives refreshes, and small matrices can be collapsed", async () => {
+    const app = await harness({ ...idle, active: true, workflows: [matrixRun(3)] });
+    assert.equal(cards(app).length, 4);
+    await toggle(app).listeners.click();
+    assert.equal(cards(app).length, 2);
+    app.advance(10000);
+    await app.tick();
+    assert.equal(cards(app).length, 2);
+    assert.equal(toggle(app).textContent, "Expand matrix jobs");
+});
+
+test("workflows without a matrix have no matrix toggle", async () => {
+    const run = matrixRun(3);
+    run.nodes = run.nodes.slice(1);
+    const app = await harness({ ...idle, active: true, workflows: [run] });
+    assert.equal(toggle(app), undefined);
+});
