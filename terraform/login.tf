@@ -72,14 +72,19 @@ import {
   id = local.ids.stages["default-authentication-identification"]
 }
 
-# Brands: point both at the recovery flow; nikolaivorkinn.com carries the branding.
+# Brands: point both at the login and recovery flows; nikolaivorkinn.com carries the branding. A brand naming no
+# authentication flow falls back to the first flow with that designation whose policies pass, by slug. That used
+# to land here: google.tf's broker-source-authentication sorts earlier but is gated by a policy. passwordless.tf
+# added broker-passwordless, which sorts earlier still and is gated by nothing, so it won the fallback and became
+# the login screen. Both brands name the flow outright so the fallback never decides this again.
 resource "authentik_brand" "default" {
-  domain        = "authentik-default"
-  flow_recovery = authentik_flow.recovery.uuid
+  domain              = "authentik-default"
+  flow_authentication = authentik_flow.authentication.uuid
+  flow_recovery       = authentik_flow.recovery.uuid
 
   # Not owned by this config, so left as Authentik has it.
   lifecycle {
-    ignore_changes = [branding_favicon, branding_logo, default, flow_authentication, flow_invalidation, flow_user_settings]
+    ignore_changes = [branding_favicon, branding_logo, default, flow_invalidation, flow_user_settings]
   }
 }
 
@@ -94,6 +99,7 @@ resource "authentik_brand" "nikolaivorkinn" {
   branding_logo                    = "/static/dist/assets/countdown/countdown-pill.svg"
   branding_favicon                 = "countdown-favicon.svg.svg"
   branding_default_flow_background = "820461.jpg"
+  flow_authentication              = authentik_flow.authentication.uuid
   flow_recovery                    = authentik_flow.recovery.uuid
 }
 
