@@ -288,7 +288,10 @@ def test_waiting_workflow_includes_unstarted_nodes_edges_and_job_steps(api):
     assert [(node["state"], node["needs"]) for node in result["nodes"]] == [("done", []), ("queued", ["build"])]
     assert result["jobs"][0]["steps"][0]["name"] == "Compile"
     assert result["pending_deployments"] == [{"id": 10, "name": "production", "can_approve": True, "wait_timer": 0}]
-    assert "ref=abc" in responses.calls[-2].request.url
+    assert any(
+        "/contents/.github/workflows/release.yml" in call.request.url and "ref=abc" in call.request.url
+        for call in responses.calls
+    )
 
 
 @responses.activate
