@@ -12,13 +12,14 @@ draws the change at once. Either way, the render pool's list of screens (service
 them.
 
 Under `maxmemory-policy volatile-lru` Redis evicts only keys with a TTL, so it never evicts these, and they count
-against the 128 MB for good: a copy is about 700 bytes of JSON (tests/fixtures/config_store.json), about 1 KB with
+against the 128 MB for good: a copy is about 700 bytes of JSON (the store contract's config_store.json), about 1 KB with
 Redis's own overhead, so a thousand screens take about 1 MB.
 """
 
 import logging
 import threading
 
+from countdown_api import keys as store_keys
 from flask import Flask, current_app
 from redis import Redis, RedisError
 from sqlalchemy import select
@@ -29,14 +30,14 @@ from broker.services import render_jobs, render_screens, renderer_config
 
 logger = logging.getLogger(__name__)
 
-PREFIX = "v1:config:"
+PREFIX = store_keys.CONFIG_PREFIX
 # How often each broker process rewrites the copies, and the render pool's screens, from the database anyway (resync).
 RESYNC_S = 60
 
 
 def key(device_id: str) -> str:
-    """Return the key of a device's config in the store, e.g. `v1:config:a1b2c3d4e5f6`."""
-    return f"{PREFIX}{device_id}"
+    """Return the key of a device's config in the store, e.g. `v1:config:a1b2c3d4e5f6` (the store contract's)."""
+    return store_keys.config(device_id)
 
 
 def publish(device_id: str) -> None:

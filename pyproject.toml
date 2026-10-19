@@ -21,9 +21,9 @@ dependencies = [
     "redis",
     # The IANA time zones for zoneinfo (the glow-provider asks Glowmarkt in each screen's), whatever the image has.
     "tzdata",
-    # The API contract and the code generated from it: the vendor/countdown-api submodule, installed editable
+    # The store contract and the code generated from it: the vendor/countdown-api submodule, installed editable
     # (see [tool.uv.sources]).
-    "countdown-api[server]",
+    "countdown-api",
 ]
 
 [dependency-groups]

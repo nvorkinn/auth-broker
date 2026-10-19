@@ -44,7 +44,7 @@ def frames_redis(app):
 
 
 def _put(_client, device_id, frame, at=None):
-    """Draw the screen's frame as the render pool does: its record in Redis (tests/fixtures/frame_record.json)."""
+    """Draw the screen's frame as the render pool does: its record in Redis (the store contract's frame_record.json)."""
     _FRAMES.delete(frame_record.key(device_id))
     _FRAMES.hset(
         frame_record.key(device_id),

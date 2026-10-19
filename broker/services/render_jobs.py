@@ -5,10 +5,9 @@ job for it is on `v1:render:jobs`. Its ticker queues every pooled screen on the 
 queue one sooner when what it shows has just changed (the developer provider on each cycle of a release, so a pooled
 screen follows the release at the burst's pace).
 
-`enqueue` runs the pool's own enqueue script (countdown_core.store.render_queue's `_ENQUEUE`, copied here byte for byte,
-and pinned by tests/fixtures/render_enqueue.json, a copy of pi-dashboard's): `SET v1:render:queued:<id> NX` with
-QUEUED_TTL_MS, and only if that set it, `LPUSH v1:render:jobs <id>`. So a screen is in the queue at most once however
-many ask.
+`enqueue` runs the store contract's enqueue script (countdown_api.scripts.ENQUEUE, which the pool runs too):
+`SET v1:render:queued:<id> NX` with QUEUED_TTL_MS, and only if that set it, `LPUSH v1:render:jobs <id>`. So a screen
+is in the queue at most once however many ask.
 
 Only the screens the pool renders are queued: those in `v1:render:screens` (services/render_screens.py), read first.
 The pool's worker would drop a job for any other, and with no pool running nothing would take jobs off the list, which
@@ -21,6 +20,8 @@ which quotes its keys and values) and not raised, and the next minute's tick dra
 import logging
 from typing import TYPE_CHECKING
 
+from countdown_api import keys as store_keys
+from countdown_api import scripts
 from redis import RedisError
 
 if TYPE_CHECKING:
@@ -30,39 +31,28 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# pi-dashboard's keys.RENDER_JOBS: the job queue, a list of device ids.
-JOBS = "v1:render:jobs"
-# pi-dashboard's keys.RENDER_SCREENS: the screens the pool renders, a hash of device id to slug.
-SCREENS = "v1:render:screens"
-# pi-dashboard's render_queue.QUEUED_TTL_MS: the queued flag lasts the ticker's minute, so a worker that died between
-# the pop and the claim keeps the screen out of the queue for no longer than that.
-QUEUED_TTL_MS = 60_000
+# The store contract's (countdown_api.keys), as pi-dashboard's render pool reads them. The job queue, a list of device
+# ids:
+JOBS = store_keys.RENDER_JOBS
+# The screens the pool renders, a hash of device id to slug:
+SCREENS = store_keys.RENDER_SCREENS
+# The queued flag lasts the ticker's minute, so a worker that died between the pop and the claim keeps the screen out
+# of the queue for no longer than that.
+QUEUED_TTL_MS = store_keys.RENDER_QUEUED_TTL_MS
 
 
 def queued_key(device_id: str) -> str:
     """Return the flag that a job for the screen is in the queue, e.g. `v1:render:queued:a1b2c3d4e5f6`.
 
-    pi-dashboard's keys.render_queued.
+    The store contract's (countdown_api.keys.render_queued).
     """
-    return f"v1:render:queued:{device_id}"
+    return store_keys.render_queued(device_id)
 
 
-# Copied byte for byte from pi-dashboard's countdown_core/store/render_queue.py (tests/test_render_jobs.py checks it
-# against tests/fixtures/render_enqueue.json). Redis's clock, in Unix milliseconds, as a string.
-_NOW_MS = "local t = redis.call('TIME')\nlocal now_ms = t[1] .. string.format('%03d', math.floor(t[2] / 1000))\n"
-
+# The store contract's enqueue script (countdown-api's lua/enqueue.lua), which pi-dashboard's render pool runs too.
 # KEYS: queued, jobs. ARGV: the device id, the queued flag's TTL. Returns 1 if it queued the screen, 0 if it was queued
 # already.
-_ENQUEUE = (
-    _NOW_MS
-    + """
-if redis.call('SET', KEYS[1], now_ms, 'NX', 'PX', ARGV[2]) then
-  redis.call('LPUSH', KEYS[2], ARGV[1])
-  return 1
-end
-return 0
-"""
-)
+_ENQUEUE = scripts.ENQUEUE.source
 
 
 def enqueue(client: Redis, device_ids: Iterable[str]) -> int:

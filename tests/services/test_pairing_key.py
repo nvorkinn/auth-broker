@@ -1,7 +1,7 @@
 """A device's live pairing code in the store, `v1:pairing:<device id>` (broker/services/pairing_key.py).
 
 Through the real routes and `flask devices` commands, with the broker's Redis a fakeredis (TTLs and all).
-tests/fixtures/pairing_key.json is the stored shape, which pi-dashboard's render reads: both repositories' tests read
+The contract's pairing_key.json is the stored shape, which pi-dashboard's render reads: both repositories' tests read
 that file.
 """
 
@@ -13,13 +13,14 @@ from unittest.mock import patch
 import fakeredis
 import pytest
 import redis
+from countdown_api import fixtures
 
 from broker.db import db
 from broker.models import Device, DeviceConfig
 from broker.services import config_store, pairing, pairing_key
 
 ROOT = Path(__file__).parent.parent.parent
-FIXTURE = json.loads((ROOT / "tests" / "fixtures" / "pairing_key.json").read_text())
+FIXTURE = fixtures.load("pairing_key.json")
 
 
 @pytest.fixture

@@ -31,6 +31,7 @@ from typing import TYPE_CHECKING, Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import redis
+from countdown_api import keys as store_keys
 from cryptography.fernet import InvalidToken
 from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
@@ -51,8 +52,8 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger("broker.providers.glow")
 
-SOURCE = "glow"
-SUB_CHANGED = "v1:sub:changed"
+SOURCE = store_keys.GLOW
+SUB_CHANGED = store_keys.SUB_CHANGED
 # Glowmarkt has a new half-hour's reading at most every 30 minutes (DCC data often lags by hours), and the panel's
 # pages are hours, days and months: every 15 minutes keeps the open hour's bar within a quarter of an hour, at three
 # readings requests per device, fewer than a renderer's own (each page every 10 minutes).
@@ -61,8 +62,8 @@ INTERVAL_S = 15 * 60
 # slowly (a new half-hour at most every 30 minutes, DCC data often hours late), so Glowmarkt failing for hours changes
 # nothing on the screens, while after a day without a fetch (the provider down, or Glowmarkt failing all day) the key
 # is gone and the energy panel says it's not available, rather than draw readings that old. This TTL is the only
-# expiry: the renderers keep no copy of their own.
-TTL_S = 24 * 60 * 60
+# expiry: the renderers keep no copy of their own. The store contract's.
+TTL_S = store_keys.ENERGY_TTL_S
 # How long to wait before asking Redis again for the nudges, when it can't be reached.
 RESUBSCRIBE_S = 5
 # The renderer's default zone when its config has none (the countdown-api contract's).
@@ -70,8 +71,8 @@ DEFAULT_ZONE = "Europe/London"
 
 
 def energy_key(device_id: str) -> str:
-    """Return the key of a device's energy readings (countdown_core.store.keys.energy in pi-dashboard)."""
-    return f"v1:energy:{device_id}"
+    """Return the key of a device's energy readings (the store contract's)."""
+    return store_keys.energy(device_id)
 
 
 @dataclass(frozen=True)

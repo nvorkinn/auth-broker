@@ -34,6 +34,7 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 import requests
+from countdown_api import keys as store_keys
 from sqlalchemy import select
 
 from broker import provider_loop
@@ -57,19 +58,20 @@ BURST_INTERVAL_S = 20
 # The refresh pace asked of the screen while a release shows: what the renderer will not go under either.
 PACE_S = 20
 # The pace key lapses unless the next cycle renews it: three burst cycles, so one missed poll doesn't slow the screen.
-PACE_TTL_S = 60
+PACE_TTL_S = store_keys.PACE_TTL_S
 # Kept long enough that a provider that is down for a while shows as missing data (a panel that says so), not stale.
-TTL_S = 15 * 60
+# The store contract's, as are the keys.
+TTL_S = store_keys.DEVELOPER_TTL_S
 
 
 def stored_key(device_id: str) -> str:
-    """Return the key of a device's developer panel (pi-dashboard's store.keys.developer)."""
-    return f"v1:developer:{device_id}"
+    """Return the key of a device's developer panel (the store contract's)."""
+    return store_keys.developer(device_id)
 
 
 def pace_key(device_id: str) -> str:
-    """Return the key of the pace the developer provider asks for (pi-dashboard's store.keys.pace)."""
-    return f"v1:pace:developer:{device_id}"
+    """Return the key of the pace the developer provider asks for (the store contract's)."""
+    return store_keys.pace(store_keys.DEVELOPER, device_id)
 
 
 @dataclass(frozen=True)

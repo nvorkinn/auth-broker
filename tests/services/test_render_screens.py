@@ -1,25 +1,24 @@
 """The render pool's list of screens, `v1:render:screens` (broker/services/render_screens.py), as the broker writes it.
 
-tests/fixtures/render_screens.json is the hash's shape, which pi-dashboard's render pool reads (keys.RENDER_SCREENS):
+The contract's render_screens.json is the hash's shape, which pi-dashboard's render pool reads (keys.RENDER_SCREENS):
 both repositories' tests read that file. The rest goes through the real routes and `flask devices` commands, with the
 broker's Redis a fakeredis.
 """
 
-import json
 import threading
 from datetime import UTC, datetime, timedelta
-from pathlib import Path
 from unittest.mock import patch
 
 import fakeredis
 import pytest
 import redis
+from countdown_api import fixtures
 
 from broker.db import db
 from broker.models import Device, DeviceConfig, RendererAssignment
 from broker.services import assignments, config_store, pairing, render_jobs, render_screens
 
-FIXTURE = json.loads((Path(__file__).parent.parent / "fixtures" / "render_screens.json").read_text())
+FIXTURE = fixtures.load("render_screens.json")
 SCREENS = FIXTURE["key"]
 
 

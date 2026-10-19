@@ -4,6 +4,7 @@ import re
 from http import HTTPStatus
 from typing import TYPE_CHECKING, Any
 
+from countdown_api import keys as store_keys
 from cryptography.fernet import InvalidToken
 from flask import Blueprint, Response, current_app, g, jsonify, redirect, render_template, request, url_for
 from redis import Redis, RedisError
@@ -88,11 +89,11 @@ def _write_subscriptions_to_redis() -> None:
     try:
         with redis.pipeline(transaction=True) as pipe:
             for name, members in subs.items():
-                key = f"v1:sub:{name}"
+                key = store_keys.subscription(name)
                 pipe.delete(key)
                 if members:
                     pipe.sadd(key, *members)
-            pipe.publish("v1:sub:changed", "")
+            pipe.publish(store_keys.SUB_CHANGED, "")
             pipe.execute()
     except RedisError as e:
         # The error's type only: a failed pipeline's text quotes its commands, and SADD v1:sub:postcode's has postcodes.

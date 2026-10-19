@@ -14,6 +14,7 @@ import secrets
 import string
 from datetime import UTC, datetime, timedelta
 
+from countdown_api import keys as store_keys
 from flask import current_app
 from sqlalchemy import delete, or_, select
 
@@ -24,7 +25,8 @@ from broker.services import assignments, device_keys, pairing_key, render_jobs
 # Excludes visually ambiguous characters (0/O, 1/I/L) since this gets typed in by hand.
 CODE_ALPHABET = "".join(c for c in string.ascii_uppercase + string.digits if c not in "0O1IL")
 CODE_LENGTH = 6
-CODE_TTL = timedelta(minutes=10)
+# Ten minutes: the store contract's TTL of the code's key (services/pairing_key.py), which lapses with it.
+CODE_TTL = timedelta(seconds=store_keys.PAIRING_TTL_S)
 
 
 def token_for(secret_hash: str) -> str:

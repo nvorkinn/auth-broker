@@ -12,7 +12,7 @@ The record is a Redis hash, so the small fields can be read without the frame:
 - `rendered_at`: when the pool first wrote this picture, ISO 8601 with its UTC offset.
 
 A screen that has the record's picture gets its 304 from `etag` alone (`head`); only one that doesn't costs reading
-the 48 KB (`frame_of`). A record that isn't what tests/fixtures/frame_record.json pins (a field missing, an etag
+the 48 KB (`frame_of`). A record that isn't what the store contract's frame_record.json pins (a field missing, an etag
 that isn't 16 hex digits, a time without its offset, a frame that isn't 48,000 bytes hashing to its etag) is no
 record. The pool gives each record a TTL of a day from its last change (`volatile-lru` may evict it before then), and
 writes it again at its next render; meanwhile, as after a Redis restart, the screen is told there's no frame yet and
@@ -30,6 +30,7 @@ from datetime import UTC, datetime
 from hashlib import blake2b
 from typing import TYPE_CHECKING
 
+from countdown_api import keys as store_keys
 from flask import current_app
 from redis import RedisError
 
@@ -38,7 +39,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-PREFIX = "v1:frame:"
+PREFIX = store_keys.FRAME_PREFIX
 # The hash's fields.
 FRAME, ETAG, RENDERED_AT = "frame", "etag", "rendered_at"
 # 1-bit packed 800x480.
@@ -56,8 +57,8 @@ class StoredFrame:
 
 
 def key(device_id: str) -> str:
-    """Return the key of a screen's record, e.g. `v1:frame:a1b2c3d4e5f6` (pi-dashboard's store.keys.frame)."""
-    return f"{PREFIX}{device_id}"
+    """Return the key of a screen's record, e.g. `v1:frame:a1b2c3d4e5f6` (the store contract's)."""
+    return store_keys.frame(device_id)
 
 
 def head(device_id: str) -> StoredFrame | None:

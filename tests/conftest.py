@@ -302,7 +302,7 @@ def config_of(app):
 def draw(app):
     """Return a function that draws a screen's frame as the render pool does: its record in Redis.
 
-    draw(device_id, frame, at=None) writes `v1:frame:<device id>` (the shape tests/fixtures/frame_record.json pins) to
+    draw(device_id, frame, at=None) writes `v1:frame:<device id>` (the shape the contract's frame_record.json pins) to
     the app's bytes Redis, with `at` (default now) as when it was drawn.
     """
 

@@ -10,6 +10,7 @@ from unittest.mock import patch
 import fakeredis
 import pytest
 import redis
+from countdown_api import fixtures
 
 from broker.db import db
 from broker.models import Device, DeviceConfig, GitHubToken, GlowmarktCredentials, SpotifyToken
@@ -17,7 +18,7 @@ from broker.services import config_store, pairing, render_jobs
 
 ROOT = Path(__file__).parent.parent.parent
 # The stored shape, which pi-dashboard's renderer reads: both repositories' tests read this file.
-FIXTURE = json.loads((ROOT / "tests" / "fixtures" / "config_store.json").read_text())
+FIXTURE = fixtures.load("config_store.json")
 
 
 @pytest.fixture
@@ -45,7 +46,7 @@ def nudges(store):
 
 
 def _add_fixture_device(app) -> str:
-    """Add the device tests/fixtures/config_store.json is the stored config of, paired; return its id."""
+    """Add the device the store contract's config_store.json is the stored config of, paired; return its id."""
     settings = dict(FIXTURE["settings"])
     glowmarkt = settings.pop("glowmarkt")
     device_id = FIXTURE["device_id"]

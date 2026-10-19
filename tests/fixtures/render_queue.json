@@ -1,8 +1,0 @@
-{
-  "about": "The render pool's job queue, as anything outside the pool queues a job (pi-dashboard's docs/stateless-renderers.md, \"The pool, the queue and the render function\"): the enqueue script's SHA1 (the hex SHA1 of its UTF-8 text, which is what EVALSHA calls it by), the keys it's called with (KEYS[1] the queued flag, KEYS[2] the job list) and its arguments (ARGV[1] the device id, ARGV[2] the flag's TTL in ms). pi-dashboard's countdown_core.store.render_queue owns the script; auth-broker's broker/services/render_jobs.py is a byte-for-byte copy. Both repositories' tests check their own script and keys against this file (tests/fixtures/render_queue.json in auth-broker, countdown/tests/fixtures/render_queue.json in pi-dashboard): change both together.",
-  "device_id": "a1b2c3d4e5f6",
-  "enqueue_sha1": "57fce79550eba98a8b28791d7ff5bd7fe69560e9",
-  "jobs_key": "v1:render:jobs",
-  "queued_key": "v1:render:queued:a1b2c3d4e5f6",
-  "queued_ttl_ms": 60000
-}

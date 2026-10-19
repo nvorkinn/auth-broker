@@ -1,12 +1,10 @@
 """The covers the music provider stores (broker/album_art.py): which size, under which key, and when it's fetched.
 
-tests/fixtures/music_art.json is the keys stored for music_player.json, each holding music_art.jpg's bytes in these
+The contract's music_art.json is the keys stored for music_player.json, each holding music_art.jpg's bytes in these
 tests: pi-dashboard's renderer tests read copies of the same files, and find the covers by the same keys.
 """
 
-import json
 import re
-from pathlib import Path
 from unittest.mock import patch
 
 import fakeredis
@@ -14,14 +12,14 @@ import pytest
 import redis
 import requests
 import responses
+from countdown_api import fixtures
 
 from broker import album_art
 from broker.album_art import ART_TTL_S, MAX_ART_BYTES, AlbumArt, art_key, art_url, art_urls
 
-FIXTURES = Path(__file__).parent / "fixtures"
-PLAYER = json.loads((FIXTURES / "music_player.json").read_text())
-COVERS = json.loads((FIXTURES / "music_art.json").read_text())
-ART = (FIXTURES / "music_art.jpg").read_bytes()
+PLAYER = fixtures.load("music_player.json")
+COVERS = fixtures.load("music_art.json")
+ART = fixtures.read_bytes("music_art.jpg")
 SPOTIFY_URL = COVERS["spotify"]["url"]
 APPLE_URL = COVERS["apple_music"]["url"]
 

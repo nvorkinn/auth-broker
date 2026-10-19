@@ -32,6 +32,7 @@ from typing import TYPE_CHECKING
 
 import redis
 import requests
+from countdown_api import keys as store_keys
 from redis.exceptions import RedisError
 from sqlalchemy import or_, select
 
@@ -52,11 +53,11 @@ logger = logging.getLogger("broker.spotify_provider")
 # What's playing: fetched every minute. That's as often as a renderer's music panel moves on today (and it shows the
 # player only every other page), so the provider makes no more Spotify calls than the renderers it stands in for.
 INTERVAL_S = 60
-# Three missed cycles, then the player is gone (and the renderer's panel says it's not available).
-PLAYER_TTL_S = 3 * INTERVAL_S
-# The top lists change slowly: fetched every half hour, and kept for four missed fetches.
+# Three missed cycles, then the player is gone (and the renderer's panel says it's not available). The store contract's.
+PLAYER_TTL_S = store_keys.SPOTIFY_TTL_S
+# The top lists change slowly: fetched every half hour, and kept for four missed fetches (the store contract's TTL).
 TOP_INTERVAL_S = 30 * 60
-TOP_TTL_S = 4 * TOP_INTERVAL_S
+TOP_TTL_S = store_keys.SPOTIFY_TOP_TTL_S
 # What the renderer's top pages show: Spotify's time ranges, and five of each.
 TIME_RANGES = ("long_term", "short_term")
 TOP_LIMIT = 5
@@ -69,7 +70,7 @@ APPLE_MUSIC = "apple_music"
 # again until it says (Retry-After, in seconds), or until this long when it doesn't say.
 DEFAULT_BACKOFF_S = 60
 
-SUB_CHANGED = "v1:sub:changed"
+SUB_CHANGED = store_keys.SUB_CHANGED
 # How long each wait for a `v1:sub:changed` message lasts, so a stop is noticed within it.
 LISTEN_S = 1.0
 # How long to wait before subscribing again after losing Redis.
@@ -77,13 +78,13 @@ RESUBSCRIBE_S = 5.0
 
 
 def player_key(device_id: str) -> str:
-    """Return the key of what a device's music services are playing (pi-dashboard's store.keys.spotify)."""
-    return f"v1:spotify:{device_id}"
+    """Return the key of what a device's music services are playing (the store contract's)."""
+    return store_keys.spotify(device_id)
 
 
 def top_key(device_id: str) -> str:
-    """Return the key of a device's top tracks and artists (pi-dashboard's store.keys.spotify_top)."""
-    return f"v1:spotify-top:{device_id}"
+    """Return the key of a device's top tracks and artists (the store contract's)."""
+    return store_keys.spotify_top(device_id)
 
 
 def next_tick(now: float, interval_s: float) -> float:

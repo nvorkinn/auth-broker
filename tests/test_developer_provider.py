@@ -1,7 +1,7 @@
 """The developer provider (broker/developer_provider.py): what it writes to the store and the pace it asks for.
 
-tests/fixtures/developer.json is the stored contract: pi-dashboard's renderer tests read the same file (copied into its
-tests), so a change to either side that breaks the other shows up in both.
+The store contract's developer.json (countdown_api.fixtures) is the stored value: pi-dashboard's renderer tests read the
+same file, so a change to either side that breaks the other shows up in both.
 """
 
 import json
@@ -9,13 +9,13 @@ import shutil
 import threading
 import time
 from datetime import UTC, datetime
-from pathlib import Path
 from unittest.mock import Mock, patch
 
 import fakeredis
 import pytest
 import redis
 import requests
+from countdown_api import fixtures
 from cryptography.fernet import Fernet
 from sqlalchemy import text
 from sqlalchemy.exc import OperationalError
@@ -37,7 +37,7 @@ from broker.provider_loop import SUB_CHANGED, next_tick, read_only_app
 from broker.services import render_jobs
 from broker.services.render_jobs import JOBS, SCREENS, queued_key
 
-FIXTURE = json.loads((Path(__file__).parent / "fixtures" / "developer.json").read_text())
+FIXTURE = fixtures.load("developer.json")
 FETCHED_AT = datetime.fromisoformat(FIXTURE["fetched_at"]).timestamp()
 GITHUB = FIXTURE["github"]
 # A release that just finished, still on the panel for github.SHOWN_AFTER.

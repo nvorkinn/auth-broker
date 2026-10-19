@@ -22,6 +22,7 @@ from contextlib import suppress
 from typing import TYPE_CHECKING
 
 import redis
+from countdown_api import keys as store_keys
 from flask import Flask
 from redis.exceptions import RedisError
 
@@ -30,7 +31,7 @@ from broker.db import init_read_only_app
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-SUB_CHANGED = "v1:sub:changed"
+SUB_CHANGED = store_keys.SUB_CHANGED
 # How long each wait for a `v1:sub:changed` message lasts, so a stop is noticed within it.
 LISTEN_S = 1.0
 # How long to wait before subscribing again after losing Redis.
