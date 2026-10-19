@@ -28,13 +28,9 @@ jobs:
         with:
           submodules: true
 
-      - uses: actions/setup-python@v7
-        with:
-          python-version: "3.14"
-
-      # setup-uv also caches uv's downloads and built wheels in the GitHub Actions cache, keyed on (among others)
-      # pyproject.toml and uv.lock, so a new cache is saved whenever the dependencies change. The image job below
-      # reads the same cache for the broker's build.
+      # uv installs the Python .python-version names (3.14) itself. setup-uv also caches uv's downloads and built
+      # wheels in the GitHub Actions cache, keyed on (among others) pyproject.toml and uv.lock, so a new cache is saved
+      # whenever the dependencies change. The image job below reads the same cache for the broker's build.
       - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
 
       - name: Install redis-server
@@ -117,13 +113,7 @@ jobs:
           submodules: true
 
       # The broker's image installs its dependencies with uv: given the test jobs' uv cache, it reads what it needs
-      # from there. Python 3.14 as in the test jobs, as it's part of setup-uv's cache key. Restore only: this job adds
-      # nothing to the cache, so it mustn't save it under the test jobs' key.
-      - uses: actions/setup-python@v7
-        if: matrix.image == 'broker'
-        with:
-          python-version: "3.14"
-
+      # from there. Restore only: this job adds nothing to the cache, so it mustn't save it under the test jobs' key.
       - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         if: matrix.image == 'broker'
         with:
