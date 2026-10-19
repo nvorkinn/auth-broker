@@ -41,6 +41,7 @@ from broker.services import (
     pace,
     pairing,
     render_jobs,
+    render_screens,
     stops,
     weather_place,
 )
@@ -350,6 +351,8 @@ def name_screen() -> ResponseReturnValue:
     if request.method == "POST":
         try:
             assignments.create(device, slug, current_username())
+            # Its slug lists it in the render pool (services/render_screens.py).
+            render_screens.write()
             return redirect(url_for("pages.device_config", device_id=g.device_id))
         except assignments.InvalidSlugError:
             error = (
@@ -439,6 +442,7 @@ def request_renderer(device_id: str) -> ResponseReturnValue:
         return jsonify(
             error="slug is taken" if isinstance(e, assignments.SlugTakenError) else "already has a renderer"
         ), 409
+    render_screens.write()
     return jsonify(id=assignment.id, slug=assignment.slug, status=assignment.status), 201
 
 

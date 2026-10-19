@@ -6,10 +6,12 @@ a change reaches a renderer at once: after writing a device's copy, the broker p
 `v1:config:changed`, which its renderer listens for. The renderer asks GET /api/config only when there's no copy.
 
 The copies have no TTL. They're rebuilt from the database (publish_all) on every config save, as the broker starts
-(gunicorn.conf.py) and by `flask config publish`, so one Redis lost comes back; and one copy at a time (publish) when
-a device's pairing changes. A device that should have no copy (not paired, a pairing code to show, deleted) has its
-key removed. Only what changed is written, and only those devices are nudged, on the channel and with a render job
-for the render pool (services/render_jobs.py), which listens to no channel.
+(gunicorn.conf.py), every RESYNC_S in each broker process (start_resync, also from gunicorn.conf.py) and by `flask
+config publish`, so one Redis lost comes back within a minute; and one copy at a time (publish) when a device's pairing
+changes. A device that should have no copy (not paired, a pairing code to show, deleted) has its key removed. Only
+what changed is written, and only those devices are nudged, on the channel and with a render job for the render pool
+(services/render_jobs.py), which listens to no channel. Either way, the render pool's list of screens
+(services/render_screens.py) is rewritten with them.
 
 Under `maxmemory-policy volatile-lru` Redis evicts only keys with a TTL, so it never evicts these, and they count
 against the 128 MB for good: a copy is about 700 bytes of JSON (tests/fixtures/config_store.json), about 1 KB with
@@ -17,18 +19,21 @@ Redis's own overhead, so a thousand screens take about 1 MB.
 """
 
 import logging
+import threading
 
-from flask import current_app
+from flask import Flask, current_app
 from redis import Redis, RedisError
 from sqlalchemy import select
 
 from broker.db import db
 from broker.models import Device
-from broker.services import render_jobs, renderer_config
+from broker.services import render_jobs, render_screens, renderer_config
 
 logger = logging.getLogger(__name__)
 
 PREFIX = "v1:config:"
+# How often each broker process rewrites the copies, and the render pool's screens, from the database anyway (resync).
+RESYNC_S = 60
 # The pub/sub channel the broker publishes a device's id on after changing its copy.
 CHANGED = "v1:config:changed"
 
@@ -45,6 +50,8 @@ def publish(device_id: str) -> None:
     """
     device = db.session.get(Device, device_id)
     _write({key(device_id): _stored(device) if device is not None else None})
+    # Its pairing changing (or its being forgotten) changes whether the render pool draws it.
+    render_screens.write()
 
 
 def publish_all() -> None:
@@ -54,6 +61,34 @@ def publish_all() -> None:
     """
     wanted = {key(device.device_id): _stored(device) for device in db.session.scalars(select(Device))}
     _write(wanted, sweep=True)
+    # And the screens the render pool draws, which are the configured ones (services/render_screens.py).
+    render_screens.write()
+
+
+def resync_forever(app: Flask, stop: threading.Event, interval_s: float = RESYNC_S) -> None:
+    """Every `interval_s`, until `stop` is set, rewrite every copy and the render pool's screens from the database.
+
+    publish_all() writes only what differs, so this costs a read of each when nothing has changed. It's what brings
+    back a Redis that restarted (it keeps nothing on disk), and lists a screen in the pool once it's seen again after
+    going quiet. A failure is logged and the next round tries again.
+    """
+    while not stop.wait(interval_s):
+        try:
+            with app.app_context():
+                publish_all()
+        except Exception:
+            # The database, say: the thread must outlive it, or nothing would rewrite the store until a restart.
+            logger.exception("Couldn't rewrite the screens' configs from the database; trying again in %ss", interval_s)
+
+
+def start_resync(app: Flask) -> threading.Thread:
+    """Start resync_forever on `app` in a daemon thread of its own (it ends with the process), and return the thread.
+
+    gunicorn.conf.py starts one in each broker worker; more than one at a time is harmless, as each writes the same.
+    """
+    thread = threading.Thread(target=resync_forever, args=(app, threading.Event()), name="config-resync", daemon=True)
+    thread.start()
+    return thread
 
 
 def _stored(device: Device) -> str | None:

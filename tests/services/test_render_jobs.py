@@ -26,7 +26,7 @@ import redis
 
 from broker.db import db
 from broker.models import Device
-from broker.services import config_store, pairing, pairing_key, render_jobs
+from broker.services import config_store, pairing, pairing_key, render_jobs, render_screens
 from broker.services.render_jobs import JOBS, QUEUED_TTL_MS, SCREENS, enqueue, queued_key
 
 FIXTURES = Path(__file__).parent.parent / "fixtures"
@@ -294,9 +294,15 @@ def test_a_rebuild_queues_only_the_screens_whose_copy_changed(app, store, paired
     assert _jobs(store) == [device_id]
 
 
-def test_a_save_of_a_screen_with_its_own_renderer_queues_nothing(store, paired_client):
+def test_a_save_of_a_screen_the_pool_doesnt_draw_queues_nothing(app, store, paired_client):
     client, device_id, _ = paired_client
-    _pool(store, "another-screen")
+    # A screen with no slug isn't in the pool's list (services/render_screens.py).
+    with app.app_context():
+        db.session.delete(db.session.get(Device, device_id).assignment)
+        db.session.commit()
+        render_screens.write()
+    assert store.hgetall(render_jobs.SCREENS) == {}
+    _take_jobs(store)
 
     client.post("/device", data={"style": "card"})
 
