@@ -119,7 +119,7 @@ jobs:
           # The broker itself: its CMD is overridden, and importing the submodule's code checks it was copied in and installed.
           - image: broker
             context: .
-            check: python -c "import countdown_api.blueprints"
+            check: python -c "import countdown_api.models"
     steps:
       - uses: actions/checkout@v7
         with:

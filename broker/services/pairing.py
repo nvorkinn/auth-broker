@@ -111,15 +111,6 @@ def live_code(device_id: str) -> str | None:
     )
 
 
-def current_code_for(device_id: str) -> str | None:
-    """Return a live code if there is one; otherwise a new one, unless the device is already paired."""
-    live = live_code(device_id)
-    if live:
-        return live
-    paired_at = db.session.get(Device, device_id).paired_at
-    return None if paired_at else issue_code(device_id)
-
-
 def redeem_code(code: str, user: str) -> str | None:
     """Use up a live code and pair the device with the user, returning the device_id.
 

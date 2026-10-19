@@ -14,13 +14,12 @@ import redis
 
 from broker import developer_provider
 from broker.db import db
-from broker.models import DeviceConfig, Frame
+from broker.models import DeviceConfig
 from broker.services import pace
 from broker.services.pace import (
     HINT_FLOOR_S,
     LEAD_S,
     MIN_SLEEP_S,
-    PACE_LEASE_S,
     POLLS_PER_RENDER,
     RENDER_INTERVAL_S,
     Hint,
@@ -279,9 +278,9 @@ def screen(app, register_device):
     return _set
 
 
-def _hints(app, device_id, frame=None, now=MINUTE):
+def _hints(app, device_id, now=MINUTE):
     with app.app_context():
-        return pace.screen_hints(device_id, frame, now)
+        return pace.screen_hints(device_id, now)
 
 
 def test_the_developer_panel_has_the_key_the_developer_provider_writes(app, screen):
@@ -341,64 +340,18 @@ def test_no_pace_key_is_no_hint(app, store, screen):
     assert _hints(app, screen(developer=True)) == []
 
 
-def test_the_legacy_lease_on_the_frame_row_is_a_hint_too(app, store, screen):
-    device_id = screen(developer=True)
-    store.set(f"v1:pace:developer:{device_id}", "30", ex=60)
-    frame = Frame(device_id=device_id, pace=20, pace_until=MINUTE + timedelta(seconds=PACE_LEASE_S))
-
-    hints = _hints(app, device_id, frame)
-
-    assert sorted(h.seconds for h in hints) == [20, 30]
-    assert Hint(20, MINUTE + timedelta(seconds=PACE_LEASE_S)) in hints
-    assert poll_interval_s(MINUTE, hints) == 10
-
-
-def test_a_frame_without_a_lease_adds_nothing(app, store, screen):
-    device_id = screen(developer=False)
-
-    assert _hints(app, device_id, Frame(device_id=device_id, pace=None, pace_until=None)) == []
-
-
-def test_redis_down_loses_only_the_keys_hints(app, screen):
+def test_redis_down_is_no_hints(app, screen):
     device_id = screen(developer=True)
     app.extensions["redis"] = redis.Redis(host="127.0.0.1", port=1, socket_connect_timeout=0.2)
-    frame = Frame(device_id=device_id, pace=20, pace_until=MINUTE + timedelta(seconds=60))
 
     with patch.object(pace, "logger") as logger:
-        hints = _hints(app, device_id, frame)
+        hints = _hints(app, device_id)
 
-    assert hints == [Hint(20, MINUTE + timedelta(seconds=60))]
+    assert hints == []
     logger.warning.assert_called_once_with("Couldn't read the screen's pace hints from Redis (%s)", "ConnectionError")
 
 
-# --- the legacy X-Refresh-Hint header ----------------------------------------------------------------------------
-
-
-@pytest.mark.parametrize(
-    ("header", "seconds"),
-    [
-        ("20", 20),
-        (" 20 ", 20),
-        ("5", 5),
-        ("3600", 3600),
-        ("0", None),
-        ("", None),
-        (None, None),
-        ("soon", None),
-        ("-5", None),
-        ("2.5", None),
-        ("²", None),
-    ],
-)
-def test_the_legacy_header_is_kept_as_asked_and_sleep_s_floors_and_caps_it(header, seconds):
-    assert pace.parse_hint(header) == seconds
-
-
-def test_the_legacy_lease_holds_for_pace_lease_s():
-    values = {}
-
-    pace.store_hint(values, 20, MINUTE)
-
-    assert values == {"pace": 20, "pace_until": MINUTE + timedelta(seconds=PACE_LEASE_S)}
-    pace.store_hint(values, None, MINUTE)
-    assert values == {"pace": None, "pace_until": None}
+def test_the_legacy_hint_is_gone():
+    # Renderers sent it with PUT /api/frame; the pool's providers' pace keys are all there is now.
+    assert not hasattr(pace, "PACE_LEASE_S")
+    assert not hasattr(pace, "parse_hint")

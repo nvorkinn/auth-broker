@@ -5,6 +5,7 @@ import pytest
 
 from broker.db import db
 from broker.models import Device, DeviceConfig
+from broker.services import pairing
 
 TOKEN = "test-status-token"
 
@@ -18,8 +19,8 @@ def _status(client, token=TOKEN):
     return client.get("/api/status/devices", headers={"Authorization": f"Bearer {token}"})
 
 
-def _poll(client, device_id, secret, path="/api/config"):
-    return client.get(path.format(device_id), headers={"Authorization": f"Bearer {secret}"})
+def _poll(client, device_id, secret, path="/api/frame"):
+    return client.post(path.format(device_id), headers={"Authorization": f"Bearer {secret}"})
 
 
 def _last_seen(app, device_id):
@@ -49,14 +50,16 @@ def test_status_is_read_only(client):
 @pytest.mark.usefixtures("status_on")
 def test_status_lists_every_device(app, client, register_device):
     paired_id, paired_secret = register_device()
-    client.post("/pair", data={"code": _poll(client, paired_id, paired_secret).get_json()["pairing_code"]})
+    with app.app_context():
+        code = pairing.issue_code(paired_id)
+    client.post("/pair", data={"code": code})
+    _poll(client, paired_id, paired_secret)
     new_id, _ = register_device("another-very-long-device-secret")
     with app.app_context():
         config = db.session.get(DeviceConfig, paired_id)
         config.weather_location, config.postcode = "London", "SW1A 1AA"
         db.session.get(Device, paired_id).device_name = "camilla"
         db.session.commit()
-        new_slug = db.session.get(Device, new_id).assignment.slug
         paired = db.session.get(Device, paired_id)
         created_at, paired_at, last_seen_at = paired.created_at, paired.paired_at, paired.last_seen_at
 
@@ -71,7 +74,7 @@ def test_status_lists_every_device(app, client, register_device):
             "last_seen_at": last_seen_at.isoformat(),
         },
         new_id: {
-            "device_name": new_slug,  # its renderer's, given when it claimed the device
+            "device_name": None,
             "created_at": response.get_json()[new_id]["created_at"],
             "paired_at": None,
             "last_seen_at": None,
@@ -94,12 +97,12 @@ def test_last_seen_at_is_unset_until_the_device_authenticates(app, client, regis
     device_id, _ = register_device()
     assert _last_seen(app, device_id) is None
 
-    client.get("/api/config", headers={"Authorization": "Bearer wrong-secret"})
+    client.post("/api/frame", headers={"Authorization": "Bearer wrong-secret"})
 
     assert _last_seen(app, device_id) is None
 
 
-@pytest.mark.parametrize("path", ["/api/config", "/api/frame"])
+@pytest.mark.parametrize("path", ["/api/frame"])
 def test_any_authenticated_device_request_sets_last_seen_at(app, client, register_device, path):
     device_id, secret = register_device()
     before = datetime.now(UTC)

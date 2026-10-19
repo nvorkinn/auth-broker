@@ -11,42 +11,39 @@ import pytest
 from broker.auth import user_devices
 from broker.db import db
 from broker.models import Device, DeviceConfig, SpotifyToken
-from tests.conftest import USER
+from broker.services import pairing
+from tests.conftest import USER, name_screen
 
 FIRST_SECRET = "first-screen-secret-0123456789"
 SECOND_SECRET = "second-screen-secret-0123456789"
 OTHER_SECRET = "someone-elses-secret-0123456789"
 
 
-def _bearer(secret):
-    return {"Authorization": f"Bearer {secret}"}
-
-
-def _pair(client, claim_renderer, secret):
-    """Register a screen and its renderer and pair the client's user with them; return the device's id.
-
-    The registration is the one the shared register_device fixture does.
-    """
-    client.post("/api/devices/register", json={"secret": "display-" + secret, "width": 480, "height": 800})
-    registered = claim_renderer("display-" + secret, secret)
-    code = client.post("/api/devices/pairing-code", headers=_bearer(secret)).get_json()["code"]
+def _pair(app, client, secret):
+    """Register a screen, name it and pair the client's user with it by a code; return the device's id."""
+    device_id = client.post("/api/devices/register", json={"secret": secret, "width": 480, "height": 800}).get_json()[
+        "device_id"
+    ]
+    with app.app_context():
+        name_screen(device_id)
+        code = pairing.issue_code(device_id)
     assert client.post("/pair", data={"code": code}).status_code == 302
-    return registered.get_json()["device_id"]
+    return device_id
 
 
 @pytest.fixture
-def two_screens(client, claim_renderer):
+def two_screens(app, client):
     """Pair the signed-in user's two screens: return (first_id, second_id), the second paired most recently."""
-    return _pair(client, claim_renderer, FIRST_SECRET), _pair(client, claim_renderer, SECOND_SECRET)
+    return _pair(app, client, FIRST_SECRET), _pair(app, client, SECOND_SECRET)
 
 
 @pytest.fixture
-def other_screen(app, claim_renderer):
+def other_screen(app):
     """Pair a screen to someone else: return its id."""
     stranger = app.test_client()
     stranger.environ_base["HTTP_X_AUTHENTIK_UID"] = "user-2"
     stranger.environ_base["HTTP_X_AUTHENTIK_USERNAME"] = "stranger"
-    return _pair(stranger, claim_renderer, OTHER_SECRET)
+    return _pair(app, stranger, OTHER_SECRET)
 
 
 def _weather(app, device_id):
@@ -106,7 +103,7 @@ def test_saving_one_screen_leaves_the_other_alone(app, client, two_screens):
     assert _weather(app, second) == "Secondtown"
 
 
-def test_each_screen_keeps_its_own_clock_format(app, client, two_screens):
+def test_each_screen_keeps_its_own_clock_format(app, client, two_screens, config_of):
     first, second = two_screens
 
     assert client.post(f"/device/{first}", data={"clock_format": "12h"}).status_code == 302
@@ -114,10 +111,10 @@ def test_each_screen_keeps_its_own_clock_format(app, client, two_screens):
     with app.app_context():
         assert db.session.get(DeviceConfig, first).clock_format == "12h"
         assert db.session.get(DeviceConfig, second).clock_format == "24h"
-    for device_id, secret, expected in [(first, FIRST_SECRET, "12h"), (second, SECOND_SECRET, "24h")]:
+    for device_id, expected in [(first, "12h"), (second, "24h")]:
         page = client.get(f"/device/{device_id}").get_data(as_text=True)
         assert f'name="clock_format" value="{expected}" checked' in page
-        assert client.get("/api/config", headers=_bearer(secret)).get_json()["clock_format"] == expected
+        assert config_of(device_id)["clock_format"] == expected
 
 
 def test_disconnecting_spotify_and_unlinking_act_on_the_chosen_screen(app, client, two_screens):
@@ -201,12 +198,9 @@ def test_plain_device_marks_the_most_recent_screen_as_current(client, two_screen
 
 def test_the_switcher_uses_the_screens_name(app, client, two_screens):
     first, _ = two_screens
-    with app.app_context():
-        db.session.delete(db.session.get(Device, first).assignment)
-        db.session.get(Device, first).device_name = "kitchen-pi"
-        db.session.commit()
+    client.post(f"/device/{first}", data={"screen_name": "Kitchen"})
 
-    assert ">kitchen-pi</a>" in client.get("/device").data.decode()
+    assert ">Kitchen</a>" in client.get("/device").data.decode()
 
 
 def test_no_switcher_for_a_user_without_screens(client):
@@ -287,11 +281,7 @@ def test_without_a_signed_in_user_there_are_no_screens(app):
         assert user_devices() == []
 
 
-def test_a_screen_with_no_name_is_called_screen_and_its_id(app, client, two_screens):
+def test_a_screen_with_no_name_is_called_screen_and_its_id(client, two_screens):
     _, second = two_screens
-    with app.app_context():
-        db.session.get(Device, second).device_name = None
-        db.session.get(Device, second).assignment.slug = second  # named automatically, at pairing
-        db.session.commit()
 
     assert f">Screen {second[:6]}</a>" in client.get("/device").data.decode()

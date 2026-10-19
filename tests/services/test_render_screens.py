@@ -44,11 +44,7 @@ def _add_screen(device_id, slug, *, paired=True, config=True, seen=None):
     if config:
         device.config = DeviceConfig()
     db.session.add(device)
-    db.session.add(
-        RendererAssignment(
-            id=device_id[:6], device=device, slug=slug, status="pending", created_at=now - timedelta(days=30)
-        )
-    )
+    db.session.add(RendererAssignment(id=device_id[:6], device=device, slug=slug, created_at=now - timedelta(days=30)))
     db.session.commit()
     return device
 
@@ -158,7 +154,7 @@ def test_a_paired_screen_showing_a_code_stays_listed(app, store):
     assert store.hgetall(SCREENS) == {"a1b2c3d4e5f6": "nvorkinn-kitchen"}
 
 
-def test_a_quiet_screen_is_left_out_as_the_orchestrator_suspends_it(app, store):
+def test_a_quiet_screen_is_left_out_until_it_is_back(app, store):
     with app.app_context():
         now = datetime.now(UTC)
         _add_screen("a1b2c3d4e5f6", "nvorkinn-kitchen", seen=now - assignments.SUSPEND_AFTER - timedelta(minutes=1))
@@ -166,8 +162,6 @@ def test_a_quiet_screen_is_left_out_as_the_orchestrator_suspends_it(app, store):
 
         render_screens.write()
         assert store.hgetall(SCREENS) == {"0f9e8d7c6b5a": "nvorkinn-hall"}
-        # The same rule as the orchestrator's suspension (assignments.listing): the two lists agree.
-        assert [a.status for a in assignments.listing()] == ["suspended", "pending"]
 
         # Seen again: listed at the next write.
         db.session.get(Device, "a1b2c3d4e5f6").display_last_seen_at = now
@@ -178,7 +172,7 @@ def test_a_quiet_screen_is_left_out_as_the_orchestrator_suspends_it(app, store):
 
 
 def test_screens_nobody_has_are_taken_out_and_the_rest_left(app, store):
-    # What the orchestrator wrote for a slug the broker doesn't list, and a screen under an old slug.
+    # What an orchestrator wrote for a slug the broker doesn't list, and a screen under an old slug.
     store.hset(SCREENS, mapping={"gone00000000": "someone-old", "a1b2c3d4e5f6": "nvorkinn-old"})
     with app.app_context():
         _add_screen("a1b2c3d4e5f6", "nvorkinn-kitchen")
@@ -236,7 +230,7 @@ def test_pairing_names_the_screen_and_lists_and_draws_it_at_once(app, store, cli
     assert device_id in _jobs(store)
 
 
-def test_renaming_a_screen_leaves_its_entry_alone(app, store, client, paired_client):
+def test_renaming_a_screen_leaves_its_entry_alone(store, client, paired_client):
     _client, _device_id, _ = paired_client
     before = store.hgetall(SCREENS)
 
@@ -245,12 +239,18 @@ def test_renaming_a_screen_leaves_its_entry_alone(app, store, client, paired_cli
     assert store.hgetall(SCREENS) == before
 
 
-def test_pairing_lists_a_screen_and_unpairing_takes_it_out(store, paired_client, cli):
+def test_unpairing_keeps_a_screen_listed_only_while_its_code_is_live(app, store, paired_client, cli):
     _client, device_id, _ = paired_client
-    assert device_id in store.hgetall(SCREENS)
+    slug = store.hget(SCREENS, device_id)
+    assert slug
 
     assert cli("unpair", device_id).exit_code == 0
 
+    # It shows the code unpairing issued it (its pairing key), so the pool still draws it.
+    assert store.hgetall(SCREENS) == {device_id: slug}
+    with app.app_context(), patch.object(render_screens, "datetime") as clock:
+        clock.now.return_value = datetime.now(UTC) + pairing.CODE_TTL + timedelta(seconds=1)
+        render_screens.write()
     assert store.hgetall(SCREENS) == {}
 
 

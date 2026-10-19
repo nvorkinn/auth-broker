@@ -1,7 +1,8 @@
 """Stand in for a real screen (e.g. the ESP32) during development.
 
-It registers as a display and shows its pairing code, as the real screen would, so you can test the
-/pair -> /device browser flow without the hardware. Works against a local broker or the deployed one.
+It registers as a display, as the real screen would, so you can test the /pair -> /device browser flow without
+the hardware. A screen doesn't ask for a pairing code itself; the script says how to issue one. Works against a
+local broker or the deployed one.
 
 With --token it plays a screen that has just finished WiFi setup instead: it prints the /pair URL its
 owner's browser would be redirected to, and registers only once you've opened it, so you can watch the
@@ -50,9 +51,6 @@ print(f"device_id:      {register.json()['device_id']}")
 if args.token:
     print("\nThe /pair page should now pair and move on.")
 else:
-    code = requests.post(
-        f"{base_url}/api/devices/pairing-code", headers={"Authorization": f"Bearer {device_secret}"}, timeout=10
-    )
-    code.raise_for_status()
-    print(f"pairing code:   {code.json()['code']}  (valid {code.json()['expires_in_seconds'] // 60} minutes)")
-    print(f"\nEnter the pairing code at {base_url}/pair")
+    device_id = register.json()["device_id"]
+    print(f"\nFor a pairing code: `docker exec auth-broker flask --app wsgi devices code {device_id}`")
+    print(f"(locally: `flask --app wsgi devices code {device_id}`), then enter it at {base_url}/pair")

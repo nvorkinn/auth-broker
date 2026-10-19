@@ -7,7 +7,7 @@ import redis
 from broker.clients import weather
 from broker.db import db
 from broker.models import Device, DeviceConfig, GitHubToken, GlowmarktCredentials, SpotifyToken
-from broker.services import weather_place
+from broker.services import pairing, weather_place
 from broker.services.postcodes import normalize_postcode, postcode_country
 
 
@@ -28,6 +28,12 @@ def weather_place_lookup():
     """Stands in for Open-Meteo's lookup of a picked place by id; finds none by default."""
     with patch("broker.clients.weather.get_place", return_value=None) as lookup:
         yield lookup
+
+
+def _issue(app, device_id):
+    """Issue the device a pairing code, as `flask devices code` does; return it."""
+    with app.app_context():
+        return pairing.issue_code(device_id)
 
 
 def _mock_get(json_data, status_code=200):
@@ -62,9 +68,9 @@ def test_pair_rejects_unknown_code(client):
     assert b"invalid or has expired" in response.data
 
 
-def test_pair_code_is_single_use(client, register_device):
-    _device_id, secret = register_device()
-    code = client.post("/api/devices/pairing-code", headers={"Authorization": f"Bearer {secret}"}).get_json()["code"]
+def test_pair_code_is_single_use(app, client, register_device):
+    device_id, _secret = register_device()
+    code = _issue(app, device_id)
 
     first = client.post("/pair", data={"code": code})
     assert first.status_code == 302
@@ -73,9 +79,9 @@ def test_pair_code_is_single_use(client, register_device):
     assert b"invalid or has expired" in second.data
 
 
-def test_pair_accepts_lowercase_code(client, register_device):
-    _device_id, secret = register_device()
-    code = client.post("/api/devices/pairing-code", headers={"Authorization": f"Bearer {secret}"}).get_json()["code"]
+def test_pair_accepts_lowercase_code(app, client, register_device):
+    device_id, _secret = register_device()
+    code = _issue(app, device_id)
 
     response = client.post("/pair", data={"code": code.lower()})
     assert response.status_code == 302
@@ -388,10 +394,11 @@ def test_a_forgotten_device_sends_the_browser_to_pair_instead_of_erroring(paired
     assert _redirects_to_pair(client.get("/"))
 
 
-def test_pairing_again_after_an_unpair_restores_access(paired_client, cli):
-    client, device_id, secret = paired_client
-    cli("unpair", device_id)
-    code = client.get("/api/config", headers={"Authorization": f"Bearer {secret}"}).get_json()["pairing_code"]
+def test_pairing_again_after_an_unpair_restores_access(app, paired_client, cli):
+    client, device_id, _secret = paired_client
+    cli("unpair", device_id)  # which issues it a code to show
+    with app.app_context():
+        code = pairing.live_code(device_id)
 
     assert client.post("/pair", data={"code": code}).status_code == 302
 
@@ -412,8 +419,8 @@ def test_pages_need_the_login_proxy_header(anonymous_client, paired_client):
 
 
 def test_a_code_hands_a_device_to_the_user_who_enters_it(app, paired_client):
-    client, _device_id, secret = paired_client
-    code = client.post("/api/devices/pairing-code", headers={"Authorization": f"Bearer {secret}"}).get_json()["code"]
+    client, device_id, _secret = paired_client
+    code = _issue(app, device_id)
     new_owner = app.test_client()
     new_owner.environ_base["HTTP_X_AUTHENTIK_UID"] = "someone-else"
 
@@ -569,9 +576,9 @@ def test_pair_locks_out_an_ip_after_ten_wrong_codes(client):
     assert b"wait a minute" in response.data
 
 
-def test_a_locked_out_ip_is_refused_even_with_the_right_code(client, register_device):
-    _device_id, secret = register_device()
-    code = client.post("/api/devices/pairing-code", headers={"Authorization": f"Bearer {secret}"}).get_json()["code"]
+def test_a_locked_out_ip_is_refused_even_with_the_right_code(app, client, register_device):
+    device_id, _secret = register_device()
+    code = _issue(app, device_id)
     _wrong_codes(client, 10)
 
     response = client.post("/pair", data={"code": code}, headers={"X-Forwarded-For": "203.0.113.7"})
@@ -615,20 +622,18 @@ def test_pair_logs_wrong_codes_and_lockouts(client, caplog):
 # --- device ID and screen ----------------------------------------------------------------------------
 
 
-def test_unlink_screen_clears_the_display_secret(app, client, split_device):
-    device_id, renderer_secret, display_secret = split_device
-    code = client.get("/api/config", headers={"Authorization": f"Bearer {renderer_secret}"}).get_json()["pairing_code"]
-    client.post("/pair", data={"code": code})
-    frame_headers = {"Authorization": f"Bearer {display_secret}"}
+def test_unlink_screen_clears_the_display_secret(app, client, paired_client):
+    client, device_id, secret = paired_client
+    frame_headers = {"Authorization": f"Bearer {secret}"}
     assert "Unlink screen" in client.get("/device").get_data(as_text=True)
-    assert client.get("/api/frame", headers=frame_headers).status_code == 404  # authenticated, no frame yet
+    assert client.post("/api/frame", headers=frame_headers).status_code == 404  # authenticated, no frame yet
 
     response = client.post("/device/display/unlink")
 
     assert response.status_code == 302
     with app.app_context():
         assert db.session.get(Device, device_id).display_secret_hash is None
-    assert client.get("/api/frame", headers=frame_headers).status_code == 401
+    assert client.post("/api/frame", headers=frame_headers).status_code == 401
     assert "Unlink screen" not in client.get("/device").get_data(as_text=True)
 
 
@@ -783,8 +788,9 @@ def test_saving_the_config_publishes_subscriptions_to_redis(paired_client, fake_
         "weather": {"london-gb-2643743"},
         "spotify": {device_id},
     }
-    # Then the screen's config, which changed: its renderer is nudged (tests/services/test_config_store.py).
-    assert fake_redis.published == [("v1:sub:changed", ""), ("v1:config:changed", device_id)]
+    # The providers are nudged; the screen gets a render job instead (tests/services/test_config_store.py).
+    assert fake_redis.published == [("v1:sub:changed", "")]
+    assert device_id in fake_redis.jobs
 
 
 def _give_another_screen_weather(app, register_device, location, place=None):

@@ -2,34 +2,25 @@
 
 pi-dashboard's render pool (its docs/stateless-renderers.md, "The pool, the queue and the render function") draws the
 screens listed in `v1:render:screens`, a hash of device id to slug (the slug names the screen: it's the `device` label
-of the pool's metrics), and drops a job for any other. The orchestrator wrote it during the migration, for the screens
-in its POOL_SLUGS (step 6); the broker writes it from here (step 9), so the orchestrator can go.
+of the pool's metrics), and drops a job for any other. The broker is the only one that writes it.
 
 A screen is listed while the pool has something to draw for it:
 
-- it has a renderer assignment (services/assignments.py), whose slug names it, and its device hasn't been forgotten;
+- it has been named (services/assignments.py), so it has a slug;
 - it has settings (a device_config row);
 - it's paired, so its config is in the store (services/config_store.py), or it has a live pairing code, whose key
   (services/pairing_key.py) the pool draws the pairing screen from;
-- it has been seen in the last assignments.SUSPEND_AFTER (assignments.is_quiet): the rule the orchestrator suspends a
-  renderer by, and takes its screen out of the pool for. A screen that's back is listed again within RESYNC_S.
+- it has been seen in the last assignments.SUSPEND_AFTER (assignments.is_quiet). A screen that's back is listed
+  again within config_store.RESYNC_S.
 
-That's the set the orchestrator writes with every slug in its POOL_SLUGS, but for an unpaired screen with no code, which
-it lists and the pool has nothing to draw for. tests/fixtures/render_screens.json pins the hash's shape (pi-dashboard's
-countdown_core.store.render_queue reads it: `screens()`, and the claim script's HGET).
+tests/fixtures/render_screens.json pins the hash's shape (pi-dashboard's countdown_core.store.render_queue reads it:
+`screens()`, and the claim script's HGET).
 
 The hash is written whole, only where it differs (HDEL and HSET in one transaction), whenever the configs are
 (config_store.publish and publish_all call write()): on a config save, pairing, unpairing, forgetting and a pairing code
 issued, as the broker starts, by `flask config publish`, and every config_store.RESYNC_S, so a Redis that has restarted
 (it keeps nothing on disk) has its screens back within a minute; and when a screen is named, which gives it its slug. A
 screen newly listed gets a render job at once (services/render_jobs.py), rather than waiting for the ticker's minute.
-
-While the orchestrator still runs it writes the same hash: it adds the screens in its POOL_SLUGS on every pass (10 s),
-and removes every other. Where the two disagree (a screen whose slug isn't in POOL_SLUGS, an unpaired screen with no
-code), the screen flaps: the orchestrator takes it out within 10 s, and the broker lists it again at its next write,
-at most once a minute unless someone saves or pairs, with one render job each time. That's harmless: such a screen
-still has its own renderer, a pooled render draws the same frame from the same store, the worker drops a job for a
-screen no longer listed, and this logs nothing above debug about it.
 
 Like a render job, this is never worth failing a request for: a Redis that can't be asked is logged by the error's type
 (never a failed command's text, which quotes its keys and values) and not raised, and the next write puts it right.
@@ -56,7 +47,7 @@ def listed(now: datetime) -> dict[str, str]:
     """Return the screens the pool is to draw as of `now`: their slugs by device id, from the database."""
     coded = set(db.session.scalars(select(PairingCode.device_id).where(PairingCode.expires_at > now)))
     screens: dict[str, str] = {}
-    for assignment in db.session.scalars(select(RendererAssignment).where(RendererAssignment.device_id.is_not(None))):
+    for assignment in db.session.scalars(select(RendererAssignment)):
         device = assignment.device
         if (
             device is None

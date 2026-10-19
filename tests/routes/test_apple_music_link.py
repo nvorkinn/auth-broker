@@ -49,8 +49,8 @@ def test_another_users_device_404s(client, register_device):
     assert client.post(f"/device/{device_id}/apple-music/connect", data={"music_user_token": "x"}).status_code == 404
 
 
-def test_the_config_page_switches_both_services_on_and_sends_both(app, paired_client, musickit):
-    client, device_id, secret = paired_client
+def test_the_config_page_switches_both_services_on_and_sends_both(app, paired_client, musickit, config_of):
+    client, device_id, _secret = paired_client
 
     page = client.get("/device").data
     assert b'name="apple_music_enabled"' in page
@@ -59,7 +59,7 @@ def test_the_config_page_switches_both_services_on_and_sends_both(app, paired_cl
     with app.app_context():
         config = db.session.get(DeviceConfig, device_id)
         assert (config.spotify_enabled, config.apple_music_enabled) == (True, True)
-    config = client.get("/api/config", headers={"Authorization": f"Bearer {secret}"}).get_json()
+    config = config_of(device_id)
     assert config["spotify"]["enabled"]
     assert config["apple_music"] == {"enabled": True}
 

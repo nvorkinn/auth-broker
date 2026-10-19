@@ -11,10 +11,9 @@ The providers write each device's data under keys of its own (pi-dashboard's sto
 Three other keys are the device's, and are looked after where they're written:
 
 - `v1:config:<device id>` is config_store's: publish() removes it for a device that's unpaired or gone;
-- `v1:frame:<device id>`, the screen's latest picture, follows the frames table's row (services/frame_record.py):
-  frame_record.forget() deletes it wherever the row is deleted (a device forgotten, or unpaired with its config).
-  Where the row stays, deleting the record would only have the broker serve the row's copy of the same picture,
-  until the renderer, nudged by the config's change, draws the next;
+- `v1:frame:<device id>`, the screen's latest picture, is the render pool's (services/frame_record.py):
+  frame_record.forget() deletes it when a device is forgotten, or unpaired with its config. Otherwise the pool draws
+  over it at the render the change queues, and deleting it first would only leave the screen with no frame;
 - `v1:pairing:<device id>`, its live pairing code, is services/pairing_key.py's: it lapses with the code, goes when
   the code is used or the device paired, and forget() deletes it too (a device unpaired, handed on or gone has no code
   left: its codes go with the change).

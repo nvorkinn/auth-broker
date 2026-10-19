@@ -78,7 +78,7 @@ def code(device_id: str) -> None:
     """Issue a fresh pairing code, e.g. to hand a device to a different user."""
     _get_device(device_id)
     new_code = pairing.issue_code(device_id)
-    # Its renderer shows the code: without its config in the store, it asks the broker, which sends the code.
+    # The render pool shows the code (its pairing key); the config's copy goes from the store while it's live.
     config_store.publish(device_id)
     minutes = int(pairing.CODE_TTL.total_seconds() // 60)
     click.echo(f"{new_code}: enter it at /pair within {minutes} minutes (the device shows it too).")
@@ -127,17 +127,21 @@ def unpair(device_id: str, *, wipe_config: bool) -> None:
         device.github_token = None
         device.apple_music_token = None
         device.apple_music_plays = []
-        device.frame = None
     db.session.commit()
     # Its data in the store (energy, music, developer), so the next owner never sees the last one's. With its accounts
     # kept (no --config), the providers write their keys again from them.
     device_keys.forget(device_id)
     if wipe_config:
-        # The renderer's copy of the frame too, so the next owner never sees the last one's screen.
+        # The screen's frame too, so the next owner never sees the last one's screen.
         frame_record.forget(device_id)
-    # An unpaired device has no config in the store, so its renderer asks the broker, which gives it a code.
+    # A code for the pool to draw (its pairing key), as an unpaired device has no config in the store to draw.
+    new_code = pairing.issue_code(device_id)
     config_store.publish(device_id)
-    click.echo(f"{device_id} is unpaired; it will show a new pairing code on its next poll.")
+    minutes = int(pairing.CODE_TTL.total_seconds() // 60)
+    click.echo(
+        f"{device_id} is unpaired; it shows the pairing code {new_code} for {minutes} minutes "
+        "(`devices code` for another), or pair it by its token."
+    )
 
 
 @devices.command()
@@ -145,12 +149,10 @@ def unpair(device_id: str, *, wipe_config: bool) -> None:
 def forget(device_id: str) -> None:
     """Delete a device entirely (it must register again)."""
     device = _get_device(device_id)
-    # Its renderer, if the orchestrator started one, is removed too; the assignment outlives the device for that.
-    assignments.mark_deleting(device)
-    # The relationships cascade, so the device's codes, config, tokens and frame go with it.
+    # The relationships cascade, so the device's codes, config, tokens and name go with it.
     db.session.delete(device)
     db.session.commit()
-    frame_record.forget(device_id)  # and the frame the renderer keeps in Redis
+    frame_record.forget(device_id)  # and the frame the pool keeps in Redis
     device_keys.forget(device_id)  # and the providers' data for it
     config_store.publish(device_id)
     click.echo(f"{device_id} forgotten; delete its credentials file so it registers again.")
@@ -204,7 +206,7 @@ def publish() -> None:
 
     The broker does this on every config save and as it starts; this is for when Redis has lost them (it keeps
     nothing on disk) and the broker hasn't restarted since. Safe to run at any time: only what changed is written,
-    and only the renderers whose config changed are nudged.
+    and only the screens whose config changed are drawn again.
     """
     publish_store()
     click.echo("Wrote the configs and the subscriptions to the store (the log warns if Redis couldn't be reached).")

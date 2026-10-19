@@ -139,7 +139,7 @@ def test_the_pace_is_withdrawn_once_the_release_is_off_the_panel(provider, store
 
 
 def _pool(store, *device_ids):
-    """List the screens in the render pool, as pi-dashboard's orchestrator does."""
+    """List the screens in the render pool, as the broker does (services/render_screens.py)."""
     store.hset(SCREENS, mapping={device_id: f"screen-{device_id}" for device_id in device_ids})
 
 

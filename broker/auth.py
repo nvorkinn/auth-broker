@@ -26,8 +26,9 @@ LAST_SEEN_RESOLUTION = timedelta(minutes=1)
 
 
 # The roles a device's secrets can hold, in the order a presented secret is checked against them.
-# Each has its own column, devices.<role>_secret_hash.
-ROLES = ("renderer", "display")
+# Each has its own column, devices.<role>_secret_hash. Only the screen's is left: the render pool, which draws every
+# screen, needs no secret (its frames go through Redis).
+ROLES = ("display",)
 
 
 def hash_secret(secret: str) -> str:
@@ -94,8 +95,7 @@ def authenticate_device(authorization: str, roles: Collection[str] = frozenset(R
 def require_device_auth(roles: Collection[str] = frozenset(ROLES)) -> Callable[[View], View]:
     """Protect device-facing endpoints with one of the device's own bearer secrets.
 
-    Checked as authenticate_device does, and passes device_id to the view. For the routes of the countdown API
-    contract (vendor/countdown-api) the same check is its `deviceSecret` authenticator, in api.py.
+    Checked as authenticate_device does, and passes device_id to the view.
     """
 
     def decorator(view: View) -> View:
@@ -164,9 +164,8 @@ def _require_bearer_token(config_key: str) -> Callable[[View], View]:
     return decorator
 
 
-# The read-only status endpoint's own token, and the orchestrator's: neither is a device secret.
+# The read-only status endpoint's own token, which isn't a device secret.
 require_status_token = _require_bearer_token("STATUS_TOKEN")
-require_orchestrator_token = _require_bearer_token("ORCHESTRATOR_TOKEN")
 
 
 def current_user() -> str | None:

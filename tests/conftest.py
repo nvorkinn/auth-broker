@@ -1,6 +1,7 @@
 import fnmatch
-import secrets
 import shutil
+from datetime import UTC, datetime
+from hashlib import blake2b
 
 import fakeredis
 import pytest
@@ -8,14 +9,12 @@ import redis
 from cryptography.fernet import Fernet
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ec
-from sqlalchemy import select
 
 from broker import create_app
-from broker.auth import hash_secret
 from broker.clients import apple_music
 from broker.db import db
-from broker.models import Device
-from broker.services import assignments, render_jobs
+from broker.models import Device, DeviceConfig
+from broker.services import assignments, frame_record, pairing, render_jobs, renderer_config
 from broker.services.pair_throttle import PairThrottle
 
 
@@ -250,70 +249,75 @@ def cli(app):
     return _invoke
 
 
-@pytest.fixture
-def claim_renderer(app, client):
-    """Give a registered screen a renderer the way the orchestrator does; return the claim response.
-
-    Its owner names it (here the assignment is made directly), then the renderer claims its device with
-    the token.
-    """
-
-    def _claim(display_secret: str, renderer_secret: str):
-        with app.app_context():
-            device = db.session.scalar(select(Device).where(Device.display_secret_hash == hash_secret(display_secret)))
-            token = assignments.create(device, secrets.token_hex(3), None).claim_token
-        return client.post("/api/renderers/claim", json={"secret": renderer_secret, "claim_token": token})
-
-    return _claim
+def name_screen(device_id: str) -> None:
+    """Give a registered screen its stable name, as pairing does, which puts it on the render pool (app context)."""
+    assignments.auto_name(db.session.get(Device, device_id))
+    db.session.commit()
 
 
 @pytest.fixture
-def register_device(client, claim_renderer):
-    """Register a screen and then a renderer with the given secret, returning (device_id, secret).
-
-    The screen's secret is "display-" plus the given one.
-    """
+def register_device(app, client):
+    """Register a screen with the given secret and name it, returning (device_id, secret). It isn't paired."""
 
     def _register(secret: str = DEVICE_SECRET):
-        screen = client.post("/api/devices/register", json={"secret": "display-" + secret, "width": 480, "height": 800})
+        screen = client.post("/api/devices/register", json={"secret": secret, "width": 480, "height": 800})
         assert screen.status_code == 201
-        response = claim_renderer("display-" + secret, secret)
-        assert response.status_code == 201
-        return response.get_json()["device_id"], secret
+        device_id = screen.get_json()["device_id"]
+        with app.app_context():
+            name_screen(device_id)
+        return device_id, secret
 
     return _register
 
 
 @pytest.fixture
-def split_device(client, claim_renderer):
-    """Register a screen and have a renderer claim it.
+def paired_client(app, client, register_device):
+    """Return a test client whose user is already paired with a freshly-registered, named device.
 
-    Returns (device_id, renderer_secret, display_secret).
+    Paired with a code, as the fallback flow does: (client, device_id, the screen's secret).
     """
-    renderer_secret, display_secret = "renderer-secret-0123456789", "display-secret-0123456789"
-    screen = client.post("/api/devices/register", json={"secret": display_secret, "width": 480, "height": 800})
-    assert screen.status_code == 201
-    response = claim_renderer(display_secret, renderer_secret)
-    assert response.status_code == 201
-    assert response.get_json() == screen.get_json()
-    return response.get_json()["device_id"], renderer_secret, display_secret
-
-
-@pytest.fixture
-def paired_client(client, register_device):
-    """Return a test client whose user is already paired with a freshly-registered device."""
     device_id, device_secret = register_device()
-
-    code_response = client.post(
-        "/api/devices/pairing-code",
-        headers={"Authorization": f"Bearer {device_secret}"},
-    )
-    code = code_response.get_json()["code"]
+    with app.app_context():
+        code = pairing.issue_code(device_id)
 
     pair_response = client.post("/pair", data={"code": code})
     assert pair_response.status_code == 302
 
     return client, device_id, device_secret
+
+
+@pytest.fixture
+def config_of(app):
+    """Return a function giving a device's config as the render pool reads it (renderer_config.build), as JSON."""
+
+    def _config_of(device_id: str) -> dict:
+        with app.app_context():
+            config = db.session.get(DeviceConfig, device_id)
+            return renderer_config.build(config, pairing_code=None).model_dump(mode="json")
+
+    return _config_of
+
+
+@pytest.fixture
+def draw(app):
+    """Return a function that draws a screen's frame as the render pool does: its record in Redis.
+
+    draw(device_id, frame, at=None) writes `v1:frame:<device id>` (the shape tests/fixtures/frame_record.json pins) to
+    the app's bytes Redis, with `at` (default now) as when it was drawn.
+    """
+
+    def _draw(device_id: str, frame: bytes, at: datetime | None = None) -> None:
+        redis_bytes = app.extensions["redis_bytes"]
+        values = {
+            "frame": frame,
+            "etag": blake2b(frame, digest_size=8).hexdigest(),
+            "rendered_at": (at or datetime.now(UTC)).isoformat(timespec="milliseconds"),
+        }
+        redis_bytes.delete(frame_record.key(device_id))
+        redis_bytes.hset(frame_record.key(device_id), mapping=values)
+        redis_bytes.expire(frame_record.key(device_id), 86_400)
+
+    return _draw
 
 
 def apple_song(song_id, name="Efecto", artist="Bad Bunny", album="Un Verano Sin Ti"):

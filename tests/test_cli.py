@@ -4,28 +4,36 @@ from sqlalchemy import func, select
 
 from broker.clients import weather
 from broker.db import db
-from broker.models import DeviceConfig, GitHubToken, GlowmarktCredentials, SpotifyToken
-from broker.services import weather_place
+from broker.models import Device, DeviceConfig, GitHubToken, GlowmarktCredentials, SpotifyToken
+from broker.services import pairing, renderer_config, weather_place
 
 
 def _headers(secret):
     return {"Authorization": f"Bearer {secret}"}
 
 
-def _config(client, device_id, secret):
-    return client.get("/api/config", headers=_headers(secret)).get_json()
+def _shown(app, device_id):
+    """Return what the render pool draws the screen from: its config, with its live pairing code if it has one."""
+    with app.app_context():
+        config = db.session.get(DeviceConfig, device_id)
+        return renderer_config.build(config, pairing_code=pairing.live_code(device_id)).model_dump(mode="json")
 
 
-def _paired_device(client, register_device):
+def _issue(app, device_id):
+    with app.app_context():
+        return pairing.issue_code(device_id)
+
+
+def _paired_device(app, client, register_device):
     device_id, secret = register_device()
-    client.post("/pair", data={"code": _config(client, device_id, secret)["pairing_code"]})
+    client.post("/pair", data={"code": _issue(app, device_id)})
     return device_id, secret
 
 
-def test_list_shows_each_device_and_whether_it_is_paired(client, register_device, cli):
-    paired_id, _ = _paired_device(client, register_device)
-    unpaired_id, secret = register_device("another-very-long-device-secret")
-    code = _config(client, unpaired_id, secret)["pairing_code"]
+def test_list_shows_each_device_and_whether_it_is_paired(app, client, register_device, cli):
+    paired_id, _ = _paired_device(app, client, register_device)
+    unpaired_id, _secret = register_device("another-very-long-device-secret")
+    code = _issue(app, unpaired_id)
 
     result = cli("list")
 
@@ -43,11 +51,12 @@ def test_list_with_no_devices(cli):
     assert "No devices." in result.output
 
 
-def test_list_shows_device_name_when_set_and_unnamed_otherwise(client, register_device, cli):
-    named_id, secret = register_device()
-    client.get("/api/config", headers={**_headers(secret), "X-Device-Name": "camilla"})
-    # A screen with no renderer yet, which is all that has no name (a renderer is named by its slug when it claims).
-    screen = {"secret": "a-screen-with-no-renderer-yet", "width": 800, "height": 480}
+def test_list_shows_device_name_when_set_and_unnamed_otherwise(app, client, register_device, cli):
+    named_id, _secret = register_device()
+    with app.app_context():
+        db.session.get(Device, named_id).device_name = "camilla"  # from before the screens' names were their slugs
+        db.session.commit()
+    screen = {"secret": "a-screen-with-no-name-yet-at-all", "width": 800, "height": 480}
     unnamed_id = client.post("/api/devices/register", json=screen).get_json()["device_id"]
 
     result = cli("list")
@@ -59,24 +68,26 @@ def test_list_shows_device_name_when_set_and_unnamed_otherwise(client, register_
 
 
 def test_unpair_brings_the_device_back_to_showing_a_code_but_keeps_its_settings(app, client, register_device, cli):
-    device_id, secret = _paired_device(client, register_device)
+    device_id, _secret = _paired_device(app, client, register_device)
     with app.app_context():
         config = db.session.get(DeviceConfig, device_id)
         config.weather_location = "London"
         config.clock_format = "12h"
         db.session.commit()
-    assert _config(client, device_id, secret)["pairing_code"] is None
+    assert _shown(app, device_id)["pairing_code"] is None
 
-    assert cli("unpair", device_id).exit_code == 0
+    result = cli("unpair", device_id)
 
-    config = _config(client, device_id, secret)
+    assert result.exit_code == 0
+    config = _shown(app, device_id)
     assert len(config["pairing_code"]) == 6
+    assert config["pairing_code"] in result.output
     assert config["weather"]["location"] == "London"
     assert config["clock_format"] == "12h"
 
 
 def test_unpair_with_config_also_resets_settings_and_linked_accounts(app, client, register_device, cli):
-    device_id, secret = _paired_device(client, register_device)
+    device_id, _secret = _paired_device(app, client, register_device)
     with app.app_context():
         config = db.session.get(DeviceConfig, device_id)
         config.weather_location, config.tfl_stop_ids = "London", ["940GZZLUKNG"]
@@ -88,7 +99,7 @@ def test_unpair_with_config_also_resets_settings_and_linked_accounts(app, client
 
     assert cli("unpair", device_id, "--config").exit_code == 0
 
-    config = _config(client, device_id, secret)
+    config = _shown(app, device_id)
     assert config["pairing_code"] is not None
     assert (config["weather"]["location"], config["tfl"]["stop_ids"]) == ("", [])
     assert config["clock_format"] == "24h"
@@ -100,29 +111,30 @@ def test_unpair_with_config_also_resets_settings_and_linked_accounts(app, client
 
 
 def test_forget_deletes_the_device_so_it_must_register_again(app, client, register_device, cli):
-    device_id, secret = _paired_device(client, register_device)
+    device_id, secret = _paired_device(app, client, register_device)
 
     assert cli("forget", device_id).exit_code == 0
 
-    assert client.get("/api/config", headers=_headers(secret)).status_code == 401
+    assert client.post("/api/frame", headers=_headers(secret)).status_code == 401
     with app.app_context():
-        # The assignment outlives the device, so the orchestrator can remove the renderer.
+        # Its name (the assignment) goes too.
         for table in db.metadata.sorted_tables:
-            expected = 1 if table.name == "renderer_assignments" else 0
-            assert db.session.scalar(select(func.count()).select_from(table)) == expected, table.name
+            assert db.session.scalar(select(func.count()).select_from(table)) == 0, table.name
 
 
 def test_forget_leaves_other_devices_alone(app, client, register_device, cli):
-    gone, _ = _paired_device(client, register_device)
+    gone, _ = _paired_device(app, client, register_device)
     kept, kept_secret = register_device("another-very-long-device-secret")
 
     cli("forget", gone)
 
-    assert _config(client, kept, kept_secret)["pairing_code"] is not None
+    assert client.post("/api/frame", headers=_headers(kept_secret)).status_code == 404  # known, with no frame yet
+    with app.app_context():
+        assert db.session.get(Device, kept).assignment is not None
 
 
 def test_code_hands_an_already_paired_device_to_another_user(app, client, register_device, cli):
-    device_id, secret = _paired_device(client, register_device)
+    device_id, _secret = _paired_device(app, client, register_device)
     with app.app_context():
         db.session.get(DeviceConfig, device_id).clock_format = "12h"
         db.session.commit()
@@ -131,13 +143,13 @@ def test_code_hands_an_already_paired_device_to_another_user(app, client, regist
 
     assert result.exit_code == 0
     code = result.output.split(":")[0]
-    assert _config(client, device_id, secret)["pairing_code"] == code  # the device shows it too
+    assert _shown(app, device_id)["pairing_code"] == code  # the device shows it too
     new_owner = app.test_client()
     new_owner.environ_base["HTTP_X_AUTHENTIK_UID"] = "someone-else"
     new_owner.post("/pair", data={"code": code})
     assert new_owner.get("/device").status_code == 200
     assert client.get("/device").status_code == 302  # one owner at a time
-    assert _config(client, device_id, secret)["clock_format"] == "12h"
+    assert _shown(app, device_id)["clock_format"] == "12h"
     assert b'name="clock_format" value="12h" checked' in new_owner.get("/device").data
 
 
@@ -151,8 +163,8 @@ def test_owner_pairs_a_device_with_a_user(app, client, register_device, cli):
     assert "owner=user-1" in cli("list").output
 
 
-def test_unpair_removes_the_owner(client, register_device, cli):
-    device_id, _ = _paired_device(client, register_device)
+def test_unpair_removes_the_owner(app, client, register_device, cli):
+    device_id, _ = _paired_device(app, client, register_device)
 
     cli("unpair", device_id)
 

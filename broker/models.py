@@ -8,7 +8,7 @@ Timestamps are timezone-aware UTC datetimes (see UTCDateTime).
 
 from datetime import datetime  # noqa: TC003 -- SQLAlchemy resolves the Mapped[...] annotations at runtime
 
-from sqlalchemy import JSON, Boolean, Float, ForeignKey, Integer, LargeBinary, String, text
+from sqlalchemy import JSON, Boolean, Float, ForeignKey, Integer, String, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .crypto import decrypt, encrypt
@@ -16,13 +16,12 @@ from .db import UTCDateTime, db
 
 
 class Device(db.Model):
-    """A screen and its renderer, known by their secrets, and who it is paired with."""
+    """A screen, known by its secret, and who it is paired with."""
 
     __tablename__ = "devices"
 
     device_id: Mapped[str] = mapped_column(String, primary_key=True)
-    # One secret per role (see auth.ROLES), each identifying the device on its own. SHA-256 hex (see auth.hash_secret).
-    renderer_secret_hash: Mapped[str | None] = mapped_column(String, index=True, unique=True)
+    # The screen's secret, which identifies the device on its own (see auth.ROLES). SHA-256 hex (see auth.hash_secret).
     display_secret_hash: Mapped[str | None] = mapped_column(String, index=True, unique=True)
     # What the device's owner's browser presents to pair with it without a code (see
     # services/pairing.py). Derived from the screen's (display) secret, so the device never has to send it.
@@ -35,8 +34,8 @@ class Device(db.Model):
     device_name: Mapped[str | None] = mapped_column(String)
     # Bumped on authenticated device requests, at most once a minute (see require_device_auth).
     last_seen_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
-    # The same for the screen's own requests only. A renderer keeps last_seen_at fresh whether or not the
-    # screen is on, so this is what decides when a renderer is suspended (see services/assignments.py).
+    # The same for the screen's own requests (today, every authenticated request is one): what decides whether
+    # the render pool still draws it (services/assignments.is_quiet).
     display_last_seen_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
 
     config: Mapped[DeviceConfig | None] = relationship(back_populates="device", cascade="all, delete-orphan")
@@ -46,8 +45,7 @@ class Device(db.Model):
     github_token: Mapped[GitHubToken | None] = relationship(cascade="all, delete-orphan")
     apple_music_token: Mapped[AppleMusicToken | None] = relationship(cascade="all, delete-orphan")
     apple_music_plays: Mapped[list[AppleMusicPlay]] = relationship(cascade="all, delete-orphan")
-    frame: Mapped[Frame | None] = relationship(cascade="all, delete-orphan")
-    assignment: Mapped[RendererAssignment | None] = relationship(back_populates="device")
+    assignment: Mapped[RendererAssignment | None] = relationship(back_populates="device", cascade="all, delete-orphan")
 
 
 class PairingCode(db.Model):
@@ -222,38 +220,18 @@ class AppleMusicPlay(db.Model):
     track: Mapped[dict] = mapped_column(JSON)
 
 
-class Frame(db.Model):
-    """The latest frame rendered for a device's screen."""
-
-    __tablename__ = "frames"
-
-    device_id: Mapped[str] = mapped_column(ForeignKey("devices.device_id"), primary_key=True)
-    frame: Mapped[bytes] = mapped_column(LargeBinary)
-    etag: Mapped[str] = mapped_column(String)
-    rendered_at: Mapped[datetime] = mapped_column(UTCDateTime)
-    # The refresh interval the renderer asked for with this frame, while a provider's data is bursty, and when that
-    # lapses. None when it didn't ask.
-    pace: Mapped[int | None] = mapped_column(Integer)
-    pace_until: Mapped[datetime | None] = mapped_column(UTCDateTime)
-
-
 class RendererAssignment(db.Model):
-    """The renderer a screen is to have, which the orchestrator turns into a running container.
+    """A screen's name, its slug, under which the render pool draws it (services/render_screens.py).
 
-    See services/assignments.py. Created when the screen's owner names it; the slug can't change after.
+    See services/assignments.py. Created when the screen's owner names it; the slug can't change after, and goes with
+    the device.
     """
 
     __tablename__ = "renderer_assignments"
 
     id: Mapped[str] = mapped_column(String, primary_key=True)
-    # NULL once the device is forgotten, so the orchestrator can still be told to remove the renderer.
     device_id: Mapped[str | None] = mapped_column(ForeignKey("devices.device_id"), unique=True)
     slug: Mapped[str] = mapped_column(String, unique=True)
-    # Handed to the orchestrator, which starts the renderer with it; cleared when the renderer claims it.
-    # Stored as is, since the orchestrator needs it back (see the orchestrator's README).
-    claim_token: Mapped[str | None] = mapped_column(String, unique=True)
-    status: Mapped[str] = mapped_column(String, default="pending")
-    detail: Mapped[str] = mapped_column(String, default="", server_default=text("''"))
     created_at: Mapped[datetime] = mapped_column(UTCDateTime)
 
     device: Mapped[Device | None] = relationship(back_populates="assignment")

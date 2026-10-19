@@ -19,9 +19,7 @@ bp = Blueprint("stop_search", __name__)
 MIN_QUERY_LENGTH = 2
 
 
-# /api/tfl/search is its old name, kept so a page loaded before the rename still searches.
 @bp.get("/api/stops/search")
-@bp.get("/api/tfl/search")
 @require_paired_user
 def search_stops() -> ResponseReturnValue:
     """Return selectable stations and stops matching ?q=, as JSON, each with its source (tfl or entur)."""
