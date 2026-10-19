@@ -1,5 +1,4 @@
 import fnmatch
-import secrets
 import shutil
 from datetime import UTC, datetime
 from hashlib import blake2b
@@ -250,9 +249,10 @@ def cli(app):
     return _invoke
 
 
-def name_screen(device_id: str, suffix: str | None = None) -> None:
-    """Name a registered screen as its owner does, which puts it on the render pool (needs an app context)."""
-    assignments.create(db.session.get(Device, device_id), suffix or secrets.token_hex(3), None)
+def name_screen(device_id: str) -> None:
+    """Give a registered screen its stable name, as pairing does, which puts it on the render pool (app context)."""
+    assignments.auto_name(db.session.get(Device, device_id))
+    db.session.commit()
 
 
 @pytest.fixture

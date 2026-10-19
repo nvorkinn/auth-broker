@@ -307,8 +307,13 @@
         <div class="card-header">
             <h2 class="card-title">Screen</h2>
         </div>
+        <div class="form-group">
+            <label for="screen_name">Name</label>
+            <input type="text" id="screen_name" name="screen_name" value="{{ screen_name }}" maxlength="{{ name_max }}" placeholder="e.g. Kitchen" autocomplete="off">
+            <p class="card-subtitle">What it's called in the list of your screens. Change it whenever you like.</p>
+        </div>
         <div class="status-row">
-            <span class="card-subtitle">Screen: {{ 'attached' if display_attached else 'not attached' }}{% if assignment %} · {{ assignment.slug }}{% endif %}</span>
+            <span class="card-subtitle">Screen: {{ 'attached' if display_attached else 'not attached' }}</span>
             {% if display_attached %}
                 <button type="submit" form="displayUnlinkForm" class="btn-action btn-delete">Unlink screen</button>
             {% endif %}

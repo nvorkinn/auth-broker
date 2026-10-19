@@ -25,7 +25,7 @@ erDiagram
         string owner "Authentik uid, not an FK"
         datetime created_at
         datetime paired_at "NULL until paired"
-        string device_name "what older devices reported; unused now"
+        string device_name "the friendly name its owner gave it (settings page)"
         datetime last_seen_at "1 min resolution"
         datetime display_last_seen_at "the screen's: whether the pool draws it"
     }
@@ -103,13 +103,13 @@ Things the diagram can't say:
 
 | Table | One row per | Written by | Read by |
 |---|---|---|---|
-| `devices` | screen | `POST /api/devices/register` (insert, and deletes unpaired screens older than 24 h), pairing (`owner`, `paired_at`), every device call (`last_seen_at`, `display_last_seen_at`), "Unlink screen", the CLI | every device call (secret lookup), the pages, the store's rewrites, `GET /api/status/devices`, the CLI |
+| `devices` | screen | `POST /api/devices/register` (insert, and deletes unpaired screens older than 24 h), pairing (`owner`, `paired_at`), the settings page (`device_name`, the friendly name), every device call (`last_seen_at`, `display_last_seen_at`), "Unlink screen", the CLI | every device call (secret lookup), the pages, the store's rewrites, `GET /api/status/devices`, the CLI |
 | `device_config` | device | created at registration (with the screen's size), `POST /device` (settings), `unpair --config` | the store's copy of the config (`v1:config:`), `Retry-After` on frame polls, the providers, `/device` |
 | `pairing_codes` | live code | `flask devices code` and `unpair`; deleted on use, on expiry (swept on each new code), by pairing and by `unpair` | `POST /pair`, the store's rewrites (a live code keeps a screen in the pool's list) |
 | `spotify_tokens` | device that connected Spotify | `/auth/spotify/callback`, lazy refresh in the music provider | the music provider; deleted by Disconnect, `unpair --config`, `forget` |
 | `glowmarkt_credentials` | device | `POST /device` | the config's `glowmarkt.enabled`, the glow-provider, `/device` |
 | `github_tokens` | device given a GitHub token | `POST /device`; deleted by "Remove token", `unpair --config`, `forget` | the developer-provider, `/device` |
-| `renderer_assignments` | named screen | the naming page (insert); deleted with its device by `forget` | the pool's list of screens (`v1:render:screens`), the pages |
+| `renderer_assignments` | named screen | pairing (insert: the slug is its device id), or its settings page for a screen paired before that; deleted with its device by `forget` | the pool's list of screens (`v1:render:screens`), the pages |
 
 ## What each action changes
 

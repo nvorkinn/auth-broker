@@ -1,7 +1,8 @@
-"""Test naming a screen, which puts it on the render pool under its slug (services/assignments.py).
+"""Test naming a screen: its stable name at pairing (services/assignments.py), and its friendly name.
 
-Covers the /device/name page and the slug's rules. Which named screens the pool draws is
-tests/services/test_render_screens.py's.
+The friendly name is set on its settings page.
+
+Which named screens the pool draws is tests/services/test_render_screens.py's.
 """
 
 import pytest
@@ -19,14 +20,17 @@ def _bearer(secret):
     return {"Authorization": f"Bearer {secret}"}
 
 
-@pytest.fixture
-def screen(app, client):
-    """Register a screen paired by the signed-in user, with no renderer yet: return its device_id."""
-    device_id = client.post("/api/devices/register", json={"secret": DISPLAY, "width": 480, "height": 800}).get_json()[
+def _register(client, secret=DISPLAY):
+    return client.post("/api/devices/register", json={"secret": secret, "width": 480, "height": 800}).get_json()[
         "device_id"
     ]
-    token = pairing.token_for(hash_secret(DISPLAY))
-    assert client.post("/pair/token", json={"token": token}).status_code == 200
+
+
+@pytest.fixture
+def paired(app, client):
+    """Register a screen and pair the signed-in user with it by its token: return its device_id."""
+    device_id = _register(client)
+    assert client.post("/pair/token", json={"token": pairing.token_for(hash_secret(DISPLAY))}).status_code == 200
     return device_id
 
 
@@ -35,182 +39,124 @@ def _assignment(app, device_id):
         return db.session.get(Device, device_id).assignment
 
 
-# --- naming the screen ------------------------------------------------------------------------------
+# --- its stable name, at pairing --------------------------------------------------------------------------------------
 
 
-def test_a_new_screen_is_sent_to_name_itself_first(client, screen):
-    response = client.get("/device")
-
-    assert response.status_code == 302
-    assert response.headers["Location"] == f"/device/{screen}/name"
-    assert b"Name your screen" in client.get(response.headers["Location"]).data
-    assert b"Name your screen" in client.get("/device/name").data
-
-
-def test_naming_the_screen_creates_its_assignment_and_opens_the_settings(app, client, screen):
-    response = client.post("/device/name", data={"slug": "  Lisa "})
-
-    assert response.status_code == 302
-    assert response.headers["Location"] == f"/device/{screen}"
-    assignment = _assignment(app, screen)
-    assert assignment.slug == f"{USERNAME}-lisa"
+def test_pairing_names_the_screen_by_its_own_id_and_opens_its_settings(app, client, paired):
+    # The stable name the pool lists it under and its metrics are labelled with: never shown.
+    assert _assignment(app, paired).slug == paired
     assert client.get("/device").status_code == 200
-    assert client.get("/device/name").headers["Location"] == f"/device/{screen}"
+    # Where a new screen used to be named first.
+    assert client.get("/device/name").headers["Location"] == f"/device/{paired}"
+    assert client.post(f"/device/{paired}/name", data={"slug": "lisa"}).headers["Location"] == f"/device/{paired}"
 
 
-@pytest.mark.parametrize("slug", ["", "-lisa", "li sa", "Li$a", "x" * 33])
-def test_a_bad_slug_is_refused_and_nothing_is_created(app, client, screen, slug):
-    response = client.post("/device/name", data={"slug": slug})
+def test_pairing_by_code_and_the_owner_command_name_the_screen_too(app, client, cli):
+    by_code = _register(client, "a-screen-paired-by-a-code-0123")
+    with app.app_context():
+        code = pairing.issue_code(by_code)
+    client.post("/pair", data={"code": code})
+    by_command = _register(client, "a-screen-given-an-owner-0123")
+    cli("owner", by_command, "user-2")
 
-    assert response.status_code == 400
-    assert _assignment(app, screen) is None
-
-
-def test_a_slug_is_unique_across_the_whole_broker(app, client, screen):
-    client.post("/device/name", data={"slug": "lisa"})
-    other = app.test_client()
-    other.environ_base["HTTP_X_AUTHENTIK_UID"] = "user-2"
-    other.environ_base["HTTP_X_AUTHENTIK_USERNAME"] = USERNAME
-    other_id = other.post(
-        "/api/devices/register", json={"secret": "another-display-0123456789", "width": 480, "height": 800}
-    )
-    other_id = other_id.get_json()["device_id"]
-    token = pairing.token_for(hash_secret("another-display-0123456789"))
-    other.post("/pair/token", json={"token": token})
-
-    response = other.post("/device/name", data={"slug": "lisa"})
-
-    assert response.status_code == 400
-    assert b"taken" in response.data
-    assert _assignment(app, other_id) is None
+    assert _assignment(app, by_code).slug == by_code
+    assert _assignment(app, by_command).slug == by_command
 
 
-def test_a_named_screen_is_never_asked_to_name_itself_again(paired_client):
-    client, device_id, _ = paired_client
+def test_a_screen_paired_before_automatic_names_gets_one_on_its_settings_page(app, client, paired):
+    with app.app_context():
+        db.session.delete(db.session.get(Device, paired).assignment)
+        db.session.commit()
+
     assert client.get("/device").status_code == 200
-    assert client.get("/device/name").headers["Location"] == f"/device/{device_id}"
+
+    assert _assignment(app, paired).slug == paired
 
 
-def test_forgetting_a_device_frees_its_slug(app, client, screen, cli):
-    client.post("/device/name", data={"slug": "lisa"})
-    assignment_id = _assignment(app, screen).id
+def test_naming_again_changes_nothing(app, paired):
+    with app.app_context():
+        assert assignments.auto_name(db.session.get(Device, paired)) is None
+    assert _assignment(app, paired).slug == paired
 
-    assert cli("forget", screen).exit_code == 0
+
+def test_forgetting_a_device_frees_its_slug(app, client, paired, cli):
+    assignment_id = _assignment(app, paired).id
+
+    assert cli("forget", paired).exit_code == 0
 
     with app.app_context():
         assert db.session.get(RendererAssignment, assignment_id) is None
 
 
-def test_a_slug_taken_between_the_check_and_the_insert_is_refused(app, client, screen, monkeypatch):
-    """Check two owners naming their screens the same thing at once.
+# --- its friendly name ------------------------------------------------------------------------------------------------
 
-    Both pass the check, the second insert hits the unique index.
-    """
-    other = app.test_client()
-    other.environ_base["HTTP_X_AUTHENTIK_UID"] = "user-2"
-    other.environ_base["HTTP_X_AUTHENTIK_USERNAME"] = USERNAME
-    other_id = other.post(
-        "/api/devices/register", json={"secret": "another-display-0123456789", "width": 480, "height": 800}
-    )
-    other_id = other_id.get_json()["device_id"]
-    other.post("/pair/token", json={"token": pairing.token_for(hash_secret("another-display-0123456789"))})
-    assert client.post("/device/name", data={"slug": "lisa"}).status_code == 302
-    real_scalar = assignments.db.session.scalar
 
-    def scalar_that_misses_the_slug_check(statement, *args, **kwargs):
-        if "renderer_assignments.id" in str(statement):
-            return None
-        return real_scalar(statement, *args, **kwargs)
+def test_a_new_screen_is_called_screen_and_its_id_until_its_owner_names_it(client, paired):
+    assert f">Screen {paired[:6]}</a>" in client.get("/device").data.decode()
 
-    monkeypatch.setattr(assignments.db.session, "scalar", scalar_that_misses_the_slug_check)
 
-    response = other.post("/device/name", data={"slug": "lisa"})
+def test_the_owner_names_and_renames_the_screen_on_its_settings_page(app, client, paired):
+    assert client.post("/device", data={"screen_name": "  Kitchen   wall "}).status_code == 302
+    page = client.get("/device").data.decode()
+    assert ">Kitchen wall</a>" in page
+    assert 'name="screen_name" value="Kitchen wall"' in page
+
+    client.post("/device", data={"screen_name": "Hall"})
+
+    with app.app_context():
+        device = db.session.get(Device, paired)
+        assert device.device_name == "Hall"
+        assert device.assignment.slug == paired  # the stable name never moves
+
+
+def test_a_blank_name_clears_it_and_a_save_without_one_keeps_it(app, client, paired):
+    client.post("/device", data={"screen_name": "Hall"})
+    client.post("/device", data={"style": "card"})  # a form without the field
+    with app.app_context():
+        assert db.session.get(Device, paired).device_name == "Hall"
+
+    client.post("/device", data={"screen_name": "   "})
+
+    with app.app_context():
+        assert db.session.get(Device, paired).device_name is None
+
+
+def test_a_name_too_long_is_refused_and_nothing_is_saved(app, client, paired):
+    response = client.post("/device", data={"screen_name": "x" * (assignments.NAME_MAX + 1), "style": "card"})
 
     assert response.status_code == 400
-    assert b"taken" in response.data
-    assert _assignment(app, other_id) is None
+    assert b"at most 40 characters" in response.data
+    with app.app_context():
+        assert db.session.get(Device, paired).device_name is None
 
 
-def test_naming_a_screen_that_got_its_name_meanwhile_goes_to_the_settings(client, screen, monkeypatch):
-    def already_has_one(device, slug, username):
-        raise assignments.NotNeededError(device.device_id)
+def test_a_screen_named_by_a_slug_before_keeps_it_as_its_name(app, client, paired):
+    with app.app_context():
+        db.session.get(Device, paired).assignment.slug = f"{USERNAME}-lisa"
+        db.session.commit()
 
-    monkeypatch.setattr(assignments, "create", already_has_one)
-
-    response = client.post("/device/name", data={"slug": "lisa"})
-
-    assert (response.status_code, response.headers["Location"]) == (302, f"/device/{screen}")
+    assert f">{USERNAME}-lisa</a>" in client.get("/device").data.decode()
 
 
-# --- the username prefix ------------------------------------------------------------------------------
+def test_the_screens_name_is_never_logged(client, paired, caplog):
+    client.post("/device", data={"screen_name": "Mum's flat in Kennington"})
 
+    with caplog.at_level("INFO"):
+        client.post("/api/frame", headers=_bearer(DISPLAY))
 
-@pytest.mark.parametrize(
-    ("username", "prefix"),
-    [
-        ("nvorkinn", "nvorkinn"),
-        ("Nikolai V.", "nikolai-v"),
-        ("n.vorkinn@gmail.com", "n-vorkinn-gmail-com"[: assignments.PREFIX_MAX].rstrip("-")),
-        ("--A__", "a"),
-        ("x" * 40, "x" * assignments.PREFIX_MAX),
-        ("!!!", "user"),
-        ("", "user"),
-        (None, "user"),
-    ],
-)
-def test_the_prefix_is_the_username_made_safe_and_cut_to_fit(username, prefix):
-    assert assignments.slug_prefix(username) == prefix
-
-
-def test_a_full_slug_always_fits_the_slug_limit():
-    for username in ["a", "x" * 100, "Nikolai V."]:
-        suffix = "s" * assignments.max_suffix_length(username)
-        slug = assignments.full_slug(username, suffix)
-        assert assignments.SLUG_RE.match(slug)
-        assert len(slug) <= assignments.SLUG_MAX
-        with pytest.raises(assignments.InvalidSlugError):
-            assignments.full_slug(username, suffix + "s")
-
-
-def test_the_name_page_shows_the_prefix_the_user_cannot_change(client, screen):
-    page = client.get("/device/name").data.decode()
-
-    assert f"{USERNAME}-" in page
-    assert f'maxlength="{assignments.max_suffix_length(USERNAME)}"' in page
-
-
-def test_a_suffix_too_long_for_the_prefix_is_refused(app, client, screen):
-    too_long = "s" * (assignments.max_suffix_length(USERNAME) + 1)
-
-    assert client.post("/device/name", data={"slug": too_long}).status_code == 400
-    assert _assignment(app, screen) is None
-
-
-def test_the_slug_uses_the_username_at_the_time_of_naming(app, client, screen):
-    client.environ_base["HTTP_X_AUTHENTIK_USERNAME"] = "Nikolai V."
-
-    client.post("/device/name", data={"slug": "kitchen"})
-
-    assert _assignment(app, screen).slug == "nikolai-v-kitchen"
-
-
-def test_a_user_without_a_username_header_gets_the_fallback_prefix(app, client, screen):
-    del client.environ_base["HTTP_X_AUTHENTIK_USERNAME"]
-
-    client.post("/device/name", data={"slug": "kitchen"})
-
-    assert _assignment(app, screen).slug == "user-kitchen"
+    assert f"POST /api/frame device={paired} ({paired}) role=display" in caplog.messages
+    assert not any("Kennington" in message for message in caplog.messages)
 
 
 # --- the username on the page ---------------------------------------------------------------------------
 
 
-def test_the_username_is_shown_at_the_top_of_the_pages(client, screen):
-    for path in ["/device/name", "/pair"]:
+def test_the_username_is_shown_at_the_top_of_the_pages(client, paired):
+    for path in ["/device", "/pair"]:
         assert f'<div class="whoami" title="Signed in as {USERNAME}">{USERNAME}</div>' in client.get(path).data.decode()
 
 
-def test_the_username_is_escaped(client, screen):
+def test_the_username_is_escaped(client, paired):
     client.environ_base["HTTP_X_AUTHENTIK_USERNAME"] = "<script>alert(1)</script>"
 
     page = client.get("/pair").data.decode()

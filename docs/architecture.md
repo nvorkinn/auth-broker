@@ -253,20 +253,21 @@ sequenceDiagram
     participant B as auth-broker
     participant D as Redis
     participant W as Render pool
-    P->>B: GET /device<br/>signed in
-    B-->>P: 302 Location: /device/ID/name
-    P->>B: POST /device/ID/name {slug}<br/>signed in
-    Note right of B: DB: +renderer_assignments (the slug)
-    B->>D: HSET v1:render:screens ID SLUG, then a render job for ID
-    B-->>P: 302 Location: /device/ID
+    P->>B: POST /pair/token {token} (or POST /pair {code})<br/>signed in
+    Note right of B: DB: devices: owner, paired_at; +renderer_assignments (slug = the device id)
+    B->>D: SET v1:config:ID, HSET v1:render:screens ID ID, then a render job for ID
+    B-->>P: 200 {status: paired}
     W->>D: BRPOP v1:render:jobs, claim, read v1:config:ID and its panels' data
     W->>D: HSET v1:frame:ID (frame, etag, rendered_at), TTL a day
+    P->>B: POST /device/ID {screen_name: Kitchen}<br/>signed in
+    Note right of B: DB: devices: device_name (the friendly name). The store's list is unchanged
+    B-->>P: 302 Location: /device/ID
 ```
 
-- A new screen's owner is sent to the naming page before anything else works. The slug is
-  `<username up to 16 characters>-<what they typed>`, at most 32 characters, unique across the whole broker.
-- Naming lists the screen in `v1:render:screens` and queues its first render, so its first frame is drawn within
-  seconds and shows at the screen's next poll. See the README's [Naming a screen](../README.md#naming-a-screen).
+- A screen is named automatically when it's paired, by its own id (`assignments.auto_name`), so it's listed in
+  `v1:render:screens` and drawn at once. Its owner gives it a friendly name on its settings page whenever they like,
+  which changes nothing in the store. Screens named before that kept the `<username up to 16 characters>-<what they
+  typed>` slug they chose. See the README's [Naming a screen](../README.md#naming-a-screen).
 
 ### 5. Steady state
 

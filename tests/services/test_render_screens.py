@@ -214,20 +214,29 @@ def test_redis_down_is_logged_by_type_and_not_raised(app):
 # --- kept in step with the database ----------------------------------------------------------------------------------
 
 
-def test_naming_a_screen_lists_it_and_draws_it(app, store, client):
+def test_pairing_names_the_screen_and_lists_and_draws_it_at_once(app, store, client):
     display = "display-secret-for-naming-a-screen"
     device_id = client.post("/api/devices/register", json={"secret": display, "width": 480, "height": 800}).get_json()[
         "device_id"
     ]
     with app.app_context():
         token = db.session.get(Device, device_id).pairing_token
+    assert store.hgetall(SCREENS) == {}  # not paired yet
+
     assert client.post("/pair/token", json={"token": token}).status_code == 200
-    assert store.hgetall(SCREENS) == {}  # paired, but no slug yet
 
-    assert client.post("/device/name", data={"slug": "kitchen"}).status_code == 302
+    # Under its stable name, its own id (assignments.auto_name): what its owner calls it can change, this can't.
+    assert store.hgetall(SCREENS) == {device_id: device_id}
+    assert device_id in _jobs(store)
 
-    assert store.hgetall(SCREENS) == {device_id: "tester-kitchen"}
-    assert _jobs(store) == [device_id]
+
+def test_renaming_a_screen_leaves_its_entry_alone(store, client, paired_client):
+    _client, _device_id, _ = paired_client
+    before = store.hgetall(SCREENS)
+
+    client.post("/device", data={"screen_name": "Kitchen"})
+
+    assert store.hgetall(SCREENS) == before
 
 
 def test_unpairing_keeps_a_screen_listed_only_while_its_code_is_live(app, store, paired_client, cli):

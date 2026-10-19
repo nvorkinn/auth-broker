@@ -224,7 +224,7 @@ def test_pairing_by_token_stores_the_config(app, store, nudges, client):
     assert client.post("/pair/token", json={"token": token}).status_code == 200
 
     assert _stored(store, device_id)["pairing_code"] is None
-    assert nudges() == []  # not named yet, so the pool doesn't draw it
+    assert nudges() == [device_id]  # named at pairing, so the pool draws it at once
 
 
 def test_a_code_takes_the_config_out_of_the_store_until_it_is_used(app, store, nudges, paired_client):
