@@ -19,7 +19,7 @@ ENV PYTHONUNBUFFERED=1
 
 # The dependencies, exactly as uv.lock pins them (no dev group), in /app/.venv. vendor/countdown-api (the API contract
 # and its generated code) is installed from here, editable, so it has to stay where it is. The uv cache is a bind mount
-# from the uv-cache stage above: empty unless the build is given CI's cache (`--build-context uv-cache=~/.cache/uv`),
+# from the uv-cache stage above: empty unless the build is given CI's cache (`--build-context uv-cache=<its folder>`),
 # and whatever uv adds to it is thrown away with the mount. uv itself is mounted too, so it isn't left in the image.
 ENV UV_COMPILE_BYTECODE=1 UV_LINK_MODE=copy UV_PYTHON_DOWNLOADS=never
 COPY vendor/countdown-api/ vendor/countdown-api/

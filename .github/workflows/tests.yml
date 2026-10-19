@@ -32,20 +32,10 @@ jobs:
         with:
           python-version: "3.14"
 
-      # setup-uv also caches ~/.cache/uv (uv's downloads and built wheels) in the GitHub Actions cache, keyed on
-      # pyproject.toml and uv.lock, so a new cache is saved whenever the dependencies change. The same uv as the
-      # Dockerfile's (keep them in step), and the image job below sets it up the same way, so the broker's image
-      # build reads the cache these jobs save.
+      # setup-uv also caches uv's downloads and built wheels in the GitHub Actions cache, keyed on (among others)
+      # pyproject.toml and uv.lock, so a new cache is saved whenever the dependencies change. The image job below
+      # reads the same cache for the broker's build.
       - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
-        with:
-          version: "0.13.1"
-          # Part of the cache key: given, not found, so the image job (which has no Python 3.14) gets the same key.
-          python-version: "3.14"
-          enable-cache: true
-          cache-local-path: ~/.cache/uv
-          cache-dependency-glob: |
-            pyproject.toml
-            uv.lock
 
       - name: Install redis-server
         # For the render queue's script's tests against a real Redis (tests/services/test_render_jobs.py starts its
@@ -127,24 +117,24 @@ jobs:
           submodules: true
 
       # The broker's image installs its dependencies with uv: given the test jobs' uv cache, it reads what it needs
-      # from there. Restore only: this job adds nothing to the cache, so it mustn't save it under the test jobs' key.
+      # from there. Python 3.14 as in the test jobs, as it's part of setup-uv's cache key. Restore only: this job adds
+      # nothing to the cache, so it mustn't save it under the test jobs' key.
+      - uses: actions/setup-python@v7
+        if: matrix.image == 'broker'
+        with:
+          python-version: "3.14"
+
       - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         if: matrix.image == 'broker'
         with:
-          version: "0.13.1"
-          python-version: "3.14"
-          enable-cache: true
           save-cache: false
-          cache-local-path: ~/.cache/uv
-          cache-dependency-glob: |
-            pyproject.toml
-            uv.lock
 
-      # The broker's in place of the Dockerfile's empty uv-cache stage: the restored cache (an empty folder on a miss).
+      # The broker's in place of the Dockerfile's empty uv-cache stage: the restored cache (setup-uv's UV_CACHE_DIR,
+      # an empty folder on a miss).
       - name: Build image
         run: |
-          mkdir -p ~/.cache/uv
-          docker build ${{ matrix.image == 'broker' && '--build-context uv-cache="$HOME/.cache/uv"' || '' }} \
+          ${{ matrix.image == 'broker' && 'mkdir -p "$UV_CACHE_DIR"' || '' }}
+          docker build ${{ matrix.image == 'broker' && '--build-context uv-cache="$UV_CACHE_DIR"' || '' }} \
             -t auth-broker-${{ matrix.image }} ${{ matrix.context || matrix.image }}
 
       - name: Check config
