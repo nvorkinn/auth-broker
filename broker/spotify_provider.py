@@ -6,7 +6,7 @@ It runs from the broker's image with the broker's settings and database, and cal
 broker's own clients (broker/clients/spotify.py, broker/services/music.py), so the tokens never leave the broker, and
 a refreshed Spotify token is stored back in the database. The renderers get the music area only from the store. Reading
 Apple Music also logs its new plays, which its top lists are counted from (apple_music.record_plays); nothing else logs
-them. See "Music in the store" in the README for the keys and what they hold.
+them. The keys and what they hold are in the countdown-api store contract.
 
 The playing track's cover is stored too, once per image however many screens show it (broker/album_art.py), so the
 renderers never call Spotify's or Apple's image hosts either.
