@@ -26,7 +26,6 @@ from broker.models import (
     STYLES,
     Device,
     DeviceConfig,
-    Frame,
     GitHubToken,
     GlowmarktCredentials,
     SpotifyToken,
@@ -155,7 +154,7 @@ def pair() -> ResponseReturnValue:
             return _too_many_attempts(lockout)
         return render_template("pair.html", error="That code is invalid or has expired.", token="")
 
-    # Paired, and the code spent: its renderer reads its config from the store again.
+    # Paired, and the code spent: its config goes back in the store, for the render pool to draw.
     config_store.publish(device_id)
     return redirect(url_for("pages.device_config"))
 
@@ -192,8 +191,8 @@ def pair_by_token() -> ResponseReturnValue:
 def device_config() -> ResponseReturnValue:
     """Show a screen's settings page, and save the settings posted from it."""
     device_id = g.device_id
-    # A screen with no renderer yet is named first: nothing else on this page works until it has one.
-    if assignments.needs_renderer(db.session.get(Device, device_id)):
+    # A screen with no name yet is named first: the render pool draws it once it has one.
+    if assignments.needs_name(db.session.get(Device, device_id)):
         return redirect(url_for("pages.name_screen", device_id=device_id))
 
     if request.method == "POST":
@@ -338,12 +337,12 @@ def _save_github_token(device_id: str) -> bool:
 @bp.route("/device/<device_id>/name", methods=["GET", "POST"])
 @require_paired_user
 def name_screen() -> ResponseReturnValue:
-    """Name a new screen, which asks for its renderer to be started (see services/assignments.py).
+    """Name a new screen, which puts it on the render pool (see services/assignments.py).
 
     The user is sent here right after pairing, and never again once it's done.
     """
     device = db.session.get(Device, g.device_id)
-    if not assignments.needs_renderer(device):
+    if not assignments.needs_name(device):
         return redirect(url_for("pages.device_config", device_id=g.device_id))
 
     error = None
@@ -379,9 +378,8 @@ def name_screen() -> ResponseReturnValue:
 def screen_view() -> ResponseReturnValue:
     """Show what a screen shows, as its latest frame, and keep it current as the screen does."""
     config = db.session.get(DeviceConfig, g.device_id)
-    frame = db.session.get(Frame, g.device_id)
-    # What the screen is served: the renderer's record in Redis, or this row (services/frame_record.py).
-    shown = frame_record.current(frame_record.head(g.device_id), frame)
+    # What the screen is served: the render pool's record in Redis (services/frame_record.py).
+    shown = frame_record.head(g.device_id)
     upright = config.orientation != "horizontal"
     width, height = (frame_image.HEIGHT, frame_image.WIDTH) if upright else (frame_image.WIDTH, frame_image.HEIGHT)
     now = pace.clock()
@@ -391,7 +389,7 @@ def screen_view() -> ResponseReturnValue:
         has_frame=shown is not None,
         rendered_at=shown.rendered_at if shown else None,
         # As often as the screen polls, right now.
-        interval=pace.poll_interval_s(now, pace.screen_hints(g.device_id, frame, now)),
+        interval=pace.poll_interval_s(now, pace.screen_hints(g.device_id, now)),
         width=width,
         height=height,
     )
@@ -403,12 +401,12 @@ def screen_view() -> ResponseReturnValue:
 def screen_frame() -> ResponseReturnValue:
     """Serve a screen's latest frame as a PNG, the right way up for how the screen is hung.
 
-    The same frame as the screen is served: the renderer's record in Redis, or the row (services/frame_record.py).
+    The same frame as the screen is served: the render pool's record in Redis (services/frame_record.py).
     Conditional on the frame's ETag (and the orientation, which changes the picture), so a page polling it only
-    downloads a frame that changed. When it was drawn rides along in a header for the page to say: the record's time
-    is when the renderer first drew the picture, and the row's moves on every upload, frame changed or not.
+    downloads a frame that changed. When it was drawn rides along in a header for the page to say: when the pool first
+    drew the picture.
     """
-    frame = frame_record.current(frame_record.read(g.device_id), db.session.get(Frame, g.device_id))
+    frame = frame_record.read(g.device_id)
     if frame is None:
         return jsonify(error="no frame yet"), 404
     upright = db.session.get(DeviceConfig, g.device_id).orientation != "horizontal"
@@ -420,30 +418,6 @@ def screen_frame() -> ResponseReturnValue:
     if resp.status_code == HTTPStatus.OK:  # a 304 needs no picture
         resp.set_data(frame_image.to_png(frame.frame, upright=upright))
     return resp
-
-
-@bp.post("/api/displays/<device_id>/renderer")
-@require_user
-def request_renderer(device_id: str) -> ResponseReturnValue:
-    """Name the signed-in user's screen, which asks for its renderer (the same as the form above).
-
-    {"slug": "lisa"} gives 201 {id, slug, status}; 400 for a bad slug, 404 for a device that isn't the
-    user's, 409 for a slug that's taken or a screen that already has its renderer.
-    """
-    device = db.session.get(Device, device_id)
-    if device is None or device.owner != current_user() or device.paired_at is None:
-        return jsonify(error="not found"), 404
-    slug = (request.get_json(silent=True) or {}).get("slug", "")
-    try:
-        assignment = assignments.create(device, slug if isinstance(slug, str) else "", current_username())
-    except assignments.InvalidSlugError:
-        return jsonify(error="slug must match [a-z0-9][a-z0-9_-]* and fit in 32 characters with the prefix"), 400
-    except (assignments.SlugTakenError, assignments.NotNeededError) as e:
-        return jsonify(
-            error="slug is taken" if isinstance(e, assignments.SlugTakenError) else "already has a renderer"
-        ), 409
-    render_screens.write()
-    return jsonify(id=assignment.id, slug=assignment.slug, status=assignment.status), 201
 
 
 # The page always sets this orientation and doesn't let it be changed, whatever is stored.

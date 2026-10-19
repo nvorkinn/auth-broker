@@ -1,11 +1,11 @@
 """A device's live pairing code in the store, `v1:pairing:<device id>`, for a screen the render pool draws.
 
 The copy of a screen's config in the store (services/config_store.py) never carries a pairing code, and there's none
-at all while the device has a code to show. A per-screen renderer then asks GET /api/config, which gives it the code;
-a render in the pool (pi-dashboard's docs/stateless-renderers.md) reads only the store. So while a code is live the
-broker keeps this key too: exactly what GET /api/config answers the device then (the contract's ConfigResponse, made
-by renderer_config.build) with the code in it. That's everything the pool needs to draw the pairing screen in the
-screen's own size and language. tests/fixtures/pairing_key.json pins the shape (pi-dashboard's store.pairing reads
+at all while the device has a code to show. A render in the pool (pi-dashboard's docs/stateless-renderers.md) reads
+only the store, so while a code is live the broker keeps this key: the screen's config (the contract's
+ConfigResponse, made by renderer_config.build) with the code in it. That's everything the pool needs to draw the
+pairing screen in the screen's own size and language; the screen stays in the pool's list while it has a live code
+(services/render_screens.py). tests/fixtures/pairing_key.json pins the shape (pi-dashboard's store.pairing reads
 it).
 
 Plaintext, by Nikolai's decision (stateless-renderers.md, "The pairing screen"): every Redis reader on the host can
@@ -43,8 +43,8 @@ def key(device_id: str) -> str:
 def write(device_id: str, code: str, expires_at: datetime) -> None:
     """Store the device's config with `code` in it, expiring when the code does (`expires_at`, aware).
 
-    Needs an app context, after the code's commit. Nothing is stored for a device with no settings (GET /api/config
-    answers it 404, so there's no screen to draw either); a Redis that can't be asked is logged, not raised.
+    Needs an app context, after the code's commit. Nothing is stored for a device with no settings (there's no screen
+    to draw); a Redis that can't be asked is logged, not raised.
     """
     # Here, not at the top: renderer_config imports pairing, which imports this module.
     from broker.services import renderer_config  # noqa: PLC0415

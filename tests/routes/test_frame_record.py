@@ -1,9 +1,9 @@
-"""The screen served from the renderer's frame record in Redis (services/frame_record.py), through the real app.
+"""The screen served from the render pool's frame record in Redis (services/frame_record.py), through the real app.
 
-Every test runs create_app()'s app with its test client: the renderer PUTs to /api/frame as before, writes the record
-as pi-dashboard's renderer does (the shape tests/fixtures/frame_record.json pins, shared with pi-dashboard's tests),
-and the screen polls GET and POST /api/frame with If-None-Match, as the ESP32 firmware does (countdown-esp32's
-frame_client.cpp: it keeps the ETag header as sent, quotes and all, and draws only a 200).
+Every test runs create_app()'s app with its test client: the record is written as pi-dashboard's render pool does (the
+shape tests/fixtures/frame_record.json pins, shared with pi-dashboard's tests), and the screen polls GET and POST
+/api/frame with If-None-Match, as the ESP32 firmware does (countdown-esp32's frame_client.cpp: it keeps the ETag header
+as sent, quotes and all, and draws only a 200).
 """
 
 import json
@@ -18,8 +18,7 @@ import redis
 
 from broker import create_app
 from broker.db import db
-from broker.models import Device, Frame
-from broker.routes import frames
+from broker.models import Device
 from broker.services import frame_image, frame_record, pace
 
 FIXTURES = Path(__file__).parent.parent / "fixtures"
@@ -29,8 +28,10 @@ FIXTURE_FRAME = (FIXTURES / FIXTURE["fields"]["frame"]["file"]).read_bytes()
 SECRET = "a-very-long-device-secret-value"  # register_device's default
 LONG_AGO = datetime(2026, 1, 1, tzinfo=UTC)
 LATER = datetime(2099, 1, 1, tzinfo=UTC)
-# The pacing clock is frozen at 12:00:10 UTC, so every answer says to sleep until 12:00:33 (services/pace.py).
+# The pacing clock is frozen at 12:00:10 UTC, so every answer says to sleep until 12:00:33 (services/pace.py), but for
+# a 404's: the pool's next render lands within the minute, so it asks again sooner (routes/frames.NO_FRAME_RETRY_S).
 RETRY_AFTER = "23"
+NO_FRAME_RETRY_AFTER = "10"
 
 
 @pytest.fixture(autouse=True)
@@ -53,7 +54,7 @@ def logged(monkeypatch) -> MagicMock:
 
 
 def _frame(fill: int) -> bytes:
-    return bytes([fill]) * frames.FRAME_BYTES
+    return bytes([fill]) * frame_record.FRAME_BYTES
 
 
 def _etag(frame: bytes) -> str:
@@ -61,7 +62,7 @@ def _etag(frame: bytes) -> str:
 
 
 def _write(store, device_id: str, picture: bytes, at: datetime, **fields) -> None:
-    """Write the screen's record as pi-dashboard's renderer does (store.frame_record), but for `fields`.
+    """Write the screen's record as pi-dashboard's render pool does (store.frame_record), but for `fields`.
 
     A field given as None is left out.
     """
@@ -70,11 +71,6 @@ def _write(store, device_id: str, picture: bytes, at: datetime, **fields) -> Non
     store.delete(frame_record.key(device_id))
     store.hset(frame_record.key(device_id), mapping={k: v for k, v in values.items() if v is not None})
     store.expire(frame_record.key(device_id), FIXTURE["ttl_s"])
-
-
-def _put(client, frame, secret=SECRET, **headers):
-    response = client.put("/api/frame", data=frame, headers={"Authorization": f"Bearer {secret}", **headers})
-    assert response.status_code == 204
 
 
 def _get(client, secret=SECRET, **headers):
@@ -87,11 +83,6 @@ def _poll(client, secret=SECRET, **headers):
     return client.post("/api/frame", json=body, headers={"Authorization": f"Bearer {secret}", **headers})
 
 
-def _row_time(app, device_id) -> datetime:
-    with app.app_context():
-        return db.session.get(Frame, device_id).rendered_at
-
-
 def _quoted(frame: bytes) -> str:
     return f'"{_etag(frame)}"'
 
@@ -101,7 +92,7 @@ def _quoted(frame: bytes) -> str:
 
 def test_the_key_and_the_frame_are_the_fixtures():
     assert frame_record.key(FIXTURE["device_id"]) == FIXTURE["key"]
-    assert len(FIXTURE_FRAME) == FIXTURE["fields"]["frame"]["length"] == frame_record.FRAME_BYTES == frames.FRAME_BYTES
+    assert len(FIXTURE_FRAME) == FIXTURE["fields"]["frame"]["length"] == frame_record.FRAME_BYTES == 48_000
     assert _etag(FIXTURE_FRAME) == FIXTURE["fields"]["etag"]
 
 
@@ -140,24 +131,13 @@ def test_the_app_reads_the_frames_with_a_client_that_doesnt_decode():
     assert not client.connection_pool.connection_kwargs.get("decode_responses", False)
 
 
-# --- which is served: the record or the row -----------------------------------------------------------------------
-
-
-def test_with_no_record_the_row_is_served(client, register_device):
-    register_device()
-    _put(client, _frame(0x11))
-
-    response = _poll(client)
-
-    assert response.data == _frame(0x11)
-    assert response.headers["ETag"] == _quoted(_frame(0x11))
+# --- serving the record ---------------------------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize("poll", [_get, _poll], ids=["GET", "POST"])
-def test_a_record_newer_than_the_row_is_served(client, register_device, frames_redis, poll):
-    # The renderer wrote its new picture, and its PUT didn't arrive (the broker was restarting).
+def test_a_new_record_replaces_the_last(client, register_device, frames_redis, poll):
     device_id, _ = register_device()
-    _put(client, _frame(0x11))
+    _write(frames_redis, device_id, _frame(0x11), LONG_AGO)
     _write(frames_redis, device_id, _frame(0x22), LATER)
 
     response = poll(client, **{"If-None-Match": _quoted(_frame(0x11))})
@@ -167,8 +147,7 @@ def test_a_record_newer_than_the_row_is_served(client, register_device, frames_r
     assert response.headers["ETag"] == _quoted(_frame(0x22))
 
 
-def test_a_record_with_no_row_is_served(client, register_device, frames_redis):
-    # The renderer's PUTs never arrived at all; nothing for the pace: the usual interval.
+def test_a_record_is_served_with_the_usual_interval(client, register_device, frames_redis):
     device_id, _ = register_device()
     _write(frames_redis, device_id, _frame(0x22), LONG_AGO)
 
@@ -179,36 +158,9 @@ def test_a_record_with_no_row_is_served(client, register_device, frames_redis):
     assert response.headers["Retry-After"] == RETRY_AFTER
 
 
-@pytest.mark.parametrize("poll", [_get, _poll], ids=["GET", "POST"])
-def test_a_row_newer_than_a_record_of_another_picture_is_served(client, register_device, frames_redis, poll):
-    # A renderer rolled back to one that only PUTs, leaving the record of what it drew before.
-    device_id, _ = register_device()
-    _write(frames_redis, device_id, _frame(0x22), LONG_AGO)
-    _put(client, _frame(0x11))
-
-    response = poll(client, **{"If-None-Match": _quoted(_frame(0x22))})
-
-    assert response.status_code == 200
-    assert response.data == _frame(0x11)
-    assert response.headers["ETag"] == _quoted(_frame(0x11))
-
-
-def test_a_record_of_the_rows_picture_answers_the_rows_etag_with_a_304(app, client, register_device, frames_redis):
-    # Today's renderer: the record written, then the same frame PUT, so the row is the newer by a moment. A screen that
-    # drew the frame from the row before this broker was deployed gets its 304 all the same.
-    device_id, _ = register_device()
-    _write(frames_redis, device_id, _frame(0x11), LONG_AGO)
-    _put(client, _frame(0x11))
-
-    response = _poll(client, **{"If-None-Match": _quoted(_frame(0x11))})
-
-    assert response.status_code == 304
-    assert response.headers["ETag"] == _quoted(_frame(0x11))
-
-
 def test_a_new_picture_reaches_the_screen_once_and_then_it_gets_304s(client, register_device, frames_redis):
     device_id, _ = register_device()
-    _put(client, _frame(0x11))
+    _write(frames_redis, device_id, _frame(0x11), LONG_AGO)
     etag = _poll(client).headers["ETag"]
     _write(frames_redis, device_id, _frame(0x22), LATER)
 
@@ -240,18 +192,6 @@ def test_a_304_from_the_record_never_reads_its_frame(client, register_device, fr
     assert asked == [["etag", "rendered_at"], ["frame"]]
 
 
-def test_the_record_keeps_the_pace_the_renderer_asked_for(client, register_device, frames_redis):
-    # The pace still comes with the PUT (services/pace.py), whichever frame is served.
-    device_id, _ = register_device()
-    _put(client, _frame(0x11), **{"X-Refresh-Hint": "30"})
-    _write(frames_redis, device_id, _frame(0x22), LATER)
-
-    response = _poll(client)
-
-    assert response.data == _frame(0x22)
-    assert response.headers["Retry-After"] == "8"  # a 30 s hint polls every 15 s: from 12:00:10, at 12:00:18
-
-
 def test_head_answers_from_the_record_without_a_body(client, register_device, frames_redis):
     device_id, _ = register_device()
     _write(frames_redis, device_id, _frame(0x22), LATER)
@@ -261,7 +201,7 @@ def test_head_answers_from_the_record_without_a_body(client, register_device, fr
     assert response.status_code == 200
     assert response.data == b""
     assert response.headers["ETag"] == _quoted(_frame(0x22))
-    assert response.headers["Content-Length"] == str(frames.FRAME_BYTES)
+    assert response.headers["Content-Length"] == str(frame_record.FRAME_BYTES)
 
 
 @pytest.mark.parametrize("poll", [_get, _poll], ids=["GET", "POST"])
@@ -298,33 +238,20 @@ CORRUPT = {
 
 @pytest.mark.parametrize("fields", CORRUPT.values(), ids=CORRUPT.keys())
 @pytest.mark.parametrize("poll", [_get, _poll], ids=["GET", "POST"])
-def test_a_record_that_cant_be_read_is_no_record(client, register_device, frames_redis, fields, poll):
+def test_a_record_that_cant_be_read_is_no_frame_yet(client, register_device, frames_redis, fields, poll):
     device_id, _ = register_device()
-    _put(client, _frame(0x11))
     _write(frames_redis, device_id, _frame(0x22), LATER, **fields)
 
     response = poll(client)
 
-    assert response.status_code == 200
-    assert response.data == _frame(0x11)
-    assert response.headers["ETag"] == _quoted(_frame(0x11))
-
-
-@pytest.mark.parametrize("fields", CORRUPT.values(), ids=CORRUPT.keys())
-def test_a_record_that_cant_be_read_and_no_row_is_no_frame_yet(client, register_device, frames_redis, fields):
-    device_id, _ = register_device()
-    _write(frames_redis, device_id, _frame(0x22), LATER, **fields)
-
-    response = _poll(client)
-
     assert response.status_code == 404
-    assert response.headers["Retry-After"] == RETRY_AFTER
+    assert response.get_json() == {"error": "no frame yet"}
+    assert response.headers["Retry-After"] == NO_FRAME_RETRY_AFTER
 
 
-def test_a_record_replaced_while_it_was_read_gives_the_row(client, register_device, frames_redis, monkeypatch):
-    # The renderer wrote a new picture between the broker reading the record's etag and its frame.
+def test_a_record_replaced_while_it_was_read_gives_the_new_one(client, register_device, frames_redis, monkeypatch):
+    # The pool wrote a new picture between the broker reading the record's etag and its frame.
     device_id, _ = register_device()
-    _put(client, _frame(0x11))
     _write(frames_redis, device_id, _frame(0x22), LATER)
     head = frame_record.head
 
@@ -338,43 +265,56 @@ def test_a_record_replaced_while_it_was_read_gives_the_row(client, register_devi
     response = _poll(client)
 
     assert response.status_code == 200
-    assert response.data == _frame(0x11)
-    assert response.headers["ETag"] == _quoted(_frame(0x11))
+    assert response.data == _frame(0x33)
+    assert response.headers["ETag"] == _quoted(_frame(0x33))
 
 
-def test_an_expired_record_gives_the_row(client, register_device, frames_redis):
+def test_a_record_deleted_while_it_was_read_is_no_frame_yet(client, register_device, frames_redis, monkeypatch):
     device_id, _ = register_device()
-    _put(client, _frame(0x11))
+    _write(frames_redis, device_id, _frame(0x22), LATER)
+    head = frame_record.head
+
+    def head_then_deleted(device):
+        found = head(device)
+        frames_redis.delete(frame_record.key(device))
+        return found
+
+    monkeypatch.setattr(frame_record, "head", head_then_deleted)
+
+    response = _poll(client)
+
+    assert (response.status_code, response.headers["Retry-After"]) == (404, NO_FRAME_RETRY_AFTER)
+
+
+def test_an_expired_record_is_no_frame_yet(client, register_device, frames_redis):
+    device_id, _ = register_device()
     _write(frames_redis, device_id, _frame(0x22), LATER)
     frames_redis.delete(frame_record.key(device_id))  # lapsed, or evicted
 
-    assert _poll(client).data == _frame(0x11)
+    response = _poll(client)
+
+    assert (response.status_code, response.headers["Retry-After"]) == (404, NO_FRAME_RETRY_AFTER)
 
 
 @pytest.mark.parametrize("poll", [_get, _poll], ids=["GET", "POST"])
-def test_redis_down_gives_the_row_and_logs_only_why(app, client, register_device, logged, poll):
+def test_redis_down_is_no_frame_yet_and_logs_only_why(app, client, register_device, logged, poll):
     register_device()
-    _put(client, _frame(0x11))
     server = fakeredis.FakeServer()
     server.connected = False  # every command raises redis.ConnectionError
     app.extensions["redis_bytes"] = fakeredis.FakeRedis(server=server)
 
     response = poll(client)
 
-    assert response.status_code == 200
-    assert response.data == _frame(0x11)
-    assert logged.warning.call_args.args == (
-        "Couldn't read a screen's frame from Redis (%s); serving the database's",
-        "ConnectionError",
-    )
+    # The screen keeps the picture it has, and asks again soon.
+    assert (response.status_code, response.headers["Retry-After"]) == (404, NO_FRAME_RETRY_AFTER)
+    assert logged.warning.call_args.args == ("Couldn't read a screen's frame from Redis (%s)", "ConnectionError")
 
 
 # --- the config page shows what the screen is served ----------------------------------------------------------------
 
 
 def test_the_screen_page_says_when_the_records_picture_was_drawn(paired_client, frames_redis):
-    client, device_id, secret = paired_client
-    _put(client, _frame(0x11), secret=secret)
+    client, device_id, _secret = paired_client
     drawn = datetime(2099, 1, 1, 12, 34, 56, tzinfo=UTC)
     _write(frames_redis, device_id, _frame(0x22), drawn)
 
@@ -384,7 +324,7 @@ def test_the_screen_page_says_when_the_records_picture_was_drawn(paired_client, 
     assert "12:34:56 UTC" in html
 
 
-def test_the_screen_page_shows_the_record_with_no_row(paired_client, frames_redis):
+def test_the_screen_page_shows_the_record(paired_client, frames_redis):
     client, device_id, _ = paired_client
     _write(frames_redis, device_id, _frame(0x22), LONG_AGO)
 
@@ -395,8 +335,7 @@ def test_the_screen_page_shows_the_record_with_no_row(paired_client, frames_redi
 
 
 def test_the_preview_is_the_records_picture(app, paired_client, frames_redis):
-    client, device_id, secret = paired_client
-    _put(client, _frame(0x00), secret=secret)  # all white
+    client, device_id, _secret = paired_client
     _write(frames_redis, device_id, _frame(0xFF), LATER)  # all black
 
     response = client.get(f"/device/{device_id}/screen/frame.png")
@@ -409,16 +348,12 @@ def test_the_preview_is_the_records_picture(app, paired_client, frames_redis):
     assert again.status_code == 304
 
 
-def test_the_preview_falls_back_to_the_row(app, paired_client, frames_redis):
-    client, device_id, secret = paired_client
-    _put(client, _frame(0x00), secret=secret)
-    _write(frames_redis, device_id, _frame(0xFF), LATER, frame=b"\x00" * 100)  # can't be read
+def test_a_record_that_cant_be_read_is_no_preview(paired_client, frames_redis):
+    client, device_id, _secret = paired_client
+    _write(frames_redis, device_id, _frame(0xFF), LATER, frame=b"\x00" * 100)
 
-    response = client.get(f"/device/{device_id}/screen/frame.png")
-
-    assert response.data == frame_image.to_png(_frame(0x00), upright=True)
-    assert response.headers["ETag"] == f'"{_etag(_frame(0x00))}-v"'
-    assert response.headers["X-Rendered-At"] == _row_time(app, device_id).isoformat(timespec="seconds")
+    assert client.get(f"/device/{device_id}/screen/frame.png").status_code == 404
+    assert "Nothing drawn yet" in client.get(f"/device/{device_id}/screen").get_data(as_text=True)
 
 
 # --- forgetting a device forgets its record -------------------------------------------------------------------------
@@ -448,7 +383,7 @@ def test_unpairing_with_the_config_deletes_the_record(client, register_device, f
     assert _poll(client).status_code == 404  # nothing of the last owner's left to serve
 
 
-def test_unpairing_alone_keeps_the_record_as_it_keeps_the_row(client, register_device, frames_redis, cli):
+def test_unpairing_alone_keeps_the_record(client, register_device, frames_redis, cli):
     device_id, _ = register_device()
     _write(frames_redis, device_id, _frame(0x22), LATER)
 
@@ -471,26 +406,6 @@ def test_forgetting_a_device_while_redis_is_down_still_forgets_it(app, register_
 
 
 # --- choosing, on its own --------------------------------------------------------------------------------------------
-
-
-def _row(etag: str, at: datetime) -> Frame:
-    return Frame(device_id="d", frame=b"", etag=etag, rendered_at=at)
-
-
-def test_current_is_the_record_unless_the_row_is_newer_and_another_picture():
-    record = frame_record.StoredFrame("a" * 16, LONG_AGO + timedelta(seconds=1))
-
-    assert frame_record.current(None, None) is None
-    assert frame_record.current(record, None) is record
-    row = _row("b" * 16, LONG_AGO)
-    assert frame_record.current(None, row) is row
-    assert frame_record.current(record, row) is record  # newer
-    newer_row = _row("b" * 16, LONG_AGO + timedelta(seconds=2))
-    assert frame_record.current(record, newer_row) is newer_row
-    same_picture = _row("a" * 16, LONG_AGO + timedelta(seconds=2))
-    assert frame_record.current(record, same_picture) is record
-    same_time = _row("b" * 16, LONG_AGO + timedelta(seconds=1))
-    assert frame_record.current(record, same_time) is same_time  # only a newer record wins over another picture
 
 
 def test_a_time_in_another_zone_is_read_as_utc(app, frames_redis):

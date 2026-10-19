@@ -1,8 +1,7 @@
-"""Registering devices.
+"""Registering screens.
 
-A screen becomes a device straight away: it exists from its first call, so its owner can pair with it
-and name its renderer (services/assignments.py) before any renderer is running.
-A renderer started by the orchestrator claims its assignment's device with the assignment's claim token.
+A screen becomes a device straight away: it exists from its first call, so its owner can pair with it and name it
+(services/assignments.py), after which the render pool draws it.
 
 Secrets arrive already hashed (auth.hash_secret); the hash is what identifies the caller here.
 """
@@ -11,10 +10,10 @@ import secrets
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import func, select
 
 from broker.db import db
-from broker.models import Device, DeviceConfig, RendererAssignment
+from broker.models import Device, DeviceConfig
 
 from . import pairing
 
@@ -26,32 +25,24 @@ UNPAIRED_TTL = timedelta(hours=24)
 
 @dataclass(frozen=True)
 class Registered:
-    """The device a secret belongs to, or role_conflict if it's already registered as the other kind of client.
+    """The device a secret belongs to; `created` is whether this call registered it, rather than repeating it."""
 
-    `created` is whether this call made the registration, rather than repeating it.
-    """
-
-    device_id: str | None = None
-    role_conflict: bool = False
+    device_id: str
     created: bool = False
 
 
 def _device_with(secret_hash: str) -> Device | None:
-    return db.session.scalar(
-        select(Device).where(or_(Device.renderer_secret_hash == secret_hash, Device.display_secret_hash == secret_hash))
-    )
+    return db.session.scalar(select(Device).where(Device.display_secret_hash == secret_hash))
 
 
 def register_screen(secret_hash: str, width: int, height: int) -> Registered | None:
-    """Make the screen a device at once, so its owner can pair with it and name its renderer.
+    """Make the screen a device at once, so its owner can pair with it and name it.
 
     A repeat of a registered secret finds its device. Returns None when too many screens are already
     waiting to be paired.
     """
     device = _device_with(secret_hash)
     if device is not None:
-        if device.display_secret_hash != secret_hash:
-            return Registered(role_conflict=True)
         return Registered(device_id=device.device_id)
 
     _drop_stale_screens(datetime.now(UTC))
@@ -63,37 +54,9 @@ def register_screen(secret_hash: str, width: int, height: int) -> Registered | N
     return Registered(device_id=device_id, created=True)
 
 
-def claim(secret_hash: str, claim_token: str) -> Registered | None:
-    """Give the device an assignment was made for its renderer's secret, spending its claim token.
-
-    A repeat of a claimed secret finds its device. None for a token that is unknown, spent, or whose
-    device already has a renderer.
-    """
-    device = _device_with(secret_hash)
-    if device is not None:
-        if device.renderer_secret_hash != secret_hash:
-            return Registered(role_conflict=True)
-        return Registered(device_id=device.device_id)
-
-    assignment = db.session.scalar(select(RendererAssignment).where(RendererAssignment.claim_token == claim_token))
-    device = assignment.device if assignment else None
-    if device is None or device.renderer_secret_hash is not None:
-        return None
-    device.renderer_secret_hash = secret_hash
-    assignment.claim_token = None
-    # The name the orchestrator starts the renderer with (DEVICE_NAME), which its config polls used to report: a
-    # renderer that reads its config from the store may never poll.
-    if not device.device_name:
-        device.device_name = assignment.slug
-    db.session.commit()
-    return Registered(device_id=device.device_id, created=True)
-
-
 def _unpaired_screens() -> int:
     return db.session.scalar(
-        select(func.count())
-        .select_from(Device)
-        .where(Device.renderer_secret_hash.is_(None), Device.paired_at.is_(None), ~Device.assignment.has())
+        select(func.count()).select_from(Device).where(Device.paired_at.is_(None), ~Device.assignment.has())
     )
 
 
@@ -104,7 +67,6 @@ def _drop_stale_screens(now: datetime) -> None:
     """
     stale = db.session.scalars(
         select(Device).where(
-            Device.renderer_secret_hash.is_(None),
             Device.paired_at.is_(None),
             ~Device.assignment.has(),
             Device.created_at < now - UNPAIRED_TTL,

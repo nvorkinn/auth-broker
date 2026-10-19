@@ -16,8 +16,7 @@ the server's clock, and nothing else computes a poll or refresh time.
   delay never adds up: the next answer starts from the clock again.
 
 sleep_s and poll_interval_s are pure. screen_hints gathers a screen's hints for them: its own panels' pace keys
-(hint_keys, from its config) read from Redis in one round trip, and the legacy hint today's renderers send with each
-frame (`X-Refresh-Hint`), kept on the frame's row for PACE_LEASE_S, so the pace works with every renderer deployed.
+(hint_keys, from its config) read from Redis in one round trip.
 """
 
 import logging
@@ -30,15 +29,15 @@ from flask import current_app
 from redis import Redis, RedisError
 
 from broker.db import db
-from broker.models import DeviceConfig, Frame
+from broker.models import DeviceConfig
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
 logger = logging.getLogger(__name__)
 
-# How often the screens are rendered, in seconds: on every minute. Also what today's renderers are told to render at
-# (GET /api/config's `interval`).
+# How often the screens are rendered, in seconds: on every minute (the render pool's ticker). Also the config's
+# `interval` in the store.
 RENDER_INTERVAL_S = 60
 # The screen polls this many times per render interval (or per hint), so an out-of-cycle render shows within about
 # half an interval, and its piggybacked logs and metrics are flushed as often.
@@ -50,10 +49,6 @@ LEAD_S = 3
 HINT_FLOOR_S = 20
 # The shortest sleep the screen is ever given: a nearer slot is skipped for the one after.
 MIN_SLEEP_S = 5
-# How long the legacy hint a renderer sends with a frame holds, so one that stops asking (or dies) lapses by itself.
-PACE_LEASE_S = 180
-# The header today's renderers send the legacy hint in, with each PUT /api/frame.
-HINT_HEADER = "X-Refresh-Hint"
 
 _EPOCH = datetime(1970, 1, 1, tzinfo=UTC)
 _ONE_US = timedelta(microseconds=1)
@@ -121,21 +116,18 @@ def hint_keys(config: DeviceConfig | None) -> list[str]:
     return [key("developer", config.device_id)]
 
 
-def screen_hints(device_id: str, frame: Frame | None, now: datetime) -> list[Hint]:
-    """Return the hints for the screen `device_id`: its pace keys' in Redis, and the legacy one on `frame`, its row.
+def screen_hints(device_id: str, now: datetime) -> list[Hint]:
+    """Return the hints for the screen `device_id`: its pace keys' in Redis.
 
-    Live or lapsed: sleep_s tells. Redis being unreachable only loses the keys' hints (logged).
+    Live or lapsed: sleep_s tells. Redis being unreachable only loses the hints (logged).
     """
-    hints = _stored_hints(hint_keys(db.session.get(DeviceConfig, device_id)), now)
-    if frame is not None and frame.pace and frame.pace_until:
-        hints.append(Hint(frame.pace, frame.pace_until))
-    return hints
+    return _stored_hints(hint_keys(db.session.get(DeviceConfig, device_id)), now)
 
 
-def retry_after(device_id: str, frame: Frame | None) -> int:
-    """Return how long the screen `device_id` should sleep after this poll; `frame` is its row (None: no frame yet)."""
+def retry_after(device_id: str) -> int:
+    """Return how long the screen `device_id` should sleep after this poll."""
     now = clock()
-    return sleep_s(now, screen_hints(device_id, frame, now))
+    return sleep_s(now, screen_hints(device_id, now))
 
 
 def _stored_hints(names: list[str], now: datetime) -> list[Hint]:
@@ -167,18 +159,3 @@ def _seconds(value: object) -> int | None:
         return None
     seconds = int(text)
     return seconds if seconds > 0 else None
-
-
-def parse_hint(value: str | None) -> int | None:
-    """Return the seconds a renderer asked for in its X-Refresh-Hint; None if it didn't, or it's junk.
-
-    Kept as asked: the floor and the cap are sleep_s's, like any hint's.
-    """
-    return _seconds(value)
-
-
-def store_hint(frame_values: dict, hint: int | None, now: datetime | None = None) -> None:
-    """Put the legacy hint and when it lapses into the values a frame upload writes (both None to clear it)."""
-    now = now or clock()
-    frame_values["pace"] = hint
-    frame_values["pace_until"] = now + timedelta(seconds=PACE_LEASE_S) if hint else None

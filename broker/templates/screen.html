@@ -97,7 +97,7 @@
              width="{{ width }}" height="{{ height }}" style="max-width: {{ width }}px{% if not has_frame %}; display: none{% endif %}"
              {% if has_frame %}src="{{ url_for('pages.screen_frame', device_id=device_id) }}"{% endif %}>
         <div id="screenEmpty" class="screen-empty"{% if has_frame %} hidden{% endif %}>
-            Nothing drawn yet. The renderer sends the first picture shortly after the screen is named.
+            Nothing drawn yet. The first picture is drawn within a minute of the screen being named.
         </div>
     </div>
 

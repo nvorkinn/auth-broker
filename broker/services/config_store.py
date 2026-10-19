@@ -1,17 +1,15 @@
-"""Each screen's config in the store: `v1:config:<device id>`, and a nudge on `v1:config:changed` when it changes.
+"""Each screen's config in the store: `v1:config:<device id>`, which the render pool draws the screen from.
 
-SQLite stays the source of truth; Redis holds a copy of what GET /api/config answers each renderer (less its secrets,
-see renderer_config.for_store), so the renderers read their config from there and don't need the broker to be up, and
-a change reaches a renderer at once: after writing a device's copy, the broker publishes its device id on
-`v1:config:changed`, which its renderer listens for. The renderer asks GET /api/config only when there's no copy.
+SQLite stays the source of truth; Redis holds a copy of the screen's config (renderer_config.for_store: the countdown
+API contract's ConfigResponse, less its secrets), which the render pool reads, so it never needs the broker to be up.
 
 The copies have no TTL. They're rebuilt from the database (publish_all) on every config save, as the broker starts
 (gunicorn.conf.py), every RESYNC_S in each broker process (start_resync, also from gunicorn.conf.py) and by `flask
 config publish`, so one Redis lost comes back within a minute; and one copy at a time (publish) when a device's pairing
 changes. A device that should have no copy (not paired, a pairing code to show, deleted) has its key removed. Only
-what changed is written, and only those devices are nudged, on the channel and with a render job for the render pool
-(services/render_jobs.py), which listens to no channel. Either way, the render pool's list of screens
-(services/render_screens.py) is rewritten with them.
+what changed is written, and those devices get a render job (services/render_jobs.py) after the write, so the pool
+draws the change at once. Either way, the render pool's list of screens (services/render_screens.py) is rewritten with
+them.
 
 Under `maxmemory-policy volatile-lru` Redis evicts only keys with a TTL, so it never evicts these, and they count
 against the 128 MB for good: a copy is about 700 bytes of JSON (tests/fixtures/config_store.json), about 1 KB with
@@ -34,8 +32,6 @@ logger = logging.getLogger(__name__)
 PREFIX = "v1:config:"
 # How often each broker process rewrites the copies, and the render pool's screens, from the database anyway (resync).
 RESYNC_S = 60
-# The pub/sub channel the broker publishes a device's id on after changing its copy.
-CHANGED = "v1:config:changed"
 
 
 def key(device_id: str) -> str:
@@ -46,23 +42,20 @@ def key(device_id: str) -> str:
 def publish(device_id: str) -> None:
     """Bring one device's copy up to date with the database: write it, or remove it if it should have none.
 
-    Its renderer is nudged if that changed anything. Needs an app context; an unreachable Redis is logged, not raised.
+    It gets a render job if that changed anything. Needs an app context; an unreachable Redis is logged, not raised.
     """
     device = db.session.get(Device, device_id)
-    _write({key(device_id): _stored(device) if device is not None else None})
-    # Its pairing changing (or its being forgotten) changes whether the render pool draws it.
-    render_screens.write()
+    _queue(_write({key(device_id): _stored(device) if device is not None else None}))
 
 
 def publish_all() -> None:
     """Rebuild every device's copy from the database, and remove those of devices that should have none.
 
-    Nudges only the renderers whose copy changed. Needs an app context; an unreachable Redis is logged, not raised.
+    Queues a render only of the screens whose copy changed. Needs an app context; an unreachable Redis is logged, not
+    raised.
     """
     wanted = {key(device.device_id): _stored(device) for device in db.session.scalars(select(Device))}
-    _write(wanted, sweep=True)
-    # And the screens the render pool draws, which are the configured ones (services/render_screens.py).
-    render_screens.write()
+    _queue(_write(wanted, sweep=True))
 
 
 def resync_forever(app: Flask, stop: threading.Event, interval_s: float = RESYNC_S) -> None:
@@ -97,8 +90,18 @@ def _stored(device: Device) -> str | None:
     return stored.model_dump_json() if stored is not None else None
 
 
-def _write(wanted: dict[str, str | None], *, sweep: bool = False) -> None:
-    """Make the keys in `wanted` hold their values (None: no key), then nudge each device whose key changed.
+def _queue(changed: list[str]) -> None:
+    """After the copies are written: rewrite the render pool's screens, then queue a render of each changed screen.
+
+    In that order, so a screen that has just left the pool (unpaired, forgotten) gets no job, and one that has just
+    joined it gets one (render_screens.write queues it, after its copy is written). Logged, never raised.
+    """
+    render_screens.write()
+    render_jobs.enqueue(current_app.extensions["redis"], changed)
+
+
+def _write(wanted: dict[str, str | None], *, sweep: bool = False) -> list[str]:
+    """Make the keys in `wanted` hold their values (None: no key); return the ids of the devices whose key changed.
 
     With `sweep`, every other config key in the store is removed too (a device deleted while Redis was away).
     """
@@ -111,19 +114,16 @@ def _write(wanted: dict[str, str | None], *, sweep: bool = False) -> None:
         current = dict(zip(names, redis.mget(names), strict=True)) if names else {}
         changed = {name: value for name, value in wanted.items() if current[name] != value}
         if not changed:
-            return
-        # One transaction, the writes before the nudges, so a renderer that's nudged reads the new copy.
+            return []
         with redis.pipeline(transaction=True) as pipe:
             for name, value in changed.items():
                 if value is None:
                     pipe.delete(name)
                 else:
                     pipe.set(name, value)
-            for name in changed:
-                pipe.publish(CHANGED, name.removeprefix(PREFIX))
             pipe.execute()
-        # And a render job for each, after the writes, for a screen the render pool draws (it reads no channel).
-        render_jobs.enqueue(redis, [name.removeprefix(PREFIX) for name in changed])
+        return [name.removeprefix(PREFIX) for name in changed]
     except RedisError as error:
-        # The renderers keep the copy they have (or ask the broker, without one) until the next rebuild.
+        # The pool draws the copy it has (or nothing, without one) until the next rebuild, within RESYNC_S.
         logger.warning("Couldn't write the screens' configs to Redis (%s)", type(error).__name__)
+        return []

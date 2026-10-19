@@ -12,7 +12,7 @@ a Spotify token.
 ## How it fits together
 
 [docs/architecture.md](docs/architecture.md) shows who calls whom (screen, Caddy, this broker, authentik, the
-orchestrator and the renderers), which token or secret exists when, and what each call changes;
+the render pool), which token or secret exists when, and what each call changes;
 [docs/database.md](docs/database.md) shows the tables and how they fit in. The sections below say how each part works
 and how to run and deploy it.
 
@@ -98,7 +98,7 @@ run is discovered, then links directly to its workflow run rather than to the Gi
 2. **Pairing:** a device is paired with an Authentik user, who becomes its owner
    (`devices.owner`, the user id the login proxy passes in `X-Authentik-Uid`) and
    sees its settings at `/device` after logging in. A screen is a device from its first
-   `POST /api/devices/register`, so it can be paired before any renderer exists. A new screen's
+   `POST /api/devices/register`, so it can be paired at once. A new screen's
    owner is sent to `/device/name` first to name it (see [Naming a screen](#naming-a-screen)).
    There are two ways in:
    - **Token (main path).** After WiFi setup the device redirects its owner's
@@ -110,15 +110,13 @@ run is discovered, then links directly to its workflow run rather than to the Gi
      `POST /pair/token`) until the device has registered, which is normally
      seconds, and goes to `/device`. It gives up after 90 seconds and offers the
      code instead. Someone else's device is refused (409).
-   - **Code (fallback).** A short-lived `pairing_code` (10 minutes, one use) is made on
-     request: by `POST /api/devices/pairing-code` (either secret), by `flask devices code <device_id>`
-     (below), or, for an unpaired device, by its renderer's `GET /api/config`. The user enters it at
-     `/pair`. A code also hands a device to a different user, since it proves they're at the device.
-     The ESP32 firmware doesn't ask for one.
+   - **Code (fallback).** A short-lived `pairing_code` (10 minutes, one use) is made by
+     `flask devices code <device_id>` or `flask devices unpair` (below); the render pool draws it on the
+     screen (`v1:pairing:<device id>`). The user enters it at `/pair`. A code also hands a device to a
+     different user, since it proves they're at the device. The ESP32 firmware doesn't ask for one.
 
-   Once paired, `pairing_code` is `null`. A new device's weather location,
-   postcode and stop ids are empty (`""`, `null`, `[]`), which is valid; the
-   renderer's panels report for themselves that they need configuring.
+   A new device's weather location, postcode and stop ids are empty (`""`, `null`, `[]`), which is
+   valid; the screen's panels say for themselves that they need configuring.
    A user can own several screens. Each has its own pages at `/device/<id>` (settings),
    `/device/<id>/name`, `/device/<id>/spotify/disconnect` and `/device/<id>/display/unlink`, and the
    same paths without the id (`/device`, ...) are for the one paired most recently. A screen that isn't
@@ -150,11 +148,10 @@ run is discovered, then links directly to its workflow run rather than to the Gi
 3. **Spotify:** from `/device`, "Connect Spotify" kicks off the OAuth flow.
    The server exchanges the code for tokens and keeps them — the Pi never
    sees a Spotify token, only its own device secret.
-4. **Ongoing:** the renderer reads its config from Redis (see
-   [Configs in the store](#configs-in-the-store)), or polls `GET /api/config` (the device's
-   settings, and no API key: the weather needs none, and TfL's is only for the broker's stop
-   lookups, as pi-dashboard's providers have their own) without it, and reads its panels'
-   data from Redis. With Spotify or Apple Music on, the music provider fetches
+4. **Ongoing:** pi-dashboard's render pool draws the screen from its config in Redis (see
+   [Configs in the store](#configs-in-the-store): the device's settings, and no API key: the weather
+   needs none, and TfL's is only for the broker's stop lookups, as pi-dashboard's providers have their
+   own) and its panels' data, also in Redis. With Spotify or Apple Music on, the music provider fetches
    what's playing and the top lists with the tokens only the broker holds
    (refreshing Spotify's itself) and writes them there (see "Music in the
    store"). With the developer panel on, the developer provider fetches the owner's GitHub at a
@@ -174,8 +171,8 @@ screens; the user's identity stays the uid.
 On each screen's settings page, **General → Clock format** selects **24-hour (13:00)** or
 **12-hour (1:00 PM)** for all clock times on that screen. Existing and new screens default to 24-hour
 time, and each screen keeps its own choice. The setting does not change time zones, durations,
-machine timestamps or logs. The renderer receives it as the top-level `clock_format` field from
-`GET /api/config`; older responses without the field default to `"24h"`.
+machine timestamps or logs. The render pool receives it as the top-level `clock_format` field of the
+screen's config in the store.
 
 Every device-facing endpoint is authenticated with `Authorization: Bearer
 <secret>`; every browser-facing page needs an Authentik login: Caddy
@@ -183,44 +180,34 @@ forward-auths them and sets `X-Authentik-Uid` (setting `AUTH_USER_HEADER`
 changes the name), which the broker trusts, so the port must stay on loopback. Bearer secrets mean HTTPS is required for any
 non-local deployment (Caddy terminates TLS here; see [Caddy](#caddy)).
 
-## Renderer and display
+## The screen
 
-A device has up to two secrets, one per role:
+A device has one secret, the **display**'s: a thin screen (e.g. an ESP32) that only fetches finished frames. (Until
+pi-dashboard's render pool drew every screen, each also had a **renderer** of its own, with a secret of its own; that
+role went with them.) The render pool needs no secret: it reads the store and writes each screen's frame there.
 
-- **renderer**: whatever draws the frames. A renderer process on the server, started by the
-  orchestrator.
-- **display**: a thin screen (e.g. an ESP32) that only fetches finished frames.
-
-**The secret is the device's identity.** Each client generates its own long
-random secret and sends it, never its hash, as `Authorization: Bearer
-<secret>` on every request. The broker stores only its SHA-256, which is
-unique per device, so the secret alone finds the device.
+**The secret is the device's identity.** The screen generates its own long random secret and sends it, never its
+hash, as `Authorization: Bearer <secret>` on every request. The broker stores only its SHA-256, which is unique per
+device, so the secret alone finds the device.
 
 ### Registering
 
-A screen and a renderer register on different routes, since they do very different things.
-
-**Screen: `POST /api/devices/register {"secret": ..., "width": ..., "height": ...}`.** Safe to call again with the same secret,
-e.g. on every boot. It becomes a device at once (201 `{device_id}`; a repeat is 200) with no renderer.
-Its owner pairs with it and names it, which asks the orchestrator for a renderer (see
-[Naming a screen](#naming-a-screen)). Anyone can call it, so it is throttled.
-
-**Renderer: `POST /api/renderers/claim {"secret": ..., "claim_token": ...}`.** From a renderer the
-orchestrator started. The token belongs to one assignment and is single-use; the secret is attached to
-that assignment's device (201 `{device_id}`) and the token is spent. A repeat with the same secret
-(e.g. after a restart) is 200. The unguessable token is the protection, so this route is not throttled.
-There is no other way to get a renderer: one started by hand has no assignment to claim.
+**`POST /api/devices/register {"secret": ..., "width": ..., "height": ...}`.** Safe to call again with the same
+secret, e.g. on every boot. It becomes a device at once (201 `{device_id}`; a repeat is 200). Its owner pairs with it
+and names it, which puts it on the render pool (see [Naming a screen](#naming-a-screen)). Anyone can call it, so it is
+throttled.
 
 A screen therefore needs no logic beyond:
 
 1. On boot: `POST /api/devices/register {"secret": ..., "width": ..., "height": ...}`
-   (201 straight away; the screen has a device even before its renderer runs).
+   (201 straight away).
 2. Loop on `GET /api/frame` with `If-None-Match`, handling the status and then
    sleeping for the response's `Retry-After` seconds:
    - 200: draw the frame. `Retry-After` is the refresh interval: 60 s, or 20-59 s while a provider's data is bursty
      (a release is running). Nobody sets it; see [Pace](docs/architecture.md#pace).
    - 304: unchanged. Same `Retry-After`.
-   - 404: no frame yet (its renderer is still being set up). `Retry-After: 20`.
+   - 404: no frame yet (the pool hasn't drawn it: it's not named yet, or Redis restarted). `Retry-After` of at most
+     10 s, as the pool's next render lands within the minute.
    - 401: unknown secret (an unpaired screen is forgotten after 24 hours, or the
      screen was unlinked), so register again.
 
@@ -230,71 +217,41 @@ A screen therefore needs no logic beyond:
 |---|---|---|
 | 201 / 200 | `{device_id}`: a new device, or a repeat of a registered secret | start polling |
 | 400 | bad secret | fix the request; a firmware bug |
-| 409 | secret already registered as a renderer | generate a new secret |
 | 429 | over 5 calls a minute from this IP | wait `Retry-After` (lockouts double, up to 10 min) |
 | 503 | too many unpaired screens | wait `Retry-After` (60s) |
 
-`/api/renderers/claim` answers 201 / 200 `{device_id}`, 400 for a bad secret or no `claim_token`,
-403 for an unknown or spent token, and 409 for a secret already registered as a screen.
-
-A renderer reads its config from Redis, where the broker keeps a copy of each paired screen's (see
-[Configs in the store](#configs-in-the-store)), and polls `GET /api/config`, which carries its `device_id` and a
-`pairing_code` to draw, only when there's none there. From
-then on it can use the ID-less routes for everything (`PUT /api/frame`), so it
-never has to handle its `device_id`. The broker still logs each request with
-the `device_id` it found from the secret. A screen can also ask for a pairing code
-(`POST /api/devices/pairing-code`), which a screen with no renderer yet has nothing
-else to show.
+The screen uses the ID-less routes for everything (`/api/frame`), so it never has to handle its `device_id`. The
+broker still logs each request with the `device_id` it found from the secret, and the screen's name.
 
 What anyone can add is bounded:
 - `/register` allows 5 calls a minute per IP, every call counting (429 with
   `Retry-After`, lockouts doubling like `/pair` but capped at 10 min).
-- At most 20 screens may sit unpaired with no renderer or assignment at once (503).
+- At most 20 screens may sit unpaired and unnamed at once (503).
 - A screen unpaired after 24 hours is dropped.
 
 ### Naming a screen
 
-A new screen's owner is sent to `/device/name` right after pairing, because the
-screen's renderer is started per screen and named after it. They pick the end of a
-**slug**; the broker puts their username in front, as `<username>-<their choice>`
+A new screen's owner is sent to `/device/name` right after pairing, because the render pool draws a screen under its
+name. They pick the end of a **slug**; the broker puts their username in front, as `<username>-<their choice>`
 (the username lowercased, anything but `a-z 0-9 _ -` turned into a dash, and cut to
 16 characters, or `user` if nothing is left). The whole slug is at most 32
 characters (`[a-z0-9][a-z0-9_-]{1,31}`), unique across the broker, and fixed once
-set, even if their username changes later. It creates a *renderer assignment* (also
-`POST /api/displays/<device_id>/renderer {"slug": ...}` for a signed-in owner, where
-the slug is again just their part: 201 with the full slug, 400 bad slug, 404 not
-theirs, 409 taken or already assigned). `/device` shows nothing else until then. The slug lives in the
-broker, not Authentik: it belongs to a screen, and a user can have several.
+set, even if their username changes later. It's kept as the screen's *renderer assignment* (`renderer_assignments`,
+the name it had when the orchestrator started a renderer per screen). `/device` shows nothing else until then. The
+slug lives in the broker, not Authentik: it belongs to a screen, and a user can have several.
 
-The [orchestrator](https://github.com/nvorkinn/pi-dashboard/blob/main/countdown/orchestrator/README.md)
-polls the assignments with `Authorization: Bearer <ORCHESTRATOR_TOKEN>`
-(`secrets/broker.env`; unset keeps these endpoints off with a 404, and Caddy sends
-`/api/orchestrator/*` past the login):
-
-- `GET /api/orchestrator/assignments`: `{"assignments": [{"id", "slug", "claim_token", "status", "device_id"}]}`.
-  `status` is `pending`, `provisioned`, `suspended`, `failed` or `deleting`. `claim_token` is
-  `null` once the renderer has claimed it. `device_id` is the screen's (its `v1:config:` and `v1:frame:` keys are
-  under it), which the orchestrator needs to hand a screen to the render pool (its `POOL_SLUGS`); `null` once the
-  device is forgotten.
-- `POST /api/orchestrator/assignments/<id>/status` `{"status": "provisioned" | "failed" | "deleted", "detail": ""}`.
-  `deleted` removes the assignment, and is only accepted for one that is `deleting` (409
-  otherwise). A `provisioned` or `failed` report for an assignment that has since been suspended or
-  queued for deletion is ignored.
-
-The broker owns the suspension policy: when listing, an assignment whose screen
-hasn't made a request (`devices.display_last_seen_at`) for 24 hours becomes `suspended`, and
-`pending` again once the screen is back. `flask devices forget` marks the device's assignment
-`deleting`, which outlives the device until the orchestrator confirms the renderer and its volumes are gone.
+The broker lists every named screen it has something to draw for in `v1:render:screens` (device id to slug), which
+the render pool draws, and names the screen by in its metrics (see "The render pool's screens" in
+[docs/architecture.md](docs/architecture.md)). A screen that hasn't made a request (`devices.display_last_seen_at`)
+for 24 hours is left out until it's back. `flask devices forget` deletes the assignment with its device, which frees
+the slug.
 
 ### Which role may call what
 
 | Route | Roles |
 |---|---|
-| `GET /api/config` | renderer |
-| `POST /api/devices/pairing-code` | renderer, display |
-| `PUT /api/frame` (raw 800x480 1-bit, 48000 bytes) | renderer |
-| `GET /api/frame` (ETag / `If-None-Match` → 304) | renderer, display |
-| `POST /api/frame` (JSON `{"metrics": "<InfluxDB line protocol>", "logs": [...]}`; answers like the GET) | renderer, display |
+| `GET /api/frame` (ETag / `If-None-Match` → 304) | display |
+| `POST /api/frame` (JSON `{"metrics": "<InfluxDB line protocol>", "logs": [...]}`; answers like the GET) | display |
 
 `POST /api/frame` is the screen's poll with its report attached. The broker forwards
 `metrics` to VictoriaMetrics' `/write` after replacing every literal `{device_id}` in it with the
@@ -456,14 +413,15 @@ they work wherever the container runs, Compose or not:
 docker exec auth-broker flask --app wsgi devices list
 docker exec auth-broker flask --app wsgi devices code <device_id>              # a fresh code, e.g. to hand the device to another user
 docker exec auth-broker flask --app wsgi devices owner <device_id> <user id>   # pair a device with a user
-docker exec auth-broker flask --app wsgi devices unpair <device_id>            # show a pairing code again
+docker exec auth-broker flask --app wsgi devices unpair <device_id>            # show a pairing code again (it prints it)
 docker exec auth-broker flask --app wsgi devices unpair <device_id> --config   # ...and reset its settings and linked accounts
 docker exec auth-broker flask --app wsgi devices forget <device_id>            # delete it; it must register again
 docker exec auth-broker flask --app wsgi config publish                         # rewrite the store's configs and subscriptions
 ```
 
-Each of these that changes a device's pairing also updates its config in the store and nudges its renderer
-(see [Configs in the store](#configs-in-the-store)), so `unpair` and `code` show on its screen at once.
+Each of these that changes a device's pairing also updates its config in the store and queues a render of it
+(see [Configs in the store](#configs-in-the-store)), so `unpair` and `code` show on its screen at once: both issue
+a pairing code, which the screen shows for its ten minutes.
 
 The device's data in the store (`v1:energy:`, `v1:spotify:`, `v1:spotify-top:`, `v1:developer:` and
 `v1:pace:developer:`) is deleted, after the database's commit, whenever it changes hands: `unpair`, `forget`,
@@ -515,36 +473,22 @@ before gunicorn starts. A database from before migrations existed is adopted
 by the first migration on its first start, keeping its data.
 `test_migrations_match_the_models` fails if a model changes without a migration.
 
-## The device API contract
+## The config contract
 
-The contract between the broker and the renderer ([pi-dashboard](https://github.com/nvorkinn/pi-dashboard)) is
-one OpenAPI file, in [nvorkinn/countdown-api](https://github.com/nvorkinn/countdown-api), which both sides use as
-the submodule `vendor/countdown-api`. [openapi-codegen](https://github.com/nvorkinn/openapi-codegen) turns it into
-the Pydantic models, the renderer's `requests` client and the server side below, and the result is committed
-there, so a contract change is a change to the code.
+The shape of a screen's config, as the broker writes it to the store and pi-dashboard's render pool reads it, is one
+OpenAPI file in [nvorkinn/countdown-api](https://github.com/nvorkinn/countdown-api): its `ConfigResponse`, which both
+sides use as the submodule `vendor/countdown-api`. [openapi-codegen](https://github.com/nvorkinn/openapi-codegen)
+turns it into the Pydantic models, and the result is committed there. The broker builds the config with them
+(`broker/services/renderer_config.py`) for `v1:config:<device id>` and `v1:pairing:<device id>`.
 
-So far only `GET /api/config` is in it. The broker serves it through `broker/api.py`: `api` is the registry the
-generated code provides, and `routes/devices.py` registers what answers each operation:
+The contract still describes the operation it began with, `GET /api/config`, which the per-screen renderers polled;
+the broker no longer serves it (the render pool reads the store), so it registers none of the contract's routes, and
+only its models are used. Changing the shape is a PR in countdown-api, then here:
+`git -C vendor/countdown-api fetch && git -C vendor/countdown-api checkout <commit>`, commit the new pointer
+(Dependabot opens that PR weekly). Change the format by adding fields: a renderer that's older ignores fields it
+doesn't know.
 
-```python
-@api.get_config()
-def get_config(*, device_id, x_device_name=None) -> ConfigResponse: ...
-```
-
-- **Who may call it** is in the contract: the operation's `security` names the `deviceSecret` scheme with the role
-  (`renderer`) as its scope. `broker/api.py` registers the one authenticator for that scheme, which is
-  `auth.authenticate_device`, the same check as `require_device_auth`, and the `device_id` it provides is the
-  handler's argument.
-- **Nothing can be forgotten.** `create_app()` ends with `api.register(app)`, which refuses to start the app if the
-  contract has an operation nothing here registers, a security scheme without an authenticator, or a handler
-  that doesn't fit its operation. So when the submodule moves to a contract that adds a route, the build fails
-  (every test uses `create_app()`) until the broker implements it.
-- **Changing the contract** is a PR in countdown-api, which regenerates its code and keeps it current. Then here:
-  `git -C vendor/countdown-api fetch && git -C vendor/countdown-api checkout <commit>`, commit the new pointer
-  (Dependabot opens that PR weekly), and implement what the build says is missing. Change the format by adding
-  fields: a device on an older renderer ignores fields it doesn't know.
-
-The broker's other routes are plain Flask blueprints and not in the contract.
+The broker's routes are plain Flask blueprints and not in the contract.
 
 ## Running tests
 
@@ -919,15 +863,14 @@ fields itself, as one JSON object per line (stream fields are `service,host`):
 |---|---|
 | `service` | The source app. For containers it is the Docker log `tag`, which lands in each record's `attrs.tag` and which Fluent Bit lifts to `service`: the compose service name (the shared `x-logging` anchor sets `tag: "{{.Name}}"`), `orchestrator`, and `renderer-<slug>` for each renderer (the orchestrator sets the same tag when it starts one). Screens are `countdown-esp32`; OTLP senders that name none are `otlp` |
 | `host` | The machine's host name; for a screen, its device id |
-| `level` | `debug`/`info`/`warn`/`error`/`fatal`. Written by the broker, renderers and orchestrator; Caddy and the Victoria services have it natively; Authentik uses `warning` for `warn`; Postgres and Fluent Bit write plain text with no `level` |
+| `level` | `debug`/`info`/`warn`/`error`/`fatal`. Written by the broker, the providers and the render pool; Caddy and the Victoria services have it natively; Authentik uses `warning` for `warn`; Postgres and Fluent Bit write plain text with no `level` |
 | `_msg` | The message: `_msg` from our apps, `msg` from Caddy and the Victoria services, `event` from Authentik, else the raw line (`log`) |
 | `_time` | When Docker saw the line. A screen has no clock, so the broker dates its lines by their uptime relative to the newest in the report |
 
 The broker's JSON comes from `gunicorn.conf.py` and `broker/log_format.py` (the access log has the
 method, path without query string, status, bytes and duration as fields); a `flask` command writes the
-same lines to stderr, as its stdout is its output. The renderers and orchestrator
-use `countdown_core.core.log_format` and `countdown_orchestrator.log_format` in the pi-dashboard repo; a
-renderer's lines also carry `device` (its name). Screens' logs are posted by the broker straight to
+same lines to stderr, as its stdout is its output. pi-dashboard's providers and render pool use
+`countdown_core.core.log_format`; a render's lines also carry `device` (the screen's slug). Screens' logs are posted by the broker straight to
 VictoriaLogs, tagged `service=countdown-esp32` and `host=<device id>`; `VICTORIA_LOGS_URL` overrides the
 destination.
 
@@ -1050,7 +993,7 @@ encrypted with the broker's `CREDENTIAL_ENCRYPTION_KEY`: it reads the devices
 with an account straight from the database (opened read-only, `./data` mounted
 `:ro`; the same accounts as the broker's `v1:sub:glow`, less any without a
 username), so the passwords never leave the broker and it needs no token of its
-own. `GET /api/config` carries only `glowmarkt.enabled`, true when the device
+own. The screen's config carries only `glowmarkt.enabled`, true when the device
 has an account the provider signs in with (`GlowmarktCredentials.sign_in`, the
 rule both use), and nothing of the account itself.
 
@@ -1083,7 +1026,7 @@ models it already has (pi-dashboard's `countdown_core/store/energy.py`):
 
 Each page is asked for from the start of its window's first bucket (the hour
 24 hours ago, midnight 31 days ago, 1st January) to now, in the screen's time
-zone (the `timezone` `GET /api/config` sends: Europe/London or Europe/Oslo) at
+zone (the config's `timezone`: Europe/London or Europe/Oslo) at
 today's UTC offset. `offset` is Glowmarkt's parameter for it, minutes from local
 time to UTC (BST is `-60`): Glowmarkt labels each bucket with its local
 wall-clock start as if it were UTC, and the renderer relabels them with it. The
@@ -1102,62 +1045,58 @@ docker logs -f glow-provider
 docker exec -it redis sh -c 'REDISCLI_AUTH="$REDIS_PASSWORD" redis-cli --scan --pattern "v1:energy:*"'
 ```
 
-The renderers read it once pi-dashboard's orchestrator is given
-`RENDERER_REDIS_URL` (see its providers README).
 ## Configs in the store
 
-SQLite stays the source of truth for each screen's settings, and Redis holds a copy of what `GET /api/config` answers
-its renderer, `v1:config:<device id>`, so the renderers read their config there (pi-dashboard's README, "The config")
-and don't need the broker to be up, and a save reaches the screen at once
-(`broker/services/config_store.py`; `services/renderer_config.py` makes it, and the route's answer, the same way):
+SQLite stays the source of truth for each screen's settings, and Redis holds a copy of its config,
+`v1:config:<device id>`, which pi-dashboard's render pool draws the screen from, so it doesn't need the broker to be
+up, and a save reaches the screen at once (`broker/services/config_store.py`; `services/renderer_config.py` makes
+it):
 
-- **The value** is exactly `GET /api/config`'s JSON for the device (the contract's `ConfigResponse`), less its
-  pairing code (`pairing_code` null). It carries no API key: neither the weather's nor TfL's is in the config at
-  all any more.
+- **The value** is the screen's config (the contract's `ConfigResponse`), with no pairing code (`pairing_code`
+  null). It carries no API key: neither the weather's nor TfL's is in the config at all any more.
   `tests/fixtures/config_store.json` is an example; pi-dashboard's tests read the same file, so change both together.
 - **Written** for every device on every config save, as the broker starts (gunicorn's `post_worker_init`, in
-  `gunicorn.conf.py`, which writes the subscriptions too), by `flask weather backfill` and by
-  `flask config publish`; and for one device when its pairing changes. Only what changed is written, and after each
-  change the broker publishes the device id on `v1:config:changed`, which its renderer listens for and redraws on.
-- **No key** while a device isn't paired, or has a live pairing code: only `GET /api/config` gives the code (and
-  issues it, while the device is unpaired), so its renderer asks there. Pairing writes the key back.
+  `gunicorn.conf.py`, which writes the subscriptions too), every minute in each broker process
+  (`config_store.start_resync`), by `flask weather backfill` and by `flask config publish`; and for one device when
+  its pairing changes. Only what changed is written, and each screen whose copy changed gets a render job
+  (`services/render_jobs.py`) after the write.
+- **No key** while a device isn't paired, or has a live pairing code: the pool draws the pairing screen from the
+  code's own key (`v1:pairing:<device id>`, `services/pairing_key.py`) meanwhile. Pairing writes the key back.
 - **No TTL**, since it's rebuilt from the database, so `volatile-lru` never evicts it: about 1 KB a screen in Redis.
 - If Redis can't be written during a save, the save still works and the log says "Couldn't write the screens'
-  configs to Redis"; the screen keeps its old config until the next save or `flask config publish`.
+  configs to Redis"; the next minute's rewrite puts it right.
 
-[The config in the store](docs/architecture.md#the-config-in-the-store) has the details: the events, the failure
-modes, and how to roll back past this (delete the keys first, or the renderers keep reading them). Deploy this before
-the renderers that read it (they ask `GET /api/config` until the keys are there); to check, on the host:
+The render pool's list of screens, `v1:render:screens` (device id to slug), is rewritten with the configs
+(`services/render_screens.py`): see "The render pool's screens" in [docs/architecture.md](docs/architecture.md).
+[The config in the store](docs/architecture.md#the-config-in-the-store) has the details. To check, on the host:
 
 ```sh
 docker exec redis sh -c 'REDISCLI_AUTH="$REDIS_PASSWORD" redis-cli -h 127.0.0.1 --scan --pattern "v1:config:*"'
+docker exec redis sh -c 'REDISCLI_AUTH="$REDIS_PASSWORD" redis-cli -h 127.0.0.1 HGETALL v1:render:screens'
 ```
 
-lists one key per paired screen.
+lists one key per paired screen, and each screen the pool draws with its slug.
 
 ## Frames in the store
 
-pi-dashboard's renderers hand each screen's frame over through Redis as well as `PUT /api/frame`: each new picture
-goes to the screen's record, `v1:frame:<device id>` (pi-dashboard's `store/frame_record.py`), and the broker serves
-the screen from it (`broker/services/frame_record.py`). It's one latest value per screen, like the providers' keys:
+pi-dashboard's render pool writes each screen's frame to Redis, `v1:frame:<device id>` (pi-dashboard's
+`store/frame_record.py`), and the broker serves the screen from it (`broker/services/frame_record.py`); the broker
+keeps no copy. It's one latest value per screen, like the providers' keys:
 
 - **The record** is a hash: `frame`, the 48,000 raw bytes (read with `app.extensions["redis_bytes"]`, a client that
-  doesn't decode values); `etag`, the frame's BLAKE2b in hex, the same ETag as the database's copy; `rendered_at`,
-  when the renderer first wrote the picture. `tests/fixtures/frame_record.json` (with `frame_record.bin`) pins it;
-  pi-dashboard's tests read the same files, so change both together.
-- **Served** to the screen, and on the config page's preview and its "Drawn" time, when it's there and newer than the
-  `frames` row, or holds the same picture; the row otherwise (no record, one that can't be read, or a newer row with
-  another picture: a renderer that only PUTs). A screen with the picture already gets its 304 from `etag` without the
-  48 KB being read. The ETag, `Retry-After` and 304s are as before, whichever is served, so the firmware sees nothing
-  new.
-- **TTL a day** from the picture's last change, set by the renderer, so `volatile-lru` can evict it; the row is
-  served meanwhile, and the renderer writes it again on its next cycle. The broker deletes a device's record with its
-  row (`flask devices forget`, `unpair --config`).
-- If Redis can't be asked, the screen is served the row and the log says "Couldn't read a screen's frame from Redis",
-  with the error's type.
+  doesn't decode values); `etag`, the frame's BLAKE2b in hex, the screen's ETag; `rendered_at`, when the pool first
+  wrote the picture. `tests/fixtures/frame_record.json` (with `frame_record.bin`) pins it; pi-dashboard's tests read
+  the same files, so change both together.
+- **Served** to the screen, and on the config page's preview and its "Drawn" time. A screen with the picture already
+  gets its 304 from `etag` without the 48 KB being read. With no record (not drawn yet, or one that can't be read, or
+  Redis restarted) it's a 404 with a `Retry-After` of at most 10 s; the screen keeps its picture.
+- **TTL a day** from the picture's last change, set by the pool, so `volatile-lru` can evict it; the pool writes it
+  again at its next render. The broker deletes a device's record when it forgets the device or unpairs it with its
+  config (`flask devices forget`, `unpair --config`).
+- If Redis can't be asked, the screen gets the 404 and the log says "Couldn't read a screen's frame from Redis", with
+  the error's type.
 
-Either side can be deployed first: renderers that don't write records leave the row served, and a broker that
-doesn't read them never sees them. To check, on the host, once both are deployed:
+To check, on the host:
 
 ```sh
 docker exec redis sh -c 'REDISCLI_AUTH="$REDIS_PASSWORD" redis-cli -h 127.0.0.1 --scan --pattern "v1:frame:*"'
@@ -1165,8 +1104,8 @@ docker exec redis sh -c 'REDISCLI_AUTH="$REDIS_PASSWORD" redis-cli -h 127.0.0.1 
 docker exec redis sh -c 'REDISCLI_AUTH="$REDIS_PASSWORD" redis-cli -h 127.0.0.1 TTL v1:frame:<device id>'
 ```
 
-lists one key per screen with a running renderer, each with a TTL under a day; a record's `rendered_at` is the
-"Drawn" time on its screen's page.
+lists one key per screen the pool draws, each with a TTL under a day; a record's `rendered_at` is the "Drawn" time on
+its screen's page.
 
 ## Developer in the store
 
@@ -1181,16 +1120,15 @@ It also sets the screen's pace. While one of a device's releases is running its 
 every 20 seconds (`BURST_INTERVAL_S`) and writes `v1:pace:developer:<device id>` = 20 with a one-minute TTL, renewed each
 cycle the release still runs. Nothing says a release has ended: the key lapses and the screen goes back to polling
 twice a minute. The broker reads the key on each of the screen's polls and has it poll every 10 seconds meanwhile
-(`broker/services/pace.py`, and "Pace" in [docs/architecture.md](docs/architecture.md#pace)); today's renderers also
-read it, draw that often, and send it with their frames as `X-Refresh-Hint`, which the broker counts too. A burst costs
+(`broker/services/pace.py`, and "Pace" in [docs/architecture.md](docs/architecture.md#pace)). A burst costs
 about 750 calls over a ten-minute release, against the 5,000 an hour a token gets.
 
-For a screen pi-dashboard's render pool draws (its docs/stateless-renderers.md), each of those 20-second cycles also
+For a screen pi-dashboard's render pool draws (its docs/stateless-renderers.md), each of those 20-second cycles
 queues a render of it, once the new data is written (`broker/services/render_jobs.py`: the pool's own enqueue script,
 copied byte for byte and pinned by `tests/fixtures/render_enqueue.json`), and so does the cycle that finds the release
 gone, to take it off the screen. Outside a release it queues nothing: the pool's ticker draws every screen on the
-minute. Only screens in the pool's `v1:render:screens` are queued (nothing at all before a pool runs, as nothing would
-take the jobs), and a job that can't be queued is logged by its error's type and left to the tick.
+minute. Only screens in the pool's `v1:render:screens` are queued, and a job that can't be queued is logged by its
+error's type and left to the tick.
 
 If GitHub rate-limits a device's token anyway (a 429, or a 403 that is a rate limit rather than a missing permission), the
 provider leaves that device alone for as long as GitHub says (`Retry-After`, or until `X-RateLimit-Reset` when
@@ -1279,8 +1217,7 @@ Redis running and the broker's environment loaded, `python -m broker.spotify_pro
 cycle).
 
 It runs the broker's image, so `deploy.sh` recreates it with the broker on every `deploy-config`, pinned by the same
-`AUTH_BROKER_VERSION`. The renderers read it once pi-dashboard's orchestrator is given `RENDERER_REDIS_URL` (its
-providers README, "Enabling in production").
+`AUTH_BROKER_VERSION`.
 
 ### Covers
 

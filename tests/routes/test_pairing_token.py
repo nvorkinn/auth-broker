@@ -9,7 +9,7 @@ from broker.models import Device
 from broker.services import pairing
 
 SECRET = "a-very-long-device-secret-value"
-SCREEN_SECRET = "display-" + SECRET  # what register_device gives the device's screen
+SCREEN_SECRET = SECRET  # the screen's own, as register_device registers it
 
 
 def token_for_secret(secret=SCREEN_SECRET):
@@ -36,12 +36,6 @@ def test_a_device_registering_stores_its_token(app, register_device):
         assert db.session.get(Device, device_id).pairing_token == token_for_secret()
 
 
-def test_a_screens_token_comes_from_its_own_secret(app, split_device):
-    device_id, _, display_secret = split_device
-    with app.app_context():
-        assert db.session.get(Device, device_id).pairing_token == token_for_secret(display_secret)
-
-
 def test_the_token_pairs_the_user_with_a_registered_device(app, client, register_device):
     device_id, _ = register_device(SECRET)
 
@@ -53,10 +47,13 @@ def test_the_token_pairs_the_user_with_a_registered_device(app, client, register
     assert client.get("/device").status_code == 200
 
 
-def test_the_device_never_shows_a_code_once_paired_by_token(client, register_device):
-    register_device(SECRET)
+def test_the_device_never_shows_a_code_once_paired_by_token(app, client, register_device):
+    device_id, _ = register_device(SECRET)
+    with app.app_context():
+        pairing.issue_code(device_id)
     _pair(client)
-    assert client.get("/api/config", headers={"Authorization": f"Bearer {SECRET}"}).get_json()["pairing_code"] is None
+    with app.app_context():
+        assert pairing.live_code(device_id) is None
 
 
 def test_the_browser_waits_for_a_device_that_has_not_registered_yet(client, register_device):

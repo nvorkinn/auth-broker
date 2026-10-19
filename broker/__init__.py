@@ -1,4 +1,4 @@
-"""The auth broker: a Flask app that pairs screens with their owners and serves them config and frames."""
+"""The auth broker: a Flask app that pairs screens with their owners, keeps their settings and serves their frames."""
 
 import os
 
@@ -6,7 +6,6 @@ import redis
 from flask import Flask
 from werkzeug.middleware.proxy_fix import ProxyFix
 
-from . import api as api_module
 from . import cli, config, log_format, request_log
 from . import db as db_module
 from .auth import current_username
@@ -15,10 +14,8 @@ from .routes import (
     devices,
     frames,
     github_dashboard,
-    orchestrator,
     pages,
     place_search,
-    renderers,
     spotify_oauth,
     status,
     stop_search,
@@ -61,12 +58,11 @@ def create_app() -> Flask:
     app.extensions["redis_bytes"] = redis.Redis.from_url(
         os.environ.get("REDIS_URL", "redis://127.0.0.1:6379/0"),
         password=os.environ.get("REDIS_PASSWORD"),
-        socket_timeout=1,  # a dead Redis can't hang a screen's poll for long: it gets the database's frame
+        socket_timeout=1,  # a dead Redis can't hang a screen's poll for long: it's told to ask again
         socket_connect_timeout=1,
     )
 
     app.register_blueprint(devices.bp)
-    app.register_blueprint(renderers.bp)
     app.register_blueprint(spotify_oauth.bp)
     app.register_blueprint(apple_music_link.bp)
     app.register_blueprint(pages.bp)
@@ -75,11 +71,6 @@ def create_app() -> Flask:
     app.register_blueprint(place_search.bp)
     app.register_blueprint(frames.bp)
     app.register_blueprint(status.bp)
-    app.register_blueprint(orchestrator.bp)
-
-    # The routes of the countdown API contract (vendor/countdown-api). This also checks that the broker answers
-    # every one of them, and refuses to start if it doesn't.
-    api_module.api.register(app)
 
     app.cli.add_command(cli.devices)
     app.cli.add_command(cli.weather)
