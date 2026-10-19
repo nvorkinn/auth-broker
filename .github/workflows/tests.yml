@@ -31,7 +31,7 @@ jobs:
       # uv installs the Python .python-version names (3.14) itself. setup-uv also caches uv's downloads and built
       # wheels in the GitHub Actions cache, keyed on (among others) pyproject.toml and uv.lock, so a new cache is saved
       # whenever the dependencies change.
-      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
 
       - name: Install redis-server
         # For the render queue's script's tests against a real Redis (tests/services/test_render_jobs.py starts its
@@ -72,7 +72,7 @@ jobs:
 
       # Restore only: this job installs just the dev group, so a cache it saved under the test jobs' key would be
       # missing most of what they need.
-      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
         with:
           save-cache: false
 
