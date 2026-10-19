@@ -53,12 +53,13 @@ import {
 # Show Google on the login screen: the source alone only exists, the identification stage decides which sources
 # it lists.
 resource "authentik_stage_identification" "authentication" {
-  name            = "default-authentication-identification"
-  user_fields     = ["email", "username"]
-  recovery_flow   = authentik_flow.recovery.uuid
-  enrollment_flow = authentik_flow.enrollment.uuid
-  webauthn_stage  = authentik_stage_authenticator_validate.passkey.id
-  sources         = [authentik_source_oauth.google.uuid]
+  name              = "default-authentication-identification"
+  user_fields       = ["email", "username"]
+  recovery_flow     = authentik_flow.recovery.uuid
+  enrollment_flow   = authentik_flow.enrollment.uuid
+  webauthn_stage    = authentik_stage_authenticator_validate.passkey.id
+  passwordless_flow = authentik_flow.passwordless.uuid
+  sources           = [authentik_source_oauth.google.uuid]
 
   # Not owned by this config, so left as Authentik has it.
   lifecycle {

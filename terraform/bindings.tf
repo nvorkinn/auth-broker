@@ -4,6 +4,7 @@ locals {
   flows = {
     "default-recovery-flow"        = authentik_flow.recovery
     "broker-enrollment"            = authentik_flow.enrollment
+    "broker-passwordless"          = authentik_flow.passwordless
     "broker-source-authentication" = authentik_flow.source_authentication
     "broker-source-enrollment"     = authentik_flow.source_enrollment
   }
@@ -21,6 +22,9 @@ locals {
     enrollment_email      = { flow = "broker-enrollment", order = 25, re_evaluate_policies = false }
     enrollment_mfa        = { flow = "broker-enrollment", order = 30, re_evaluate_policies = false }
     enrollment_user_login = { flow = "broker-enrollment", order = 100, re_evaluate_policies = false }
+
+    passwordless_validation = { flow = "broker-passwordless", order = 10, re_evaluate_policies = false }
+    passwordless_login      = { flow = "broker-passwordless", order = 100, re_evaluate_policies = false }
 
     source_authentication_mfa   = { flow = "broker-source-authentication", order = 10, re_evaluate_policies = false }
     source_authentication_login = { flow = "broker-source-authentication", order = 100, re_evaluate_policies = false }
@@ -45,6 +49,9 @@ locals {
     enrollment_email      = authentik_stage_email.enrollment.id
     enrollment_mfa        = authentik_stage_authenticator_validate.enrollment_mfa.id
     enrollment_user_login = authentik_stage_user_login.enrollment.id
+
+    passwordless_validation = authentik_stage_authenticator_validate.passkey.id
+    passwordless_login      = authentik_stage_user_login.passwordless.id
 
     source_authentication_mfa   = authentik_stage_authenticator_validate.enrollment_mfa.id
     source_authentication_login = local.ids.stages["default-source-authentication-login"]
