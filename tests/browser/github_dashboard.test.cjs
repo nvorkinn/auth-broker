@@ -78,13 +78,13 @@ const active = {
     }],
 };
 
-async function harness(initial = active, repositories = [repo]) {
+async function harness(initial = active, repositories = [repo], storage = null) {
     let now = 100000;
     let data = initial;
     let failure = null;
     const calls = [];
     const ids = new Map(["summary", "error", "projects", "refresh", "pulls", "workflows",
-        "pull-count", "workflow-count", "project-count"].map(id => [id, new Element("div")]));
+        "pull-count", "workflow-count", "project-count", "refresh-pulls", "refresh-workflows", "hidden-projects"].map(id => [id, new Element("div")]));
     const intervals = [];
     const document = {
         hidden: false,
@@ -96,7 +96,7 @@ async function harness(initial = active, repositories = [repo]) {
         addEventListener: () => {},
     };
     const context = vm.createContext({
-        document, URL, window: { addEventListener: () => {} },
+        document, URL, localStorage: storage, window: { addEventListener: () => {} },
         requestAnimationFrame: callback => callback(),
         Date: class extends Date { static now() { return now; } },
         setInterval: (callback, interval) => intervals.push({ callback, interval }),
@@ -196,7 +196,7 @@ test("PRs from all repositories share one list with repository labels and attent
     assert.match(text(rows[0]), /Build: Running/);
     assert.equal(app.ids.get("pull-count").textContent, "2");
     assert.equal(app.ids.get("projects").querySelectorAll(".pull").length, 0);
-    assert.equal(app.ids.get("projects").querySelectorAll("button").length, 2);
+    assert.equal(app.ids.get("projects").querySelectorAll("button").length, 4);
 });
 
 test("completed check details stay inline and open across refreshes; completed-only rows are compact", async () => {
@@ -388,4 +388,115 @@ test("refreshes recheck the release runs shown last time by ID", async () => {
     await app.ids.get("workflows").querySelectorAll("button")[0].listeners.click();
     await app.tick();
     assert.equal(app.calls.at(-1).url, "/github/repositories/alice/project?runs=7");
+});
+
+const another = { ...repo, full_name: "alice/another" };
+const memory = (saved = {}) => ({
+    saved,
+    getItem(key) { return this.saved[key] ?? null; },
+    setItem(key, value) { this.saved[key] = value; },
+});
+const PREFS = "github-dashboard:prefs";
+const checkboxOf = (app, name) => app.evaluate(`projects.get("${name}")`).card.querySelectorAll("input")[0];
+const projectCalls = (app, name) => app.calls.filter(call => call.url.includes(`/${name}`));
+
+test("Refresh all skips projects marked as background-only, which still refresh on their own schedule", async () => {
+    const storage = memory({ [PREFS]: JSON.stringify({ background: ["alice/another"] }) });
+    const app = await harness(idle, [another, repo], storage);
+    assert.equal(app.ids.get("refresh").textContent, "Refresh 1 of 2");
+    assert.equal(checkboxOf(app, "alice/another").checked, false);
+    assert.equal(projectCalls(app, "another").length, 1);
+    await app.ids.get("refresh").listeners.click();
+    await app.tick();
+    assert.equal(projectCalls(app, "project").length, 2);
+    assert.equal(projectCalls(app, "another").length, 1);
+    app.advance(60000);
+    await app.tick();
+    assert.equal(projectCalls(app, "another").length, 2);
+});
+
+test("ticking the box changes what Refresh covers and is remembered", async () => {
+    const storage = memory();
+    const app = await harness(idle, [another, repo], storage);
+    assert.equal(app.ids.get("refresh").textContent, "Refresh all");
+    const box = checkboxOf(app, "alice/another");
+    box.checked = false;
+    box.listeners.change();
+    assert.equal(app.ids.get("refresh").textContent, "Refresh 1 of 2");
+    assert.deepEqual(JSON.parse(storage.saved[PREFS]).background, ["alice/another"]);
+    box.checked = true;
+    box.listeners.change();
+    assert.equal(app.ids.get("refresh").textContent, "Refresh all");
+    assert.deepEqual(JSON.parse(storage.saved[PREFS]).background, []);
+});
+
+test("hidden projects are neither shown nor fetched, and can be shown again", async () => {
+    const storage = memory({ [PREFS]: JSON.stringify({ hidden: ["alice/another"] }) });
+    const app = await harness(idle, [another, repo], storage);
+    assert.equal(app.evaluate("projects.has('alice/another')"), false);
+    assert.equal(projectCalls(app, "another").length, 0);
+    assert.equal(app.ids.get("hidden-projects").hidden, false);
+    assert.match(app.ids.get("summary").textContent, /1 repositories .* 1 hidden/);
+    app.ids.get("hidden-projects").querySelectorAll("button")[0].listeners.click();
+    await new Promise(setImmediate);
+    assert.equal(app.evaluate("projects.has('alice/another')"), true);
+    assert.equal(projectCalls(app, "another").length, 1);
+    assert.deepEqual(JSON.parse(storage.saved[PREFS]).hidden, []);
+    checkboxOf(app, "alice/another").parentElement.parentElement.querySelectorAll("button")[1].listeners.click();
+    assert.equal(app.evaluate("projects.has('alice/another')"), false);
+    assert.deepEqual(JSON.parse(storage.saved[PREFS]).hidden, ["alice/another"]);
+    assert.equal(app.ids.get("project-count").textContent, "1");
+});
+
+test("preferences survive storage that is missing or unreadable", async () => {
+    const broken = { getItem() { throw new Error("blocked"); }, setItem() { throw new Error("blocked"); } };
+    for (const storage of [null, broken]) {
+        const app = await harness(idle, [repo], storage);
+        const box = checkboxOf(app, "alice/project");
+        box.checked = false;
+        box.listeners.change();
+        assert.equal(app.ids.get("refresh").textContent, "Refresh 0 of 1");
+    }
+});
+
+test("a section's Refresh reads only that section and leaves the other's schedule alone", async () => {
+    const app = await harness({ ...idle, active: true, workflows: [waitingRelease] });
+    app.advance(4000);
+    await app.ids.get("refresh-pulls").listeners.click();
+    assert.equal(app.calls.at(-1).url, "/github/repositories/alice/project?section=pulls");
+    app.advance(5999);
+    await app.tick();
+    assert.equal(app.calls.length, 3, "the full refresh due 10s after the first is not pushed back");
+    app.advance(1);
+    await app.tick();
+    assert.equal(app.calls.at(-1).url, "/github/repositories/alice/project?runs=7");
+    await app.ids.get("refresh-workflows").listeners.click();
+    assert.equal(app.calls.at(-1).url, "/github/repositories/alice/project?section=workflows&runs=7");
+});
+
+test("a section's data is merged into the other's and keeps the project polling while it is active", async () => {
+    const app = await harness({ ...idle, workflows: [waitingRelease], active: true });
+    app.setData({ pulls: [], active: false });
+    app.advance(1000);
+    await app.ids.get("refresh-pulls").listeners.click();
+    assert.equal(app.ids.get("workflows").children.length, 1);
+    assert.equal(app.evaluate("projects.get('alice/project').active"), true);
+    app.setData({ ...active, workflows: [], pulls: [], active: false });
+    app.advance(9000);
+    await app.tick();
+    assert.equal(app.evaluate("projects.get('alice/project').active"), false);
+});
+
+test("Refresh for a section skips background projects and asks for everything when a project has no data yet", async () => {
+    const storage = memory({ [PREFS]: JSON.stringify({ background: ["alice/another"] }) });
+    const app = await harness(idle, [another, repo], storage);
+    await app.ids.get("refresh-pulls").listeners.click();
+    assert.equal(projectCalls(app, "another").length, 1);
+    app.setFailure({ status: 500, message: "boom" });
+    app.advance(60000);
+    await app.tick();
+    app.setFailure(null);
+    app.evaluate("projects.get('alice/project').data = null");
+    await app.ids.get("refresh-pulls").listeners.click();
+    assert.equal(app.calls.at(-1).url, "/github/repositories/alice/project");
 });

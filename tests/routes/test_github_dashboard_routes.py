@@ -48,6 +48,18 @@ def test_repositories_and_project(client, dashboard):
     dashboard.close.assert_called()
 
 
+@pytest.mark.parametrize("section", ["pulls", "workflows"])
+def test_project_can_read_one_section(client, dashboard, section):
+    dashboard.project.return_value = {section: [], "active": False}
+    assert client.get("/github/repositories/alice/project", query_string={"section": section}).status_code == 200
+    assert dashboard.project.call_args.args[2] == section
+
+
+def test_project_rejects_unknown_sections(client, dashboard):
+    assert client.get("/github/repositories/alice/project?section=jobs").status_code == 400
+    dashboard.project.assert_not_called()
+
+
 def test_project_passes_previously_shown_runs(client, dashboard):
     dashboard.project.return_value = {"pulls": [], "workflows": [], "active": True}
     assert client.get("/github/repositories/alice/project?runs=7,12").status_code == 200

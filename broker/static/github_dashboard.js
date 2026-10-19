@@ -1,6 +1,8 @@
 "use strict";
 
 const projects = new Map();
+const hiddenRepos = new Map();
+const PREFS_KEY = "github-dashboard:prefs";
 const csrf = document.querySelector('meta[name="csrf-token"]').content;
 const summary = document.getElementById("summary");
 const errorBanner = document.getElementById("error");
@@ -9,6 +11,32 @@ const workflowsList = document.getElementById("workflows");
 const FAILED_CHECKS = new Set(["failure", "timed_out", "cancelled", "error", "startup_failure", "action_required", "stale"]);
 let discovering = false;
 let pausedUntil = 0;
+
+// Per-browser choices: hidden projects are neither shown nor fetched; background ones keep auto-refreshing but are
+// left out of the Refresh buttons. Storage can be blocked, in which case the choices last until the page closes.
+function loadPrefs() {
+    try {
+        const saved = JSON.parse(localStorage.getItem(PREFS_KEY));
+        return { hidden: new Set(saved?.hidden), background: new Set(saved?.background) };
+    } catch {
+        return { hidden: new Set(), background: new Set() };
+    }
+}
+
+const prefs = loadPrefs();
+
+function savePrefs() {
+    try {
+        localStorage.setItem(PREFS_KEY, JSON.stringify({ hidden: [...prefs.hidden], background: [...prefs.background] }));
+    } catch {
+        // The choices still apply to this page view.
+    }
+}
+
+function setMember(set, name, member) {
+    if (member) set.add(name); else set.delete(name);
+    savePrefs();
+}
 
 function element(tag, text, className) {
     const node = document.createElement(tag);
@@ -253,8 +281,51 @@ function renderOverview() {
     document.getElementById("workflow-count").textContent = String(workflows.length);
     document.getElementById("project-count").textContent = String(all.length);
     summary.textContent = `${all.length} repositories · ${pulls.length} open PRs · ${workflows.length} ongoing releases`
+        + (hiddenRepos.size ? ` · ${hiddenRepos.size} hidden` : "")
         + (unloaded ? ` · ${unloaded} not loaded` : "") + (errors ? ` · ${errors} refresh errors` : "");
+    renderRefreshLabels();
     requestAnimationFrame(fitGraphs);
+}
+
+function renderRefreshLabels() {
+    const all = [...projects.values()];
+    const included = all.filter(project => !project.background).length;
+    const button = document.getElementById("refresh");
+    button.textContent = included === all.length ? "Refresh all" : `Refresh ${included} of ${all.length}`;
+    button.title = included === all.length ? "Refresh every project now"
+        : "Refresh the projects marked Refresh now; the others still update in the background";
+}
+
+function renderHidden() {
+    const box = document.getElementById("hidden-projects");
+    box.hidden = !hiddenRepos.size;
+    const nodes = [...hiddenRepos.values()].map(repo => {
+        const row = element("div", undefined, "hidden-project");
+        const show = element("button", "Show");
+        show.type = "button";
+        show.addEventListener("click", () => showProject(repo));
+        row.append(element("span", repo.full_name), show);
+        return row;
+    });
+    box.replaceChildren(element("p", `Hidden projects (${hiddenRepos.size}) are not refreshed.`, "release-hint"), ...nodes);
+}
+
+function hideProject(project) {
+    project.card.remove();
+    projects.delete(project.repo.full_name);
+    hiddenRepos.set(project.repo.full_name, project.repo);
+    setMember(prefs.hidden, project.repo.full_name, true);
+    renderHidden();
+    renderOverview();
+}
+
+function showProject(repo) {
+    hiddenRepos.delete(repo.full_name);
+    setMember(prefs.hidden, repo.full_name, false);
+    addProject(repo);
+    renderHidden();
+    renderOverview();
+    tick();
 }
 
 function renderProject(project) {
@@ -272,15 +343,22 @@ function renderProject(project) {
 async function refreshProject(project) {
     if (project.loading || document.hidden) return;
     project.loading = true;
+    const partial = project.data ? project.partial : null;
+    project.partial = null;
+    const section = partial?.section || "all";
     try {
         // Runs shown last time are rechecked by ID, since GitHub's status lists can briefly miss one just approved.
         const known = (project.data?.workflows || []).map(run => run.id);
-        const query = known.length ? `?runs=${known.slice(0, 20).join(",")}` : "";
-        const data = await api(`${projectPath(project.repo.full_name)}${query}`);
+        const parts = [];
+        if (section !== "all") parts.push(`section=${section}`);
+        if (known.length && section !== "pulls") parts.push(`runs=${known.slice(0, 20).join(",")}`);
+        const { active, ...sections } = await api(`${projectPath(project.repo.full_name)}${parts.length ? `?${parts.join("&")}` : ""}`);
+        const data = { ...project.data, ...sections };
         project.data = data;
         project.errorText = "";
         project.error.hidden = true;
-        project.active = data.active;
+        for (const name of section === "all" ? ["pulls", "workflows"] : [section]) project.sectionActive[name] = active;
+        project.active = project.sectionActive.pulls || project.sectionActive.workflows;
         if (project.publishedTag) {
             const run = data.workflows.find(run => run.branch === project.publishedTag);
             if (run) project.result.replaceChildren(link(`Published ${project.publishedTag} — view workflow`, run.url));
@@ -293,7 +371,9 @@ async function refreshProject(project) {
         project.card.title = "Refresh failed; previously shown data is stale.";
     } finally {
         project.loading = false;
-        project.nextRefresh = Math.max(pausedUntil, Date.now() + (project.active ? 10000 : 60000));
+        // A refresh of one section leaves the other's turn where it was, unless activity means sooner.
+        const next = Date.now() + (project.active ? 10000 : 60000);
+        project.nextRefresh = Math.max(pausedUntil, partial ? Math.min(partial.resume, next) : next);
         renderProject(project);
     }
 }
@@ -347,7 +427,16 @@ function addProject(repo) {
     const button = element("button", "New Release");
     button.type = "button";
     button.title = `Immediately publish the next minor release from ${repo.default_branch}`;
-    heading.append(title, button);
+    const include = element("label", undefined, "include");
+    const checkbox = element("input");
+    checkbox.type = "checkbox";
+    checkbox.checked = !prefs.background.has(repo.full_name);
+    include.title = "Include in the Refresh buttons. Unticked projects still update in the background.";
+    include.append(checkbox, document.createTextNode(" Refresh now"));
+    const hide = element("button", "Hide");
+    hide.type = "button";
+    hide.title = "Stop showing and refreshing this project";
+    heading.append(title, button, include, hide);
     const result = element("p", undefined, "release-result");
     result.setAttribute("role", "status");
     const error = element("p", undefined, "error");
@@ -358,8 +447,17 @@ function addProject(repo) {
     card.append(heading, result, error);
     document.getElementById("projects").append(card);
     const project = { repo, card, error, result, data: null, pullRows: [], workflowRows: [],
-        errorText: "", active: true, loading: false, nextRefresh: 0, approvals: new Map(), publishing: false };
+        errorText: "", active: true, loading: false, nextRefresh: 0, approvals: new Map(), publishing: false,
+        background: !checkbox.checked, partial: null, sectionActive: { pulls: true, workflows: true } };
     button.addEventListener("click", () => publish(project, button));
+    checkbox.addEventListener("change", () => {
+        project.background = !checkbox.checked;
+        card.className = project.background ? "project background" : "project";
+        setMember(prefs.background, repo.full_name, project.background);
+        renderRefreshLabels();
+    });
+    hide.addEventListener("click", () => hideProject(project));
+    if (project.background) card.className = "project background";
     projects.set(repo.full_name, project);
 }
 
@@ -375,7 +473,12 @@ async function discover() {
                 projects.delete(name);
             }
         }
-        for (const repo of data.repositories) if (!projects.has(repo.full_name)) addProject(repo);
+        for (const name of hiddenRepos.keys()) if (!names.has(name)) hiddenRepos.delete(name);
+        for (const repo of data.repositories) {
+            if (prefs.hidden.has(repo.full_name)) hiddenRepos.set(repo.full_name, repo);
+            else if (!projects.has(repo.full_name)) addProject(repo);
+        }
+        renderHidden();
         renderOverview();
         errorBanner.hidden = true;
     } catch (error) {
@@ -391,18 +494,42 @@ async function discover() {
 async function tick() {
     if (document.hidden || Date.now() < pausedUntil) return;
     const available = 3 - [...projects.values()].filter(project => project.loading).length;
-    const due = [...projects.values()].filter(project => !project.loading && project.nextRefresh <= Date.now());
+    // Projects asked for by the Refresh buttons go first, then whoever has waited longest.
+    const due = [...projects.values()].filter(project => !project.loading && project.nextRefresh <= Date.now())
+        .sort((a, b) => Number(a.background) - Number(b.background) || a.nextRefresh - b.nextRefresh);
     await Promise.all(due.slice(0, Math.max(0, available)).map(refreshProject));
 }
 
+// Make the projects the Refresh buttons cover due now. A section's turn is brought forward alone, remembering when the
+// project's next full refresh was due, so refreshing one section never delays the other.
+function requestRefresh(section) {
+    for (const project of projects.values()) {
+        if (project.background) continue;
+        if (section === "all" || project.nextRefresh <= Date.now() || !project.data
+            || (project.partial && project.partial.section !== section)) {
+            project.partial = null;
+        } else if (!project.partial) {
+            project.partial = { section, resume: project.nextRefresh };
+        }
+        project.nextRefresh = 0;
+    }
+}
+
 document.getElementById("refresh").addEventListener("click", async () => {
-    for (const project of projects.values()) project.nextRefresh = 0;
-    await discover();
-    await tick();
+    requestRefresh("all");
+    await Promise.all([discover(), tick()]);
+});
+document.getElementById("refresh-pulls").addEventListener("click", () => {
+    requestRefresh("pulls");
+    return tick();
+});
+document.getElementById("refresh-workflows").addEventListener("click", () => {
+    requestRefresh("workflows");
+    return tick();
 });
 document.addEventListener("visibilitychange", () => {
     if (!document.hidden) {
-        for (const project of projects.values()) project.nextRefresh = 0;
+        requestRefresh("all");
         discover().then(tick);
     }
 });
