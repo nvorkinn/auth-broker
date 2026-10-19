@@ -10,6 +10,7 @@ import json
 import logging
 import re
 import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 from http import HTTPStatus
 from typing import TYPE_CHECKING
@@ -20,7 +21,7 @@ from redis import RedisError
 from broker.clients import workflow_graph
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable
+    from collections.abc import Callable, Iterable
 
     from redis import Redis
 
@@ -43,6 +44,9 @@ RECENT_RUNS = timedelta(hours=6)
 SHOWN_AFTER = timedelta(minutes=1)
 # How long to leave GitHub alone after a rate limit that doesn't say how long: GitHub asks for at least a minute.
 DEFAULT_BACKOFF_S = 60
+# Most GitHub calls one dashboard request makes at once; the session's connection pool is sized to match.
+MAX_PARALLEL = 8
+POOL_SIZE = 16
 
 
 def summary(token: str) -> dict:
@@ -111,8 +115,19 @@ def _raise_if_rate_limited(response: requests.Response) -> None:
             raise
 
 
+def _parallel[T](calls: Iterable[Callable[[], T]]) -> list[T]:
+    """Run independent GitHub calls at once, returning their results in order and raising the first failure."""
+    calls = list(calls)
+    if len(calls) <= 1:
+        return [call() for call in calls]
+    with ThreadPoolExecutor(max_workers=min(len(calls), MAX_PARALLEL)) as pool:
+        return [future.result() for future in [pool.submit(call) for call in calls]]
+
+
 def _session(token: str) -> requests.Session:
     session = requests.Session()
+    for prefix in ("https://", "http://"):
+        session.mount(prefix, requests.adapters.HTTPAdapter(pool_maxsize=POOL_SIZE))
     session.headers.update(
         {
             "Authorization": f"Bearer {token}",
@@ -332,34 +347,58 @@ class Dashboard:
 
     def owned_repository(self, owner: str, name: str) -> dict:
         """Recheck ownership and archival status before reading or publishing a repository."""
-        login = self.get("/user")["login"]
-        repo = self.get(f"/repos/{owner}/{name}")
+        user, repo = _parallel([lambda: self.get("/user"), lambda: self.get(f"/repos/{owner}/{name}")])
+        login = user["login"]
         if repo["owner"]["login"].casefold() != login.casefold() or repo["archived"]:
             msg = "Only non-archived repositories owned by your GitHub account are supported."
             raise DashboardError(msg)
         return repo
 
-    def project(self, repo: dict, known: Iterable[int] = ()) -> dict:
-        """Return every open PR and unfinished release workflow, without a recency cutoff."""
+    def project(self, repo: dict, known: Iterable[int] = (), section: str = "all") -> dict:
+        """Return a project's open PRs and/or unfinished release workflows, without a recency cutoff.
+
+        A section's key is only present when it was read, and "active" covers only the sections read.
+        """
         path = f"/repos/{repo['full_name']}"
-        pulls = [self.pull(path, pr["number"]) for pr in self.pages(f"{path}/pulls", state="open")]
+        sections = {
+            "pulls": lambda: self.pulls(path),
+            "workflows": lambda: self.release_workflows(repo, known),
+        }
+        wanted = list(sections) if section == "all" else [section]
+        result = {}
+        active = False
+        for name, (items, busy) in zip(wanted, _parallel(sections[name] for name in wanted), strict=True):
+            result[name] = items
+            active = active or busy
+        return {**result, "active": active}
+
+    def pulls(self, path: str) -> tuple[list[dict], bool]:
+        """Return every open PR with its checks, and whether any is still changing."""
+        pulls = _parallel(
+            [lambda number=pr["number"]: self.pull(path, number) for pr in self.pages(f"{path}/pulls", state="open")]
+        )
+        return pulls, any(pr["refresh"] for pr in pulls)
+
+    def release_workflows(self, repo: dict, known: Iterable[int] = ()) -> tuple[list[dict], bool]:
+        """Return every unfinished release run drawn as a graph, and whether any run (release or not) is unfinished."""
+        path = f"/repos/{repo['full_name']}"
         # Query each unfinished status: a first page of recent runs would hide old approval waits.
-        # Lifecycle order, so a run that moves on during the sweep (say, just approved) is found by a later query.
+        # One after another and in lifecycle order, so a run that moves on during the sweep (say, just approved) is
+        # found by a later query; queries made at once could each miss it.
         runs = {}
         for status in ("requested", "pending", "waiting", "queued", "in_progress"):
             for run in self.pages(f"{path}/actions/runs", "workflow_runs", status=status):
                 runs[run["id"]] = run
         # The status filters can briefly lag a state change, so look up runs the dashboard showed last time directly.
-        for run_id in known:
-            if run_id not in runs and (run := self.run(path, run_id)):
+        missed = [run_id for run_id in known if run_id not in runs]
+        for run in _parallel([lambda run_id=run_id: self.run(path, run_id) for run_id in missed]):
+            if run:
                 runs[run["id"]] = run
         ongoing = [run for run in runs.values() if run["status"] != "completed"]
-        workflows = [self.workflow(repo, run) for run in ongoing if "release" in run["name"].casefold()]
-        return {
-            "pulls": pulls,
-            "workflows": workflows,
-            "active": bool(ongoing) or any(pr["refresh"] for pr in pulls),
-        }
+        workflows = _parallel(
+            [lambda run=run: self.workflow(repo, run) for run in ongoing if "release" in run["name"].casefold()]
+        )
+        return workflows, bool(ongoing)
 
     def run(self, path: str, run_id: int) -> dict | None:
         """Read one workflow run, or None when it has been deleted."""
@@ -374,6 +413,12 @@ class Dashboard:
         """Read mergeability and both Checks API and legacy commit-status checks for the exact PR head."""
         pr = self.get(f"{path}/pulls/{number}")
         sha = pr["head"]["sha"]
+        check_runs, status_list = _parallel(
+            [
+                lambda: self.pages(f"{path}/commits/{sha}/check-runs", "check_runs", filter="latest"),
+                lambda: self.pages(f"{path}/commits/{sha}/statuses"),
+            ]
+        )
         checks = [
             {
                 "name": check["name"],
@@ -381,11 +426,11 @@ class Dashboard:
                 "pending": check["status"] != "completed",
                 "url": check.get("html_url"),
             }
-            for check in self.pages(f"{path}/commits/{sha}/check-runs", "check_runs", filter="latest")
+            for check in check_runs
         ]
         # The statuses endpoint is newest first, including superseded updates of the same context.
         statuses = {}
-        for status in self.pages(f"{path}/commits/{sha}/statuses"):
+        for status in status_list:
             statuses.setdefault(status["context"], status)
         checks.extend(
             {
@@ -413,8 +458,13 @@ class Dashboard:
     def workflow(self, repo: dict, run: dict) -> dict:
         """Draw dependencies from the workflow at the run's commit, retaining every returned job and step."""
         path = f"/repos/{repo['full_name']}"
-        jobs = self.pages(f"{path}/actions/runs/{run['id']}/attempts/{run['run_attempt']}/jobs", "jobs")
-        text = self.read(f"{path}/contents/{run['path'].split('@')[0]}", raw=True, ref=run["head_sha"])
+        jobs, text, pending_deployments = _parallel(
+            [
+                lambda: self.pages(f"{path}/actions/runs/{run['id']}/attempts/{run['run_attempt']}/jobs", "jobs"),
+                lambda: self.read(f"{path}/contents/{run['path'].split('@')[0]}", raw=True, ref=run["head_sha"]),
+                lambda: self.pending_deployments(repo, run["id"]),
+            ]
+        )
         try:
             definitions = workflow_graph.workflow_jobs(text)
         except ValueError as error:
@@ -429,7 +479,7 @@ class Dashboard:
             "branch": run["head_branch"],
             "status": run["status"],
             "url": run["html_url"],
-            "pending_deployments": self.pending_deployments(repo, run["id"]),
+            "pending_deployments": pending_deployments,
             "nodes": workflow_graph.nodes(definitions, jobs),
             "jobs": [
                 {

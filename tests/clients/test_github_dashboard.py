@@ -1,4 +1,5 @@
 import json
+import threading
 from unittest.mock import Mock
 
 import fakeredis
@@ -138,16 +139,22 @@ def test_pull_checks_include_paginated_checks_and_latest_legacy_statuses(api):
     assert [check["state"] for check in pr["checks"][-2:]] == ["success", "pending"]
 
 
+def _runs_by_status(**by_status):
+    """Stand in for Dashboard.pages: open PRs, and the runs GitHub lists under each status."""
+
+    def pages(path, key=None, **params):
+        if path.endswith("/pulls"):
+            return [{"number": 3}]
+        return by_status.get(params["status"], [])
+
+    return Mock(side_effect=pages)
+
+
 def test_project_reads_every_unfinished_status_and_deduplicates(api):
-    api.pages = Mock(
-        side_effect=[
-            [{"number": 3}],
-            [],
-            [],
-            [{"id": 2, "name": "Release packages", "status": "waiting"}],
-            [{"id": 1, "name": "Release", "status": "queued"}],
-            [{"id": 1, "name": "Release", "status": "in_progress"}],
-        ]
+    api.pages = _runs_by_status(
+        waiting=[{"id": 2, "name": "Release packages", "status": "waiting"}],
+        queued=[{"id": 1, "name": "Release", "status": "queued"}],
+        in_progress=[{"id": 1, "name": "Release", "status": "in_progress"}],
     )
     api.pull = Mock(return_value={"refresh": False})
     api.workflow = Mock(side_effect=lambda _repo, run: run)
@@ -155,7 +162,7 @@ def test_project_reads_every_unfinished_status_and_deduplicates(api):
     assert sorted(run["id"] for run in result["workflows"]) == [1, 2]
     assert result["active"] is True
     # Lifecycle order: a run approved mid-sweep leaves "waiting" for a status that is queried later.
-    assert [call.kwargs.get("status") for call in api.pages.call_args_list[1:]] == [
+    assert [call.kwargs["status"] for call in api.pages.call_args_list if "status" in call.kwargs] == [
         "requested",
         "pending",
         "waiting",
@@ -164,10 +171,46 @@ def test_project_reads_every_unfinished_status_and_deduplicates(api):
     ]
 
 
+def test_project_reads_only_the_section_asked_for(api):
+    api.pages = _runs_by_status(queued=[{"id": 1, "name": "Release", "status": "queued"}])
+    api.pull = Mock(return_value={"refresh": False})
+    api.workflow = Mock(side_effect=lambda _repo, run: run)
+    pulls = api.project(REPO, section="pulls")
+    assert pulls == {"pulls": [{"refresh": False}], "active": False}
+    api.workflow.assert_not_called()
+    assert all(call.args[0].endswith("/pulls") for call in api.pages.call_args_list)
+    api.pages.reset_mock()
+    api.pull.reset_mock()
+    workflows = api.project(REPO, section="workflows")
+    assert workflows == {"workflows": [{"id": 1, "name": "Release", "status": "queued"}], "active": True}
+    api.pull.assert_not_called()
+    assert not any(call.args[0].endswith("/pulls") for call in api.pages.call_args_list)
+
+
+def test_project_reads_pull_requests_concurrently_and_keeps_their_order(api):
+    started = threading.Barrier(3, timeout=5)
+
+    def pull(_path, number):
+        started.wait()  # Returns only if every PR is being read at the same time.
+        return {"number": number, "refresh": False}
+
+    api.pages = Mock(return_value=[{"number": 3}, {"number": 1}, {"number": 2}])
+    api.pull = Mock(side_effect=pull)
+    assert [pr["number"] for pr in api.project(REPO, section="pulls")["pulls"]] == [3, 1, 2]
+
+
+def test_a_failed_part_fails_the_project_read(api):
+    api.pages = _runs_by_status()
+    api.pull = Mock(side_effect=requests.ConnectionError("down"))
+    with pytest.raises(requests.ConnectionError):
+        api.project(REPO)
+
+
 @responses.activate
 def test_project_rechecks_known_runs_that_the_status_lists_missed(api):
     path = f"{ROOT}/repos/alice/project"
-    api.pages = Mock(side_effect=[[], [], [], [], [{"id": 1, "name": "Release", "status": "in_progress"}], []])
+    api.pages = _runs_by_status(in_progress=[{"id": 1, "name": "Release", "status": "in_progress"}])
+    api.pull = Mock(return_value={"refresh": False})
     api.workflow = Mock(side_effect=lambda _repo, run: run)
     responses.get(f"{path}/actions/runs/7", json={"id": 7, "name": "Release", "status": "queued"})
     responses.get(f"{path}/actions/runs/8", json={"id": 8, "name": "Release", "status": "completed"})
@@ -175,7 +218,7 @@ def test_project_rechecks_known_runs_that_the_status_lists_missed(api):
     result = api.project(REPO, [1, 7, 8, 9])
     assert sorted(run["id"] for run in result["workflows"]) == [1, 7]
     assert result["active"] is True
-    assert [call.request.url.split("/")[-1] for call in responses.calls] == ["7", "8", "9"]
+    assert sorted(call.request.url.split("/")[-1] for call in responses.calls) == ["7", "8", "9"]
 
 
 @pytest.mark.parametrize(
@@ -192,7 +235,8 @@ def test_project_rechecks_known_runs_that_the_status_lists_missed(api):
 )
 def test_only_release_workflows_are_drawn_but_other_ci_still_keeps_fast_polling(api, name, shown):
     run = {"id": 7, "name": name, "status": "waiting"}
-    api.pages = Mock(side_effect=[[], [], [], [run], [], []])
+    api.pages = _runs_by_status(waiting=[run])
+    api.pull = Mock(return_value={"refresh": False})
     api.workflow = Mock(return_value=run)
     result = api.project(REPO)
     assert result["workflows"] == ([run] if shown else [])
@@ -244,7 +288,10 @@ def test_waiting_workflow_includes_unstarted_nodes_edges_and_job_steps(api):
     assert [(node["state"], node["needs"]) for node in result["nodes"]] == [("done", []), ("queued", ["build"])]
     assert result["jobs"][0]["steps"][0]["name"] == "Compile"
     assert result["pending_deployments"] == [{"id": 10, "name": "production", "can_approve": True, "wait_timer": 0}]
-    assert "ref=abc" in responses.calls[-2].request.url
+    assert any(
+        "/contents/.github/workflows/release.yml" in call.request.url and "ref=abc" in call.request.url
+        for call in responses.calls
+    )
 
 
 @responses.activate

@@ -76,6 +76,12 @@ summary { cursor: pointer; color: var(--muted); font-size: 11px; }
 .project-header { gap: 5px; }
 .project-name { min-width: 0; font-size: 12px; overflow-wrap: anywhere; }
 .project button { font-size: 10px; padding: 3px 6px; }
+.include { font-size: 10px; color: var(--muted); display: flex; align-items: center; gap: 3px; }
+.project.background { opacity: .7; }
+.hidden-projects { padding: 0 12px 10px; font-size: 11px; }
+.hidden-projects[hidden] { display: none; }
+.hidden-project { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 2px 0; }
+.hidden-project button { font-size: 10px; padding: 3px 6px; }
 .error { padding: 5px 0; overflow-wrap: anywhere; }
 .project .error, .release-result { font-size: 11px; }
 .release-result:empty { display: none; }
