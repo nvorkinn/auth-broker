@@ -70,7 +70,8 @@ class FakeRedis:
     """Just enough of Redis to see what a config save writes: sets, strings (configs, pairing keys), what's published.
 
     And the render jobs queued (services/render_jobs.py): `jobs`, oldest first, a device at most once, as the queue's
-    script does (its flag never lapses here), for the screens in `pooled` (v1:render:screens). A TTL is ignored.
+    script does (its flag never lapses here), for the screens in `pooled`, the render pool's `v1:render:screens` (its
+    slugs by device id, which the broker writes: services/render_screens.py). A TTL is ignored.
     tests/services/test_render_jobs.py runs the real script.
     """
 
@@ -79,7 +80,7 @@ class FakeRedis:
         self.strings: dict[str, str] = {}
         self.published: list[tuple[str, str]] = []
         self.jobs: list[str] = []
-        self.pooled: set[str] = set()
+        self.pooled: dict[str, str] = {}
         self.fail = False
 
     def _check(self):
@@ -115,7 +116,12 @@ class FakeRedis:
     def hmget(self, key, fields):
         self._check()
         assert key == render_jobs.SCREENS
-        return ["slug" if field in self.pooled else None for field in fields]
+        return [self.pooled.get(field) for field in fields]
+
+    def hgetall(self, key):
+        self._check()
+        assert key == render_jobs.SCREENS
+        return dict(self.pooled)
 
     def register_script(self, script):
         assert script == render_jobs._ENQUEUE, "only the render queue's enqueue is faked"
@@ -166,6 +172,12 @@ class FakePipeline:
     def publish(self, channel, message):
         self.ops.append(("publish", channel, message))
 
+    def hset(self, key, mapping):
+        self.ops.append(("hset", key, mapping))
+
+    def hdel(self, key, *fields):
+        self.ops.append(("hdel", key, fields))
+
     def execute(self):
         self.server._check()
         results = []
@@ -180,6 +192,13 @@ class FakePipeline:
                 self.server.strings[key] = rest[0]
             elif op == "sadd":
                 self.server.sets.setdefault(key, set()).update(rest[0])
+            elif op in {"hset", "hdel"}:
+                assert key == render_jobs.SCREENS
+                if op == "hset":
+                    self.server.pooled.update(rest[0])
+                else:
+                    for field in rest[0]:
+                        self.server.pooled.pop(field, None)
             else:
                 self.server.published.append((key, rest[0]))
         self.ops = []

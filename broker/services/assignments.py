@@ -122,18 +122,27 @@ def listing() -> list[RendererAssignment]:
     now = datetime.now(UTC)
     assignments = db.session.scalars(select(RendererAssignment).order_by(RendererAssignment.created_at)).all()
     for assignment in assignments:
-        device = assignment.device
-        if device is None:
+        if assignment.device is None:
             continue
-        # A new assignment for a screen that was away isn't suspended before it ever runs.
-        seen = max(filter(None, [device.display_last_seen_at, device.created_at, assignment.created_at]))
-        quiet = now - seen >= SUSPEND_AFTER
+        quiet = is_quiet(assignment, now)
         if quiet and assignment.status in {"pending", "provisioned"}:
             assignment.status = "suspended"
         elif not quiet and assignment.status == "suspended":
             assignment.status = "pending"
     db.session.commit()
     return list(assignments)
+
+
+def is_quiet(assignment: RendererAssignment, now: datetime) -> bool:
+    """Whether the assignment's screen has been unseen for SUSPEND_AFTER, so its renderer is to be suspended.
+
+    The assignment must have a device. The render pool's list of screens (services/render_screens.py) leaves its
+    screen out by the same rule.
+    """
+    device = assignment.device
+    # A new assignment for a screen that was away isn't suspended before it ever runs.
+    seen = max(filter(None, [device.display_last_seen_at, device.created_at, assignment.created_at]))
+    return now - seen >= SUSPEND_AFTER
 
 
 def report(assignment: RendererAssignment, status: str, detail: str) -> bool:

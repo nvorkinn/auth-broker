@@ -29,9 +29,14 @@ def post_worker_init(worker: Worker) -> None:
     Redis keeps nothing on disk, so after it restarts, or the first time a broker that writes the configs starts, this
     puts back what the renderers and providers read; the same as `flask config publish`. Redis being down is logged,
     and the broker serves regardless (the renderers then ask GET /api/config).
+
+    Then it starts the thread that rewrites the configs and the render pool's screens every minute
+    (config_store.start_resync), so a Redis that restarts while the broker runs gets them back too.
     """
     # Here, not at the top: gunicorn reads this file before it loads the app, and the app's own modules with it.
     from broker.cli import publish_store  # noqa: PLC0415
+    from broker.services import config_store  # noqa: PLC0415
 
     with worker.wsgi.app_context():  # the app gunicorn loaded (wsgi:app)
         publish_store()
+    config_store.start_resync(worker.wsgi)

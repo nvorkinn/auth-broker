@@ -513,7 +513,8 @@ sequenceDiagram
   null. No API key is in it, and no Glowmarkt, GitHub, Spotify or Apple Music credential.
   `tests/fixtures/config_store.json` pins the shape, and pi-dashboard's tests read the same file.
 - **When.** The whole set is rebuilt from the database on every config save, as the broker starts (gunicorn's
-  `post_worker_init`, in `gunicorn.conf.py`), by `flask weather backfill` and by `flask config publish`; one device's
+  `post_worker_init`, in `gunicorn.conf.py`), every minute in each gunicorn worker (`config_store.start_resync`, a
+  daemon thread `post_worker_init` starts), by `flask weather backfill` and by `flask config publish`; one device's
   key when its pairing changes (`/pair`, `POST /pair/token`, `POST /api/devices/pairing-code`, `flask devices code`,
   `owner`, `unpair`, `forget`). Only keys whose value changed are written, and only their devices are nudged on
   `v1:config:changed` (payload: the device id), in the same transaction, after the write.
@@ -536,13 +537,22 @@ sequenceDiagram
   takes jobs off the list (no TTL) until a pool runs. `tests/fixtures/render_queue.json` pins the script's SHA1
   and keys; pi-dashboard's tests read the same file. Redis down never fails a save or a code: the error's type is
   logged, and the pool's ticker draws the screen within the minute.
+- **The pool's screens** (`services/render_screens.py`): `v1:render:screens`, a hash of device id to slug (the
+  slug is the `device` label of the pool's metrics), which the pool's worker and ticker read, rewritten whole (only
+  what differs) with the configs, and when a screen is named. A screen is listed while it has a slug, settings, is
+  paired or has a live code to show, and has been seen within a day (the orchestrator's suspension rule,
+  `assignments.is_quiet`); a screen newly listed gets a render job at once. `tests/fixtures/render_screens.json` pins
+  the shape; pi-dashboard's tests read the same file. While the orchestrator runs, it prunes every 10 s the screens
+  outside its `POOL_SLUGS`, and the broker lists them again within the minute (with one job each): harmless, as those
+  screens still have their own renderers, which draw the same frame.
 - **No TTL** on the configs, as they're rebuilt from the database. `maxmemory-policy volatile-lru` evicts only keys
   with a TTL, so these are never evicted, and they count against `maxmemory 128mb` for good: about 700 bytes of JSON
   each, about 1 KB with Redis's own overhead, so a thousand screens take about 1 MB.
 - **When Redis can't be written** during a save, the save still succeeds, the broker logs "Couldn't write the
   screens' configs to Redis", and a renderer keeps reading the copy that was there (or asks the broker, with none)
   until the next rebuild; `flask config publish` puts it right. Redis restarting loses the keys (it keeps nothing on
-  disk): the renderers ask the broker until it restarts, someone saves, or `flask config publish` runs.
+  disk): the renderers ask the broker until the next minute's resync puts them back (or a save, a restart, or
+  `flask config publish`).
 - **Rolling back** to a broker from before this leaves the keys in Redis, unrefreshed, and the renderers would keep
   reading them. Delete them first, on the host:
   `docker exec redis sh -c 'REDISCLI_AUTH="$REDIS_PASSWORD" redis-cli -h 127.0.0.1 --scan --pattern "v1:config:*" | xargs -r redis-cli -h 127.0.0.1 DEL'`

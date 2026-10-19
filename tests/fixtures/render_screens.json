@@ -1,0 +1,8 @@
+{
+  "about": "The render pool's list of screens, v1:render:screens: a hash of device id to slug, the slug being the screen's name in the pool's metrics (their `device` label). pi-dashboard reads it (countdown_core.store.keys.RENDER_SCREENS: render_queue.screens(), the ticker's, and the claim script's HGET, which drops a job for a device not in it); auth-broker writes it (broker/services/render_screens.py), for the screens with a slug and something for the pool to draw. Both repositories' tests check their side against this file (tests/fixtures/render_screens.json in auth-broker, countdown/tests/fixtures/render_screens.json in pi-dashboard): change both together.",
+  "key": "v1:render:screens",
+  "screens": {
+    "a1b2c3d4e5f6": "nvorkinn-kitchen",
+    "0f9e8d7c6b5a": "nvorkinn-hall"
+  }
+}

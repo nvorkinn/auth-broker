@@ -1,0 +1,347 @@
+"""The render pool's list of screens, `v1:render:screens` (broker/services/render_screens.py), as the broker writes it.
+
+tests/fixtures/render_screens.json is the hash's shape, which pi-dashboard's render pool reads (keys.RENDER_SCREENS):
+both repositories' tests read that file. The rest goes through the real routes and `flask devices` commands, with the
+broker's Redis a fakeredis.
+"""
+
+import json
+import threading
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
+from unittest.mock import patch
+
+import fakeredis
+import pytest
+import redis
+
+from broker.db import db
+from broker.models import Device, DeviceConfig, RendererAssignment
+from broker.services import assignments, config_store, pairing, render_jobs, render_screens
+
+FIXTURE = json.loads((Path(__file__).parent.parent / "fixtures" / "render_screens.json").read_text())
+SCREENS = FIXTURE["key"]
+
+
+@pytest.fixture
+def store(app):
+    """Make the broker's Redis one fakeredis (with Lua, for the render jobs), and return it."""
+    client = fakeredis.FakeRedis(decode_responses=True)
+    app.extensions["redis"] = client
+    return client
+
+
+def _add_screen(device_id, slug, *, paired=True, config=True, seen=None):
+    """Add a device to the database as the broker has it once its owner has named it (needs an app context)."""
+    now = datetime.now(UTC)
+    device = Device(
+        device_id=device_id,
+        created_at=now - timedelta(days=30),
+        paired_at=now if paired else None,
+        owner="user-1" if paired else None,
+        display_last_seen_at=seen or now,
+    )
+    if config:
+        device.config = DeviceConfig()
+    db.session.add(device)
+    db.session.add(
+        RendererAssignment(
+            id=device_id[:6], device=device, slug=slug, status="pending", created_at=now - timedelta(days=30)
+        )
+    )
+    db.session.commit()
+    return device
+
+
+def _jobs(store) -> list[str]:
+    """Return the device ids queued, oldest first."""
+    return list(reversed(store.lrange(render_jobs.JOBS, 0, -1)))
+
+
+def _headers(secret):
+    return {"Authorization": f"Bearer {secret}"}
+
+
+# --- the hash, against the fixture shared with pi-dashboard --------------------------------------------------------
+
+
+def test_the_key_is_the_pools():
+    # pi-dashboard's keys.RENDER_SCREENS, which render_jobs reads to queue only the screens the pool draws.
+    assert render_screens.SCREENS == SCREENS == render_jobs.SCREENS
+
+
+def test_the_hash_is_the_shape_the_pool_reads(app, store):
+    with app.app_context():
+        for device_id, slug in FIXTURE["screens"].items():
+            _add_screen(device_id, slug)
+
+        render_screens.write()
+
+    # Field the device id, value the slug: what the pool's claim script HGETs, and labels its metrics with.
+    assert store.hgetall(SCREENS) == FIXTURE["screens"]
+    assert store.ttl(SCREENS) == -1  # no TTL: it's rewritten from the database, and never evicted
+
+
+# --- which screens ---------------------------------------------------------------------------------------------------
+
+
+def test_a_screen_with_a_slug_and_a_config_is_listed_and_queued(app, store):
+    with app.app_context():
+        _add_screen("a1b2c3d4e5f6", "nvorkinn-kitchen")
+
+        assert render_screens.write() == 1
+
+    assert store.hgetall(SCREENS) == {"a1b2c3d4e5f6": "nvorkinn-kitchen"}
+    # Drawn now, not at the ticker's next minute.
+    assert _jobs(store) == ["a1b2c3d4e5f6"]
+
+
+def test_only_a_newly_listed_screen_is_queued(app, store):
+    with app.app_context():
+        _add_screen("a1b2c3d4e5f6", "nvorkinn-kitchen")
+        render_screens.write()
+        store.delete(render_jobs.JOBS, render_jobs.queued_key("a1b2c3d4e5f6"))  # as the pool's worker would
+        _add_screen("0f9e8d7c6b5a", "nvorkinn-hall")
+
+        assert render_screens.write() == 1
+
+    assert _jobs(store) == ["0f9e8d7c6b5a"]
+
+
+def test_a_screen_without_a_slug_is_not_listed(app, store, paired_client):
+    _client, device_id, _ = paired_client
+    with app.app_context():
+        db.session.delete(db.session.get(Device, device_id).assignment)
+        db.session.commit()
+
+        render_screens.write()
+
+    assert store.hgetall(SCREENS) == {}
+
+
+def test_a_screen_without_settings_is_not_listed(app, store):
+    with app.app_context():
+        _add_screen("a1b2c3d4e5f6", "nvorkinn-kitchen", config=False)
+
+        render_screens.write()
+
+    assert store.hgetall(SCREENS) == {}
+
+
+def test_an_unpaired_screen_is_listed_only_while_it_has_a_code_to_show(app, store):
+    with app.app_context():
+        _add_screen("a1b2c3d4e5f6", "nvorkinn-kitchen", paired=False)
+        render_screens.write()
+        assert store.hgetall(SCREENS) == {}  # nothing for the pool to draw: no config in the store, and no code
+
+        # The pool draws the pairing screen from the code's key (services/pairing_key.py).
+        pairing.issue_code("a1b2c3d4e5f6")
+        render_screens.write()
+        assert store.hgetall(SCREENS) == {"a1b2c3d4e5f6": "nvorkinn-kitchen"}
+
+        # The code lapses: off the list at the next write.
+        with patch.object(render_screens, "datetime") as clock:
+            clock.now.return_value = datetime.now(UTC) + pairing.CODE_TTL + timedelta(seconds=1)
+            render_screens.write()
+
+    assert store.hgetall(SCREENS) == {}
+
+
+def test_a_paired_screen_showing_a_code_stays_listed(app, store):
+    # Its config isn't in the store while the code is live (renderer_config.for_store), but the code's key is.
+    with app.app_context():
+        _add_screen("a1b2c3d4e5f6", "nvorkinn-kitchen")
+        pairing.issue_code("a1b2c3d4e5f6")
+        config_store.publish("a1b2c3d4e5f6")
+
+    assert store.get(config_store.key("a1b2c3d4e5f6")) is None
+    assert store.hgetall(SCREENS) == {"a1b2c3d4e5f6": "nvorkinn-kitchen"}
+
+
+def test_a_quiet_screen_is_left_out_as_the_orchestrator_suspends_it(app, store):
+    with app.app_context():
+        now = datetime.now(UTC)
+        _add_screen("a1b2c3d4e5f6", "nvorkinn-kitchen", seen=now - assignments.SUSPEND_AFTER - timedelta(minutes=1))
+        _add_screen("0f9e8d7c6b5a", "nvorkinn-hall", seen=now - assignments.SUSPEND_AFTER + timedelta(minutes=1))
+
+        render_screens.write()
+        assert store.hgetall(SCREENS) == {"0f9e8d7c6b5a": "nvorkinn-hall"}
+        # The same rule as the orchestrator's suspension (assignments.listing): the two lists agree.
+        assert [a.status for a in assignments.listing()] == ["suspended", "pending"]
+
+        # Seen again: listed at the next write.
+        db.session.get(Device, "a1b2c3d4e5f6").display_last_seen_at = now
+        db.session.commit()
+        render_screens.write()
+
+    assert store.hgetall(SCREENS) == FIXTURE["screens"]
+
+
+def test_screens_nobody_has_are_taken_out_and_the_rest_left(app, store):
+    # What the orchestrator wrote for a slug the broker doesn't list, and a screen under an old slug.
+    store.hset(SCREENS, mapping={"gone00000000": "someone-old", "a1b2c3d4e5f6": "nvorkinn-old"})
+    with app.app_context():
+        _add_screen("a1b2c3d4e5f6", "nvorkinn-kitchen")
+
+        assert render_screens.write() == 0  # listed already, under another slug: no job
+
+    assert store.hgetall(SCREENS) == {"a1b2c3d4e5f6": "nvorkinn-kitchen"}
+    assert _jobs(store) == []
+
+
+def test_nothing_is_written_when_the_hash_is_right(app, store):
+    with app.app_context():
+        _add_screen("a1b2c3d4e5f6", "nvorkinn-kitchen")
+        render_screens.write()
+
+        with patch.object(store, "pipeline") as pipeline:
+            assert render_screens.write() == 0
+
+    pipeline.assert_not_called()
+
+
+def test_redis_down_is_logged_by_type_and_not_raised(app):
+    server = fakeredis.FakeServer()
+    server.connected = False  # every command raises ConnectionError
+    app.extensions["redis"] = fakeredis.FakeRedis(server=server, decode_responses=True)
+    with app.app_context():
+        _add_screen("a1b2c3d4e5f6", "nvorkinn-kitchen")
+
+        # Patched rather than caplog: other tests (alembic's logging set-up) can leave loggers disabled.
+        with patch.object(render_screens, "logger") as logger:
+            assert render_screens.write() == 0
+
+    logger.warning.assert_called_once()
+    assert "ConnectionError" in logger.warning.call_args.args
+    assert "a1b2c3d4e5f6" not in repr(logger.warning.call_args)
+    assert "nvorkinn" not in repr(logger.warning.call_args)
+
+
+# --- kept in step with the database ----------------------------------------------------------------------------------
+
+
+def test_naming_a_screen_lists_it_and_draws_it(app, store, client):
+    display = "display-secret-for-naming-a-screen"
+    device_id = client.post("/api/devices/register", json={"secret": display, "width": 480, "height": 800}).get_json()[
+        "device_id"
+    ]
+    with app.app_context():
+        token = db.session.get(Device, device_id).pairing_token
+    assert client.post("/pair/token", json={"token": token}).status_code == 200
+    assert store.hgetall(SCREENS) == {}  # paired, but no slug yet
+
+    assert client.post("/device/name", data={"slug": "kitchen"}).status_code == 302
+
+    assert store.hgetall(SCREENS) == {device_id: "tester-kitchen"}
+    assert _jobs(store) == [device_id]
+
+
+def test_naming_a_screen_through_the_api_lists_it(app, store, client):
+    display = "display-secret-for-naming-by-api"
+    device_id = client.post("/api/devices/register", json={"secret": display, "width": 480, "height": 800}).get_json()[
+        "device_id"
+    ]
+    with app.app_context():
+        token = db.session.get(Device, device_id).pairing_token
+    client.post("/pair/token", json={"token": token})
+
+    assert client.post(f"/api/displays/{device_id}/renderer", json={"slug": "hall"}).status_code == 201
+
+    assert store.hgetall(SCREENS) == {device_id: "tester-hall"}
+
+
+def test_pairing_lists_a_screen_and_unpairing_takes_it_out(store, paired_client, cli):
+    _client, device_id, _ = paired_client
+    assert device_id in store.hgetall(SCREENS)
+
+    assert cli("unpair", device_id).exit_code == 0
+
+    assert store.hgetall(SCREENS) == {}
+
+
+def test_forgetting_a_screen_takes_it_out(store, paired_client, cli):
+    _client, device_id, _ = paired_client
+
+    assert cli("forget", device_id).exit_code == 0
+
+    assert store.hgetall(SCREENS) == {}
+
+
+def test_a_config_save_puts_back_a_hash_redis_lost(store, paired_client):
+    client, device_id, _ = paired_client
+    slug = store.hget(SCREENS, device_id)
+    store.flushall()  # Redis restarted
+
+    client.post("/device", data={"style": "card"})
+
+    assert store.hgetall(SCREENS) == {device_id: slug}
+    assert device_id in _jobs(store)
+
+
+def test_the_broker_puts_the_hash_back_as_it_starts(app, store, paired_client):
+    _client, device_id, _ = paired_client
+    slug = store.hget(SCREENS, device_id)
+    store.flushall()
+
+    # What gunicorn.conf.py's post_worker_init runs (and `flask config publish`).
+    with app.app_context():
+        from broker.cli import publish_store  # noqa: PLC0415
+
+        publish_store()
+
+    assert store.hgetall(SCREENS) == {device_id: slug}
+
+
+# --- every minute ----------------------------------------------------------------------------------------------------
+
+
+def test_the_resync_rewrites_the_configs_and_the_screens_until_stopped(app, store, paired_client):
+    _client, device_id, _ = paired_client
+    slug = store.hget(SCREENS, device_id)
+    config = store.get(config_store.key(device_id))
+    store.flushall()  # Redis restarted while the broker ran
+    stop = threading.Event()
+    rounds = []
+    publish_all = config_store.publish_all
+
+    def publish_and_count():
+        publish_all()
+        rounds.append(store.hgetall(SCREENS))
+        if len(rounds) == 2:
+            stop.set()
+
+    with patch.object(config_store, "publish_all", side_effect=publish_and_count):
+        config_store.resync_forever(app, stop, interval_s=0.01)
+
+    assert rounds == [{device_id: slug}, {device_id: slug}]
+    assert store.get(config_store.key(device_id)) == config
+
+
+def test_the_resync_carries_on_after_a_round_fails(app):
+    stop = threading.Event()
+    calls = []
+
+    def fail_then_stop():
+        calls.append(1)
+        if len(calls) == 2:
+            stop.set()
+        msg = "unexpected"
+        raise redis.exceptions.ResponseError(msg)
+
+    with (
+        patch.object(config_store, "publish_all", side_effect=fail_then_stop),
+        patch.object(config_store, "logger") as logger,
+    ):
+        config_store.resync_forever(app, stop, interval_s=0.01)
+
+    assert len(calls) == 2
+    assert logger.exception.call_count == 2
+
+
+def test_the_resync_runs_in_a_daemon_thread(app):
+    with patch.object(config_store, "resync_forever") as resync:
+        thread = config_store.start_resync(app)
+        thread.join(1)
+
+    assert thread.daemon  # so it never holds up a worker that's stopping
+    assert resync.call_args.args[0] is app
