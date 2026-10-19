@@ -2,44 +2,38 @@
   "title": "Screens",
   "rows": [
     {
-      "title": "Each screen, on the render pool and on its own container",
+      "title": "Each screen",
       "panels": [
         {
           "title": "Problem (1 = something is wrong)",
-          "description": "By screen (its slug), whether the render pool draws it (the device attribute) or its own renderer container (the device attribute too, or else its host.name), so a screen reads the same either way. Own containers that report neither share one series, \"own containers, screen not known\". 1 when an API is in error, or (pool) the last render failed. countdown.problem.",
+          "description": "By screen (its slug, the device attribute). 1 when an API is in error, or the last render failed. countdown.problem.",
           "width": 4,
           "expr": [
-            "max by (device) (last_over_time(countdown.problem{device!=\"\"}[5m]))",
-            "label_replace(label_move(max by (host.name, host_name) (last_over_time(countdown.problem{device=\"\"}[5m])), \"host.name\", \"device\", \"host_name\", \"device\"), \"device\", \"own containers, screen not known\", \"device\", \"\")"
+            "max by (device) (last_over_time(countdown.problem{device!=\"\"}[5m]))"
           ],
           "alias": [
-            "{{device}}",
             "{{device}}"
           ]
         },
         {
           "title": "APIs in error",
-          "description": "By screen (its slug), whether the render pool draws it (the device attribute) or its own renderer container (the device attribute too, or else its host.name), so a screen reads the same either way. Own containers that report neither share one series, \"own containers, screen not known\". Each API whose status is error or fatal. countdown.api.status.",
+          "description": "By screen (its slug, the device attribute). Each API whose status is error or fatal. countdown.api.status.",
           "width": 4,
           "expr": [
-            "max by (device, api, status) (last_over_time(countdown.api.status{device!=\"\", status=~\"error|fatal\"}[5m]))",
-            "label_replace(label_move(max by (host.name, host_name, api, status) (last_over_time(countdown.api.status{device=\"\", status=~\"error|fatal\"}[5m])), \"host.name\", \"device\", \"host_name\", \"device\"), \"device\", \"own containers, screen not known\", \"device\", \"\")"
+            "max by (device, api, status) (last_over_time(countdown.api.status{device!=\"\", status=~\"error|fatal\"}[5m]))"
           ],
           "alias": [
-            "{{device}} {{api}} {{status}}",
             "{{device}} {{api}} {{status}}"
           ]
         },
         {
           "title": "Stage",
-          "description": "By screen (its slug), whether the render pool draws it (the device attribute) or its own renderer container (the device attribute too, or else its host.name), so a screen reads the same either way. Own containers that report neither share one series, \"own containers, screen not known\". What the screen shows: pairing or running. countdown.stage.",
+          "description": "By screen (its slug, the device attribute). What the screen shows: pairing or running. countdown.stage.",
           "width": 4,
           "expr": [
-            "max by (device, stage) (last_over_time(countdown.stage{device!=\"\"}[5m]))",
-            "label_replace(label_move(max by (host.name, host_name, stage) (last_over_time(countdown.stage{device=\"\"}[5m])), \"host.name\", \"device\", \"host_name\", \"device\"), \"device\", \"own containers, screen not known\", \"device\", \"\")"
+            "max by (device, stage) (last_over_time(countdown.stage{device!=\"\"}[5m]))"
           ],
           "alias": [
-            "{{device}} {{stage}}",
             "{{device}} {{stage}}"
           ]
         }

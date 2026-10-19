@@ -939,10 +939,7 @@ Grafana: it was taken back out. **Screens** has:
 
 - **Each screen**: `countdown.problem`, the APIs in error (`countdown.api.status`)
   and `countdown.stage`, by the `device` label (the slug), which the render pool
-  sets and, from pi-dashboard #225, a screen's own renderer container too, so a
-  screen looks the same either way. Beside it, the same gauge from an own
-  container that doesn't set `device` yet. A series that doesn't exist draws
-  nothing.
+  sets. A series that doesn't exist draws nothing.
 - **Render pool** (pi-dashboard's `countdown_server/pool_metrics.py`): the time
   since each screen's last good frame (`countdown.render.last_success`, the
   highest across workers), failed renders by screen, renders by `outcome`,
@@ -957,11 +954,7 @@ passes them to VictoriaMetrics unchanged, with no unit suffix and no `_total`
 resource's attributes (`host.name`, `service.name`) are not labels: Fluent Bit
 keeps them as metadata that remote write doesn't send. That's why pi-dashboard
 puts the screen (`device`) and the pool's worker (`worker`) on the data points.
-An own container from before that has no screen label: its gauges share one
-series, "own containers, screen not known" (the panels would group them by a
-`host.name` or `host_name` label, were there one). The pool's queries sum
-across workers, so `worker` changes nothing in them, but until it's there the
-two workers' counters share one series and their rates read high. To change a
+The pool's queries sum across workers, so `worker` changes nothing in them. To change a
 dashboard, edit its JSON and try every query in vmui's query tab first;
 `tests/test_vmui_dashboards.py` pins the shape.
 
