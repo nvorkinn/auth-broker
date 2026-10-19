@@ -11,8 +11,17 @@ permissions:
   contents: read
 
 jobs:
+  # The tests in 3 jobs side by side: pytest-shard gives each a third of them (split by test ID, so every test runs in
+  # exactly one shard), and Codecov merges the 3 coverage reports (codecov.yml waits for all of them). With
+  # --num-shards below, keep the shard list 0 to N-1.
   test:
+    name: test (shard ${{ matrix.shard }})
     runs-on: ubuntu-latest
+    strategy:
+      # One shard's failure shouldn't hide the others'.
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2]
     steps:
       # vendor/countdown-api is a submodule: the API contract and the code generated from it.
       - uses: actions/checkout@v7
@@ -23,29 +32,50 @@ jobs:
         with:
           python-version: "3.14"
 
+      # The same uv as the Dockerfile's (keep them in step), so the image build can read the cache these jobs save.
+      # actions/cache below, not setup-uv's own, caches it.
       - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          version: "0.13.1"
+          enable-cache: false
+
+      # uv's downloads and built wheels, reused until pyproject.toml or uv.lock changes (and then the newest one is
+      # restored and a new one saved).
+      - name: Cache uv
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/uv
+          key: uv-${{ runner.os }}-${{ hashFiles('pyproject.toml', 'uv.lock') }}
+          restore-keys: uv-${{ runner.os }}-
 
       - name: Install redis-server
         # For the render queue's script's tests against a real Redis (tests/services/test_render_jobs.py starts its
         # own; they skip without it).
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends redis-server
 
-      # uv rather than pip: about 10s quicker, most of the job before the tests.
+      # Exactly what uv.lock pins, dev group included, into .venv.
       - name: Install dependencies
-        run: uv pip install --system -r requirements-dev.txt
+        run: uv sync --locked
 
+      # Lint, formatting and the browser tests don't depend on the shard, so only the first runs them.
       - name: Lint
-        run: ruff check .
+        if: matrix.shard == 0
+        run: uv run --no-sync ruff check .
 
       - name: Check formatting
-        run: ruff format --check .
+        if: matrix.shard == 0
+        run: uv run --no-sync ruff format --check .
 
       - name: Test dashboard browser logic
+        if: matrix.shard == 0
         run: node --test tests/browser/*.test.cjs
 
       - name: Run tests
-        # One worker per CPU; pytest-cov combines their coverage.
-        run: python -m pytest -n auto -v --cov=broker --cov-report=term-missing --cov-report=xml
+        # This shard's tests, one worker per CPU; pytest-cov combines their coverage. No terminal coverage report: a
+        # shard's alone would list as missing every line only the other shards' tests reach.
+        run: >-
+          uv run --no-sync python -m pytest -n auto -v --num-shards 3 --shard-id ${{ matrix.shard }}
+          --cov=broker --cov-report=xml
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7
@@ -97,8 +127,22 @@ jobs:
         with:
           submodules: true
 
+      # The broker's image installs its dependencies with uv: given the test jobs' uv cache, it reads what it needs
+      # from there. Restore only: this job adds nothing to the cache, so it mustn't save it under the test jobs' key.
+      - name: Restore uv cache
+        if: matrix.image == 'broker'
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/uv
+          key: uv-${{ runner.os }}-${{ hashFiles('pyproject.toml', 'uv.lock') }}
+          restore-keys: uv-${{ runner.os }}-
+
+      # The broker's in place of the Dockerfile's empty uv-cache stage: the restored cache (an empty folder on a miss).
       - name: Build image
-        run: docker build -t auth-broker-${{ matrix.image }} ${{ matrix.context || matrix.image }}
+        run: |
+          mkdir -p ~/.cache/uv
+          docker build ${{ matrix.image == 'broker' && '--build-context uv-cache="$HOME/.cache/uv"' || '' }} \
+            -t auth-broker-${{ matrix.image }} ${{ matrix.context || matrix.image }}
 
       - name: Check config
         run: docker run --rm auth-broker-${{ matrix.image }} ${{ matrix.check }}

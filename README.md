@@ -419,13 +419,13 @@ broker/
 
 ## Running locally
 
-Python 3.14 is needed. `vendor/countdown-api` is a git submodule (the API contract and the code generated from it),
-installed by `requirements.txt` in editable mode, so clone with it and update it with the repository:
+Python 3.14 and [uv](https://docs.astral.sh/uv/) are needed: `pyproject.toml` lists the dependencies and `uv.lock`
+pins them. `vendor/countdown-api` is a git submodule (the API contract and the code generated from it), installed from
+there in editable mode, so clone with it and update it with the repository:
 
 ```bash
 git clone --recurse-submodules https://github.com/nvorkinn/auth-broker.git   # or, in a clone: git submodule update --init
-python3.14 -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
+uv sync && source .venv/bin/activate  # into .venv, the dev tools included
 cp secrets/broker.env.example .env  # fill in Spotify app credentials + a random FLASK_SECRET_KEY
 export SPOTIFY_REDIRECT_URI=https://auth.nikolaivorkinn.com/auth/spotify/callback
 export $(grep -v '^#' .env | xargs)
@@ -549,8 +549,8 @@ The broker's other routes are plain Flask blueprints and not in the contract.
 ## Running tests
 
 ```bash
-pip install -r requirements-dev.txt
-python -m pytest --cov=broker --cov-report=term-missing
+uv sync
+uv run python -m pytest --cov=broker --cov-report=term-missing
 ```
 
 Lint and format checks (config in `ruff.toml`, also run in CI):
@@ -561,9 +561,13 @@ ruff format .         # use --check to verify without changing files
 ```
 
 External calls (Spotify, TfL) are mocked in tests — nothing hits the network.
-`.github/workflows/tests.yml` runs this on every push/PR to `main` and uploads
-`coverage.xml` to [Codecov](https://app.codecov.io/gh/nvorkinn/auth-broker),
-which posts a coverage comment and status check on each PR (config in
+`.github/workflows/tests.yml` runs this on every push/PR to `main`, split into
+3 parallel jobs with [pytest-shard](https://pypi.org/project/pytest-shard/)
+(`--num-shards 3 --shard-id 0` runs the first third locally), with uv's cache
+kept between runs by `actions/cache` until `pyproject.toml` or `uv.lock`
+changes. Each shard uploads its `coverage.xml` to
+[Codecov](https://app.codecov.io/gh/nvorkinn/auth-broker), which merges them and
+posts a coverage comment and status check on each PR (config in
 `codecov.yml`). The upload needs a `CODECOV_TOKEN` repository secret.
 
 The same workflow builds each image. The broker's is then started the way
