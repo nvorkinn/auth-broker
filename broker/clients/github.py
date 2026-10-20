@@ -234,6 +234,11 @@ def _release(session: requests.Session, repo: dict, now: datetime) -> dict | Non
     }
 
 
+def _is_release(run: dict) -> bool:
+    """Tell whether a workflow, or a run of one, is a release the dashboard draws."""
+    return "release" in (run["name"] or "").casefold()
+
+
 def _title(run: dict, repo: dict) -> str:
     """Return the tag a release was pushed for, else its run number (one started by hand runs on the default branch)."""
     if run["event"] == "push" and run["head_branch"] != repo["default_branch"]:
@@ -395,10 +400,33 @@ class Dashboard:
             if run:
                 runs[run["id"]] = run
         ongoing = [run for run in runs.values() if run["status"] != "completed"]
-        workflows = _parallel(
-            [lambda run=run: self.workflow(repo, run) for run in ongoing if "release" in run["name"].casefold()]
+        shown = [run for run in ongoing if _is_release(run)]
+        # The latest finished release stays too, so its outcome is still there after looking away. A run rechecked
+        # by ID may have finished more recently than the per-workflow lists say yet.
+        finished = [run for run in runs.values() if run["status"] == "completed" and _is_release(run)]
+        if latest := max([*finished, *self.finished_releases(path)], key=lambda run: run["id"], default=None):
+            shown.append(latest)
+        return _parallel([lambda run=run: self.workflow(repo, run) for run in shown]), bool(ongoing)
+
+    def finished_releases(self, path: str) -> list[dict]:
+        """Return the latest finished run of each release workflow."""
+        workflows = [
+            workflow for workflow in self.pages(f"{path}/actions/workflows", "workflows") if _is_release(workflow)
+        ]
+        latest = _parallel(
+            [
+                lambda workflow=workflow: self.get(
+                    f"{path}/actions/workflows/{workflow['id']}/runs", status="completed", per_page=1
+                )["workflow_runs"]
+                for workflow in workflows
+            ]
         )
-        return workflows, bool(ongoing)
+        return [run for runs in latest for run in runs]
+
+    def release_run(self, repo: dict, run_id: int) -> dict | None:
+        """Read one release run drawn as a graph, or None when it is gone or isn't a release."""
+        run = self.run(f"/repos/{repo['full_name']}", run_id)
+        return self.workflow(repo, run) if run and _is_release(run) else None
 
     def run(self, path: str, run_id: int) -> dict | None:
         """Read one workflow run, or None when it has been deleted."""
@@ -462,7 +490,7 @@ class Dashboard:
             [
                 lambda: self.pages(f"{path}/actions/runs/{run['id']}/attempts/{run['run_attempt']}/jobs", "jobs"),
                 lambda: self.read(f"{path}/contents/{run['path'].split('@')[0]}", raw=True, ref=run["head_sha"]),
-                lambda: self.pending_deployments(repo, run["id"]),
+                lambda: self.pending_deployments(repo, run["id"]) if run["status"] != "completed" else [],
             ]
         )
         try:
@@ -478,6 +506,8 @@ class Dashboard:
             "attempt": run["run_attempt"],
             "branch": run["head_branch"],
             "status": run["status"],
+            "conclusion": run.get("conclusion"),
+            "finished_at": run["updated_at"] if run["status"] == "completed" else None,
             "url": run["html_url"],
             "pending_deployments": pending_deployments,
             "nodes": workflow_graph.nodes(definitions, jobs, list_jobs=True),
@@ -512,7 +542,7 @@ class Dashboard:
         """Recheck the release run and reviewer eligibility, then approve only the requested environment."""
         path = f"/repos/{repo['full_name']}/actions/runs/{run_id}"
         run = self.get(path)
-        if run["status"] == "completed" or "release" not in (run["name"] or "").casefold():
+        if run["status"] == "completed" or not _is_release(run):
             msg = "Only unfinished release workflows can be approved from this dashboard."
             raise DashboardError(msg)
         pending = self.pending_deployments(repo, run_id)

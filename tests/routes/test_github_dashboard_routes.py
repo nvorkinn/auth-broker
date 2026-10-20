@@ -183,3 +183,24 @@ def test_approval_timeout_has_action_specific_warning(client, dashboard):
     assert response.status_code == 502
     assert "action may have succeeded" in response.json["error"]
     assert "GitHub Actions" in response.json["error"]
+
+
+def test_one_run_is_read_for_its_refresh_button(client, dashboard):
+    dashboard.owned_repository.return_value = {"full_name": "alice/project"}
+    dashboard.release_run.return_value = {"id": 4, "status": "in_progress"}
+    response = client.get("/github/repositories/alice/project/runs/4")
+    assert response.json == {"workflow": {"id": 4, "status": "in_progress"}}
+    dashboard.owned_repository.assert_called_once_with("alice", "project")
+    dashboard.release_run.assert_called_once_with({"full_name": "alice/project"}, 4)
+    dashboard.close.assert_called()
+
+
+def test_a_run_that_is_gone_or_not_a_release_is_not_found(client, dashboard):
+    dashboard.release_run.return_value = None
+    assert client.get("/github/repositories/alice/project/runs/4").status_code == 404
+
+
+@pytest.mark.parametrize("run_id", ["0", "-1", "abc"])
+def test_reading_a_run_validates_its_id(client, dashboard, run_id):
+    assert client.get(f"/github/repositories/alice/project/runs/{run_id}").status_code == 400
+    dashboard.release_run.assert_not_called()
