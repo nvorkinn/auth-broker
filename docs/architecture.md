@@ -153,10 +153,48 @@ the pairing code instead.
 
 ### The owner walks away before pairing
 
-> **To do:** how a pairing code reaches the screen when the owner doesn't finish pairing.
+If the owner isn't sent to `/pair` by the Wi-Fi setup, or doesn't finish, the screen shows a pairing code itself. The
+broker issues one when the screen registers, and the render pool draws it, with a QR code to `/pair?code=…`, as the
+screen's frame. A code lapses after ten minutes. While the screen is unpaired, each of its polls issues a new code if
+none is live, so it always has one to show.
 
-The screen registers on every boot and after a 401, not on every poll. It shows only frames from the broker: the
-pairing URL appears only on the phone.
+```mermaid
+sequenceDiagram
+    autonumber
+    participant S as ESP32 screen
+    participant B as auth-broker
+    participant R as Redis
+    participant W as Render pool
+    participant P as Phone
+
+    S->>B: POST /api/devices/register
+    Note over B: Issues a code and keeps it in pairing_codes
+    B->>R: writes v1:pairing:ID (config and code), lists the screen, queues a render
+    B-->>S: 201 device_id
+    W->>R: reads v1:pairing:ID
+    W->>R: writes v1:frame:ID, the pairing screen with the code and a QR code
+    S->>B: POST /api/frame
+    B-->>S: 200 the pairing screen
+    Note over S,B: Ten minutes pass and the code lapses
+    S->>B: POST /api/frame
+    Note over B: Issues a new code, as it is unpaired and has none live
+    B->>R: writes v1:pairing:ID, queues a render
+    B-->>S: the frame, then the new code's screen once drawn
+    P->>B: POST /pair with the typed code, or the QR code's, which the page sends at once
+    Note over B: Redeems the code, sets the owner and names the screen
+    B->>R: deletes v1:pairing:ID, writes its config, queues a render
+    B-->>P: redirects to the settings
+    W->>R: writes the dashboard's frame
+    S->>B: POST /api/frame
+    B-->>S: 200 the frame
+```
+
+- A code works once, and a wrong one counts against the phone's IP address: too many in a row lock it out for a while.
+- A code also hands a screen that already has an owner to a new one.
+- A screen nobody pairs within 24 hours is forgotten, and registers again on its next call.
+
+The screen registers on every boot and after a 401, not on every poll, but its polls keep the code live. It shows only
+frames from the broker: the pairing screen is one of them.
 
 ## Steady state
 
