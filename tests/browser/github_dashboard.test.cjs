@@ -522,21 +522,22 @@ function matrixRun(total, jobs = total) {
 const cards = app => app.ids.get("workflows").querySelectorAll(".node");
 const toggle = app => app.ids.get("workflows").querySelectorAll(".matrix-toggle")[0];
 
-test("a matrix of five or fewer jobs is drawn as a card per job, each feeding what needs the matrix", async () => {
-    const app = await harness({ ...idle, active: true, workflows: [matrixRun(5)] });
-    assert.equal(cards(app).length, 6);
-    assert.deepEqual(cards(app).slice(0, 5).map(card => card.title), ["test (0)", "test (1)", "test (2)", "test (3)", "test (4)"]);
-    assert.equal(app.ids.get("workflows").querySelectorAll("path").length, 5);
+test("a matrix of six or fewer jobs is drawn as a card per job, each feeding what needs the matrix", async () => {
+    const app = await harness({ ...idle, active: true, workflows: [matrixRun(6)] });
+    assert.equal(cards(app).length, 7);
+    assert.deepEqual(cards(app).slice(0, 6).map(card => card.title),
+        ["test (0)", "test (1)", "test (2)", "test (3)", "test (4)", "test (5)"]);
+    assert.equal(app.ids.get("workflows").querySelectorAll("path").length, 6);
     assert.equal(toggle(app).textContent, "Collapse matrix jobs");
 });
 
-test("a matrix of more than five jobs stays one card with a count until expanded", async () => {
-    const app = await harness({ ...idle, active: true, workflows: [matrixRun(6)] });
+test("a matrix of more than six jobs stays one card with a count until expanded", async () => {
+    const app = await harness({ ...idle, active: true, workflows: [matrixRun(7)] });
     assert.equal(cards(app).length, 2);
-    assert.match(text(cards(app)[0]), /1\/6/);
+    assert.match(text(cards(app)[0]), /1\/7/);
     assert.equal(toggle(app).textContent, "Expand matrix jobs");
     await toggle(app).listeners.click();
-    assert.equal(cards(app).length, 7);
+    assert.equal(cards(app).length, 8);
     assert.equal(toggle(app).textContent, "Collapse matrix jobs");
 });
 
@@ -724,4 +725,16 @@ test("the PR order can be picked, and is remembered", async () => {
     assert.equal(again.ids.get("pull-order").value, "oldest");
     const unknown = await harness(active, [repo], memory({ [PREFS]: JSON.stringify({ order: "constructor" }) }));
     assert.equal(unknown.ids.get("pull-order").value, "newest");
+});
+
+test("a small matrix whose jobs were all skipped stays one card until expanded", async () => {
+    const run = matrixRun(3);
+    run.nodes[0] = { ...run.nodes[0], state: "skipped", done: 3,
+        jobs: run.nodes[0].jobs.map(job => ({ ...job, state: "skipped" })) };
+    const app = await harness({ ...idle, workflows: [run] });
+    assert.equal(cards(app).length, 2);
+    assert.match(text(cards(app)[0]), /Skipped · 3\/3/);
+    assert.equal(toggle(app).textContent, "Expand matrix jobs");
+    toggle(app).listeners.click();
+    assert.equal(cards(app).length, 4);
 });
