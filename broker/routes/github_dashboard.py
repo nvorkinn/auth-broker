@@ -115,6 +115,22 @@ def project(owner: str, name: str) -> ResponseReturnValue:
         api.close()
 
 
+@bp.get("/repositories/<owner>/<name>/runs/<run_id>")
+@dashboard_view
+def run(owner: str, name: str, run_id: str) -> ResponseReturnValue:
+    """Read one release run's current state, for the Refresh button on a running workflow."""
+    if not run_id.isascii() or not run_id.isdecimal() or int(run_id) <= 0:
+        return jsonify(error="Invalid workflow run ID."), 400
+    api = github.Dashboard(current_app.config["GITHUB_DASHBOARD_TOKEN"], current_app.extensions["redis"])
+    try:
+        workflow = api.release_run(api.owned_repository(owner, name), int(run_id))
+    finally:
+        api.close()
+    if workflow is None:
+        return jsonify(error="This release workflow run no longer exists."), 404
+    return jsonify(workflow=workflow)
+
+
 @bp.post("/repositories/<owner>/<name>/release")
 @dashboard_view
 def release(owner: str, name: str) -> ResponseReturnValue:

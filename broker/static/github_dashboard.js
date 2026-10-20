@@ -227,16 +227,66 @@ function fitGraphs() {
     }
 }
 
+// The latest finished release stays in full for this long, then as one line until the next release finishes.
+const FINISHED_SHOWN_MS = 120000;
+
+function finished(run) {
+    return run.status === "completed";
+}
+
+// Ongoing runs, then the latest finished one: a run refreshed on its own can finish while an older one is shown.
+function shownRuns(project) {
+    const runs = project.data?.workflows || [];
+    const latest = runs.filter(finished).sort((a, b) => b.id - a.id)[0];
+    return [...runs.filter(run => !finished(run)), ...(latest ? [latest] : [])];
+}
+
+// Collapsed once two minutes have passed since it finished, or as soon as a newer release is running.
+function collapseAt(project, run) {
+    const newer = (project.data?.workflows || []).some(other => !finished(other) && other.id > run.id);
+    return newer ? 0 : Date.parse(run.finished_at) + FINISHED_SHOWN_MS;
+}
+
 function renderWorkflow(run, project) {
     const section = element("article", undefined, "workflow");
     const heading = element("div", undefined, "row-heading");
     const title = link(`${run.name} #${run.number}`, run.url);
     title.className = "workflow-title";
-    heading.append(title, badge(stateLabel(run.status), run.status));
+    const state = finished(run) ? run.conclusion || "completed" : run.status;
+    heading.append(title, badge(({ success: "Succeeded", failure: "Failed" })[state] || stateLabel(state), state));
     if (project.errorText) heading.append(badge("Stale data", "failed"));
+    const refreshing = project.runRefresh.get(run.id);
+    if (!finished(run)) {
+        const refresh = element("button", refreshing?.busy ? "Refreshing..." : "Refresh", "run-refresh");
+        refresh.type = "button";
+        refresh.title = "Get this run's latest state now";
+        refresh.disabled = !!refreshing?.busy;
+        refresh.addEventListener("click", () => refreshRun(project, run));
+        heading.append(refresh);
+    }
+    section.append(element("p", `${project.repo.full_name} · ${run.branch}`, "repo-label"), heading);
+    if (refreshing?.message) {
+        const message = element("p", refreshing.message, "error run-error");
+        message.setAttribute("role", "alert");
+        section.append(message);
+    }
+    if (finished(run)) {
+        const choice = project.finishedMode.get(run.id);
+        const collapsed = choice ? choice === "collapsed" : Date.now() >= collapseAt(project, run);
+        const toggle = element("button", collapsed ? "Show jobs" : "Collapse", "finished-toggle");
+        toggle.type = "button";
+        toggle.addEventListener("click", () => {
+            project.finishedMode.set(run.id, collapsed ? "expanded" : "collapsed");
+            renderProject(project);
+        });
+        heading.append(element("span", `finished ${new Date(run.finished_at).toLocaleTimeString()}`, "muted"), toggle);
+        if (collapsed) {
+            section.className = "workflow collapsed";
+            return section;
+        }
+    }
     const mode = project.matrixMode.get(run.id);
     const matrices = run.nodes.filter(node => node.jobs);
-    section.append(element("p", `${project.repo.full_name} · ${run.branch}`, "repo-label"), heading);
     if (matrices.length) {
         const expanded = matrices.every(node => matrixExpanded(node, mode));
         const toggle = element("button", expanded ? "Collapse matrix jobs" : "Expand matrix jobs", "matrix-toggle");
@@ -297,6 +347,7 @@ function renderOverview() {
     const pulls = all.flatMap(project => project.pullRows).sort((a, b) =>
         Number(a.dataset.priority) - Number(b.dataset.priority) || a.dataset.key.localeCompare(b.dataset.key, undefined, { numeric: true }));
     const workflows = all.flatMap(project => project.workflowRows);
+    const ongoing = all.flatMap(project => shownRuns(project).filter(run => !finished(run))).length;
     const unloaded = all.filter(project => !project.data).length;
     const errors = all.filter(project => project.errorText).length;
     const emptyLabel = unloaded ? "Waiting for project data..." : errors ? "Refresh failed; results may be incomplete." : null;
@@ -305,7 +356,7 @@ function renderOverview() {
     document.getElementById("pull-count").textContent = String(pulls.length);
     document.getElementById("workflow-count").textContent = String(workflows.length);
     document.getElementById("project-count").textContent = String(all.length);
-    summary.textContent = `${all.length} repositories · ${pulls.length} open PRs · ${workflows.length} ongoing releases`
+    summary.textContent = `${all.length} repositories · ${pulls.length} open PRs · ${ongoing} ongoing releases`
         + (hiddenRepos.size ? ` · ${hiddenRepos.size} hidden` : "")
         + (unloaded ? ` · ${unloaded} not loaded` : "") + (errors ? ` · ${errors} refresh errors` : "");
     renderRefreshLabels();
@@ -358,7 +409,10 @@ function renderProject(project) {
     const expanded = new Set(oldRows.flatMap(row => [...row.querySelectorAll("details[open]")])
         .map(node => node.dataset.detailKey));
     project.pullRows = (project.data?.pulls || []).map(pr => renderPull(pr, project));
-    project.workflowRows = (project.data?.workflows || []).map(run => renderWorkflow(run, project));
+    project.workflowRows = shownRuns(project).map(run => renderWorkflow(run, project));
+    // Draw again when a finished run is due to collapse; tick() checks this every second.
+    project.redrawAt = Math.min(Infinity, ...shownRuns(project).filter(run => finished(run)
+        && !project.finishedMode.has(run.id)).map(run => collapseAt(project, run)).filter(at => at > Date.now()));
     for (const row of [...project.pullRows, ...project.workflowRows]) {
         for (const details of row.querySelectorAll("details")) details.open = expanded.has(details.dataset.detailKey);
     }
@@ -373,7 +427,7 @@ async function refreshProject(project) {
     const section = partial?.section || "all";
     try {
         // Runs shown last time are rechecked by ID, since GitHub's status lists can briefly miss one just approved.
-        const known = (project.data?.workflows || []).map(run => run.id);
+        const known = (project.data?.workflows || []).filter(run => !finished(run)).map(run => run.id);
         const parts = [];
         if (section !== "all") parts.push(`section=${section}`);
         if (known.length && section !== "pulls") parts.push(`runs=${known.slice(0, 20).join(",")}`);
@@ -401,6 +455,22 @@ async function refreshProject(project) {
         project.nextRefresh = Math.max(pausedUntil, partial ? Math.min(partial.resume, next) : next);
         renderProject(project);
     }
+}
+
+// Reads just this run, leaving the project's own schedule alone.
+async function refreshRun(project, run) {
+    if (project.runRefresh.get(run.id)?.busy) return;
+    project.runRefresh.set(run.id, { busy: true });
+    renderProject(project);
+    try {
+        const { workflow } = await api(`${projectPath(project.repo.full_name)}/runs/${run.id}`);
+        const runs = project.data?.workflows || [];
+        project.data = { ...project.data, workflows: runs.map(other => other.id === workflow.id ? workflow : other) };
+        project.runRefresh.delete(run.id);
+    } catch (error) {
+        project.runRefresh.set(run.id, { message: error.message });
+    }
+    renderProject(project);
 }
 
 async function publish(project, button) {
@@ -473,7 +543,8 @@ function addProject(repo) {
     document.getElementById("projects").append(card);
     const project = { repo, card, error, result, data: null, pullRows: [], workflowRows: [],
         errorText: "", active: true, loading: false, nextRefresh: 0, approvals: new Map(), publishing: false,
-        background: !checkbox.checked, partial: null, matrixMode: new Map(), sectionActive: { pulls: true, workflows: true } };
+        background: !checkbox.checked, partial: null, matrixMode: new Map(), sectionActive: { pulls: true, workflows: true },
+        runRefresh: new Map(), finishedMode: new Map(), redrawAt: Infinity };
     button.addEventListener("click", () => publish(project, button));
     checkbox.addEventListener("change", () => {
         project.background = !checkbox.checked;
@@ -517,6 +588,7 @@ async function discover() {
 
 // Bound concurrency to avoid a burst of hundreds of GitHub requests for a large account.
 async function tick() {
+    for (const project of projects.values()) if (project.redrawAt <= Date.now()) renderProject(project);
     if (document.hidden || Date.now() < pausedUntil) return;
     const available = 3 - [...projects.values()].filter(project => project.loading).length;
     const due = [...projects.values()].filter(project => !project.loading && project.nextRefresh <= Date.now())

@@ -77,6 +77,9 @@ summary { cursor: pointer; color: var(--muted); font-size: 11px; }
 .project-name { min-width: 0; font-size: 12px; overflow-wrap: anywhere; }
 .project button { font-size: 10px; padding: 3px 6px; }
 .matrix-toggle { font-size: 10px; padding: 2px 6px; margin-top: 6px; }
+.run-refresh, .finished-toggle { font-size: 10px; padding: 2px 6px; margin-left: auto; }
+.row-heading .muted { font-size: 11px; }
+.run-error { font-size: 11px; }
 .include { font-size: 10px; color: var(--muted); display: flex; align-items: center; gap: 3px; }
 .project.background { opacity: .7; }
 .hidden-projects { padding: 0 12px 10px; font-size: 11px; }

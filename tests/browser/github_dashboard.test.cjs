@@ -347,9 +347,13 @@ test("published link resolves to the discovered Actions run", async () => {
     assert.equal(app.evaluate('projects.get("alice/project").result.children[0].href'), waitingRelease.url);
 });
 
+// The approval buttons, leaving out each running workflow's own Refresh button.
+const approveButtons = app => app.ids.get("workflows").querySelectorAll("button")
+    .filter(button => button.className !== "run-refresh");
+
 test("waiting deployments have per-environment controls respecting reviewer eligibility", async () => {
     const app = await harness({ ...idle, active: true, workflows: [waitingRelease] });
-    const buttons = app.ids.get("workflows").querySelectorAll("button");
+    const buttons = approveButtons(app);
     assert.equal(buttons[0].textContent, "Approve production");
     assert.equal(buttons[0].disabled, false);
     assert.equal(buttons[1].disabled, true);
@@ -361,31 +365,31 @@ test("waiting deployments have per-environment controls respecting reviewer elig
     assert.deepEqual(JSON.parse(writes[0].options.body), { environment_id: 10 });
     assert.equal(writes[0].options.headers["X-CSRF-Token"], "csrf-token");
     assert.equal(writes[0].options.headers["Content-Type"], "application/json");
-    assert.equal(app.ids.get("workflows").querySelectorAll("button")[0].textContent, "Approved");
-    assert.equal(app.ids.get("workflows").querySelectorAll("button")[0].disabled, true);
+    assert.equal(approveButtons(app)[0].textContent, "Approved");
+    assert.equal(approveButtons(app)[0].disabled, true);
     await app.tick();
     assert.equal(app.calls.filter(call => call.options.method === "POST").length, 1);
-    assert.equal(app.ids.get("workflows").querySelectorAll("button")[0].disabled, true);
+    assert.equal(approveButtons(app)[0].disabled, true);
 });
 
 test("approval failures are visible, explicitly retryable and never automatically retried", async () => {
     const app = await harness({ ...idle, active: true, workflows: [waitingRelease] });
     app.setFailure({ status: 502, message: "The action may have succeeded" });
-    await app.ids.get("workflows").querySelectorAll("button")[0].listeners.click();
+    await approveButtons(app)[0].listeners.click();
     assert.match(text(app.ids.get("workflows")), /may have succeeded/);
-    assert.equal(app.ids.get("workflows").querySelectorAll("button")[0].disabled, false);
+    assert.equal(approveButtons(app)[0].disabled, false);
     app.setFailure(null);
     await app.tick();
     assert.equal(app.calls.filter(call => call.options.method === "POST").length, 1);
     assert.match(text(app.ids.get("workflows")), /check deployment status/);
-    await app.ids.get("workflows").querySelectorAll("button")[0].listeners.click();
+    await approveButtons(app)[0].listeners.click();
     assert.equal(app.calls.filter(call => call.options.method === "POST").length, 2);
 });
 
 test("refreshes recheck the release runs shown last time by ID", async () => {
     const app = await harness({ ...idle, active: true, workflows: [waitingRelease] });
     assert.equal(app.calls.at(-1).url, "/github/repositories/alice/project");
-    await app.ids.get("workflows").querySelectorAll("button")[0].listeners.click();
+    await approveButtons(app)[0].listeners.click();
     await app.tick();
     assert.equal(app.calls.at(-1).url, "/github/repositories/alice/project?runs=7");
 });
@@ -549,4 +553,77 @@ test("workflows without a matrix have no matrix toggle", async () => {
     run.nodes = run.nodes.slice(1);
     const app = await harness({ ...idle, active: true, workflows: [run] });
     assert.equal(toggle(app), undefined);
+});
+
+const finishedRelease = (id, finishedAt, conclusion = "success") => ({
+    ...waitingRelease, id, number: id, status: "completed", conclusion, pending_deployments: [],
+    finished_at: new Date(finishedAt).toISOString(),
+});
+const workflowsText = app => text(app.ids.get("workflows"));
+
+test("a running workflow's Refresh reads only that run and leaves the project's schedule alone", async () => {
+    const app = await harness({ ...idle, active: true, workflows: [waitingRelease] });
+    const due = app.evaluate('projects.get("alice/project").nextRefresh');
+    const running = { ...waitingRelease, status: "in_progress", pending_deployments: [] };
+    app.setData(url => url.endsWith("/runs/7") ? { workflow: running } : idle);
+    const refresh = app.ids.get("workflows").querySelectorAll(".run-refresh")[0];
+    assert.equal(refresh.textContent, "Refresh");
+    const pending = refresh.listeners.click();
+    assert.equal(app.ids.get("workflows").querySelectorAll(".run-refresh")[0].disabled, true);
+    await pending;
+    assert.equal(app.calls.at(-1).url, "/github/repositories/alice/project/runs/7");
+    assert.equal(app.calls.at(-1).options.method, undefined);
+    assert.match(workflowsText(app), /Running/);
+    assert.doesNotMatch(workflowsText(app), /Approve/);
+    assert.equal(app.evaluate('projects.get("alice/project").nextRefresh'), due);
+});
+
+test("a failed run Refresh shows its error on that run and can be tried again", async () => {
+    const app = await harness({ ...idle, active: true, workflows: [waitingRelease] });
+    app.setFailure({ status: 404, message: "This release workflow run no longer exists." });
+    await app.ids.get("workflows").querySelectorAll(".run-refresh")[0].listeners.click();
+    assert.match(workflowsText(app), /no longer exists/);
+    assert.equal(app.ids.get("workflows").querySelectorAll(".run-refresh")[0].disabled, false);
+    assert.match(workflowsText(app), /Approve production/);
+});
+
+test("the latest finished release shows in full for two minutes, then as one line", async () => {
+    const app = await harness({ ...idle, workflows: [finishedRelease(7, 100000 - 60000)] });
+    assert.match(workflowsText(app), /Succeeded/);
+    assert.equal(app.ids.get("workflows").querySelectorAll(".run-refresh").length, 0);
+    assert.equal(app.ids.get("workflows").querySelectorAll(".graph-scroll").length, 1);
+    assert.match(app.ids.get("summary").textContent, /0 ongoing releases/);
+    app.advance(59000);
+    await app.tick();
+    assert.equal(app.ids.get("workflows").querySelectorAll(".graph-scroll").length, 1);
+    app.advance(1000);
+    await app.tick();
+    assert.equal(app.ids.get("workflows").querySelectorAll(".graph-scroll").length, 0);
+    assert.equal(app.ids.get("workflows").querySelectorAll(".collapsed").length, 1);
+    assert.match(workflowsText(app), /Release #7 .*Succeeded/);
+    assert.equal(app.ids.get("workflow-count").textContent, "1");
+});
+
+test("a finished release collapses at once when a newer one runs, and can be opened again", async () => {
+    const app = await harness({ ...idle, active: true, workflows: [{ ...waitingRelease, id: 9 }, finishedRelease(8, 100000, "failure")] });
+    const list = app.ids.get("workflows");
+    assert.equal(list.querySelectorAll(".collapsed").length, 1);
+    assert.match(workflowsText(app), /Failed/);
+    assert.match(app.ids.get("summary").textContent, /1 ongoing releases/);
+    list.querySelectorAll(".finished-toggle")[0].listeners.click();
+    assert.equal(list.querySelectorAll(".collapsed").length, 0);
+    assert.equal(list.querySelectorAll(".finished-toggle")[0].textContent, "Collapse");
+    app.advance(10000);
+    await app.tick();
+    assert.equal(list.querySelectorAll(".collapsed").length, 0);
+    assert.equal(app.calls.at(-1).url, "/github/repositories/alice/project?runs=9", "finished runs aren't rechecked");
+});
+
+test("a run refreshed to finished replaces the older finished release", async () => {
+    const app = await harness({ ...idle, active: true, workflows: [{ ...waitingRelease, id: 9, number: 9 }, finishedRelease(8, 0)] });
+    app.setData({ workflow: finishedRelease(9, 100000) });
+    await app.ids.get("workflows").querySelectorAll(".run-refresh")[0].listeners.click();
+    assert.match(workflowsText(app), /Release #9/);
+    assert.doesNotMatch(workflowsText(app), /Release #8/);
+    assert.equal(app.ids.get("workflows").querySelectorAll(".graph-scroll").length, 1);
 });

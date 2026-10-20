@@ -139,12 +139,14 @@ def test_pull_checks_include_paginated_checks_and_latest_legacy_statuses(api):
     assert [check["state"] for check in pr["checks"][-2:]] == ["success", "pending"]
 
 
-def _runs_by_status(**by_status):
-    """Stand in for Dashboard.pages: open PRs, and the runs GitHub lists under each status."""
+def _runs_by_status(workflows=(), **by_status):
+    """Stand in for Dashboard.pages: open PRs, the repo's workflows, and the runs GitHub lists under each status."""
 
     def pages(path, key=None, **params):
         if path.endswith("/pulls"):
             return [{"number": 3}]
+        if path.endswith("/actions/workflows"):
+            return list(workflows)
         return by_status.get(params["status"], [])
 
     return Mock(side_effect=pages)
@@ -216,9 +218,75 @@ def test_project_rechecks_known_runs_that_the_status_lists_missed(api):
     responses.get(f"{path}/actions/runs/8", json={"id": 8, "name": "Release", "status": "completed"})
     responses.get(f"{path}/actions/runs/9", status=404)
     result = api.project(REPO, [1, 7, 8, 9])
-    assert sorted(run["id"] for run in result["workflows"]) == [1, 7]
+    # Run 8 finished since the last look, so it stays as the latest finished release.
+    assert [run["id"] for run in result["workflows"]] == [1, 7, 8]
     assert result["active"] is True
     assert sorted(call.request.url.split("/")[-1] for call in responses.calls) == ["7", "8", "9"]
+
+
+def test_the_latest_finished_release_is_kept_after_the_ongoing_ones(api):
+    api.pages = _runs_by_status(
+        workflows=[{"id": 1, "name": "Release"}, {"id": 2, "name": "Tests"}, {"id": 3, "name": "Release packages"}],
+        in_progress=[{"id": 20, "name": "Tests", "status": "in_progress"}],
+    )
+    latest = {1: {"id": 12, "name": "Release", "status": "completed"}, 3: {"id": 15, "name": "Release packages"}}
+    api.get = Mock(side_effect=lambda path, **_: {"workflow_runs": [latest[int(path.split("/")[-2])]]})
+    api.pull = Mock(return_value={"refresh": False})
+    api.workflow = Mock(side_effect=lambda _repo, run: run)
+    result = api.project(REPO)
+    assert [run["id"] for run in result["workflows"]] == [15]
+    assert result["active"] is True
+    assert sorted(call.args[0].split("/")[-2] for call in api.get.call_args_list) == ["1", "3"]
+    assert all(call.kwargs == {"status": "completed", "per_page": 1} for call in api.get.call_args_list)
+
+
+@responses.activate
+def test_a_release_rechecked_by_id_that_just_finished_beats_the_lagging_workflow_lists(api):
+    api.pages = _runs_by_status(workflows=[{"id": 1, "name": "Release"}])
+    responses.get(
+        f"{ROOT}/repos/alice/project/actions/runs/13", json={"id": 13, "name": "Release", "status": "completed"}
+    )
+    responses.get(
+        f"{ROOT}/repos/alice/project/actions/workflows/1/runs",
+        json={"workflow_runs": [{"id": 12, "name": "Release", "status": "completed"}]},
+    )
+    api.workflow = Mock(side_effect=lambda _repo, run: run)
+    assert [run["id"] for run in api.project(REPO, [13], "workflows")["workflows"]] == [13]
+
+
+@responses.activate
+def test_a_finished_workflow_has_its_outcome_and_no_approval_lookup(api):
+    path = f"{ROOT}/repos/alice/project"
+    responses.get(f"{path}/actions/runs/4/attempts/1/jobs", json={"jobs": []})
+    responses.get(f"{path}/contents/.github/workflows/release.yml", body="jobs:\n  build: {}\n")
+    run = {
+        "id": 4,
+        "run_attempt": 1,
+        "path": ".github/workflows/release.yml",
+        "head_sha": "abc",
+        "name": "Release",
+        "run_number": 9,
+        "head_branch": "v1.2.0",
+        "status": "completed",
+        "conclusion": "failure",
+        "updated_at": "2026-10-20T02:00:00Z",
+        "html_url": "https://github.com/run/4",
+    }
+    result = api.workflow(REPO, run)
+    assert (result["conclusion"], result["finished_at"]) == ("failure", "2026-10-20T02:00:00Z")
+    assert result["pending_deployments"] == []
+    assert not any("pending_deployments" in call.request.url for call in responses.calls)
+
+
+@responses.activate
+@pytest.mark.parametrize(
+    ("status", "body", "found"),
+    [(200, {"id": 4, "name": "Release"}, True), (200, {"id": 4, "name": "Tests"}, False), (404, {}, False)],
+)
+def test_release_run_reads_one_release_and_nothing_else(api, status, body, found):
+    responses.get(f"{ROOT}/repos/alice/project/actions/runs/4", json=body, status=status)
+    api.workflow = Mock(side_effect=lambda _repo, run: run)
+    assert api.release_run(REPO, 4) == (body if found else None)
 
 
 @pytest.mark.parametrize(
@@ -348,6 +416,7 @@ def test_workflow_parse_diagnostics_are_logged_not_exposed(api, caplog):
         "path": ".github/workflows/release.yml",
         "head_sha": "abc",
         "name": "Release",
+        "status": "in_progress",
     }
     with pytest.raises(github.DashboardError) as caught:
         api.workflow(REPO, run)
