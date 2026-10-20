@@ -32,7 +32,7 @@ def store(app):
 
 
 def _add_screen(device_id, slug, *, paired=True, config=True, seen=None):
-    """Add a device to the database as the broker has it once its owner has named it (needs an app context)."""
+    """Add a device to the database as the broker has it once it's named (needs an app context)."""
     now = datetime.now(UTC)
     device = Device(
         device_id=device_id,
@@ -225,7 +225,7 @@ def test_a_quiet_screen_is_left_out_until_it_is_back(app, store):
 
 
 def test_screens_nobody_has_are_taken_out_and_the_rest_left(app, store):
-    # What an orchestrator wrote for a slug the broker doesn't list, and a screen under an old slug.
+    # A screen the broker doesn't have, and one under another slug.
     store.hset(SCREENS, mapping={"gone00000000": "someone-old", "a1b2c3d4e5f6": "nvorkinn-old"})
     with app.app_context():
         _add_screen("a1b2c3d4e5f6", "nvorkinn-kitchen")

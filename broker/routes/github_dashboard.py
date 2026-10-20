@@ -1,4 +1,4 @@
-"""Personal GitHub monitoring, protected by Authentik identity and a release CSRF token."""
+"""The personal GitHub dashboard, for one Authentik user, its actions guarded by a CSRF token."""
 
 import functools
 import hmac
@@ -118,7 +118,7 @@ def project(owner: str, name: str) -> ResponseReturnValue:
 @bp.post("/repositories/<owner>/<name>/release")
 @dashboard_view
 def release(owner: str, name: str) -> ResponseReturnValue:
-    """Publish immediately, but only for a same-session dashboard action."""
+    """Publish the next minor release immediately, for a request carrying the session's CSRF token."""
     if not _valid_csrf():
         return jsonify(error="Invalid action CSRF token. Reload the dashboard."), 403
     api = github.Dashboard(current_app.config["GITHUB_DASHBOARD_TOKEN"], current_app.extensions["redis"])

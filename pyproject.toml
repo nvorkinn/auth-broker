@@ -16,13 +16,12 @@ dependencies = [
     "click",
     "maxminddb",
     "pydantic",
-    # The workflow files the developer panel's release graph is drawn from.
+    # Reads workflow files for the release graphs (broker/clients/workflow_graph.py).
     "pyyaml",
     "redis",
     # The IANA time zones for zoneinfo (the glow-provider asks Glowmarkt in each screen's), whatever the image has.
     "tzdata",
-    # The store contract and the code generated from it: the vendor/countdown-api submodule, installed editable
-    # (see [tool.uv.sources]).
+    # The store contract: the vendor/countdown-api submodule (see [tool.uv.sources]).
     "countdown-api",
 ]
 

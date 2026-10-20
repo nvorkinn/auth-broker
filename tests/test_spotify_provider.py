@@ -352,7 +352,7 @@ def test_apple_musics_new_plays_are_logged_once_each(app, store, device, musicki
 
 
 def test_apple_music_switched_off_is_not_read_or_logged(app, provider, device, musickit):
-    """Even with a token: as before, plays are only logged while the screen shows Apple Music."""
+    """Even with a token: plays are only logged while the screen shows Apple Music."""
     device_id = device(apple_music=False)
 
     with (
@@ -529,7 +529,6 @@ def test_a_429_stops_all_spotify_calls_until_retry_after(app, store, device, hea
     provider = MusicProvider(app, store, clock=lambda: now[0])
     throttled = FakeSpotify(top_429=headers)
 
-    # Patched rather than caplog: other tests (alembic's logging set-up) can leave loggers disabled.
     with patch.object(spotify_provider, "logger") as logger:
         _run(provider, throttled)
     logger.warning.assert_called_once_with(

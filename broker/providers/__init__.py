@@ -1,4 +1,5 @@
-"""Long-running processes that fetch what the screens want and write it to the shared Redis store.
+"""Long-running processes that fetch what the screens show and write it to Redis: here, the glow provider.
 
-Each runs from the broker's own image with its own command (see Services in the README).
+The music and developer providers are broker/spotify_provider.py and broker/developer_provider.py; see Services in
+the README.
 """

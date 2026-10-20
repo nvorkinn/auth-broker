@@ -1,7 +1,7 @@
 """A device's live pairing code in the store, `v1:pairing:<device id>` (broker/services/pairing_key.py).
 
-Through the real routes and `flask devices` commands, with the broker's Redis a fakeredis (TTLs and all).
-The contract's pairing_key.json is the stored shape, which pi-dashboard's render reads: both repositories' tests read
+Through the real routes and `flask devices` commands, with the broker's Redis a fakeredis (TTLs and all). The
+contract's pairing_key.json is the stored shape, which pi-dashboard's render pool reads: both repositories' tests read
 that file.
 """
 

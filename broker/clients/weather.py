@@ -55,8 +55,8 @@ def _place(result: dict[str, Any]) -> dict[str, Any]:
 def search_places(name: str, count: int = SEARCH_COUNT) -> list[dict[str, Any]]:
     """Return the places Open-Meteo finds for a name, best first; [] for none.
 
-    The first is the one a device looking the name up itself (WeatherClient._geocode in countdown) would use.
-    Raises GeocodingUnavailableError if Open-Meteo couldn't be asked.
+    The first is the one pi-dashboard's weather provider finds for the name too. Raises GeocodingUnavailableError if
+    Open-Meteo couldn't be asked.
     """
     try:
         response = requests.get(
@@ -81,8 +81,8 @@ def get_place(place_id: int) -> dict[str, Any] | None:
         response = requests.get(
             OPEN_METEO_PLACE_URL, params={"id": place_id, "language": "en", "format": "json"}, timeout=TIMEOUT
         )
-        # An unknown id is a 400 (or 404) with {"error": true, "reason": ...}: not there, rather than unreachable.
-        # Being rate limited is the latter.
+        # An unknown id is a 400 (or 404) with {"error": true, "reason": ...}: not there, rather than unreachable. A 429
+        # is unreachable.
         status = response.status_code
         if (
             HTTPStatus.BAD_REQUEST <= status < HTTPStatus.INTERNAL_SERVER_ERROR

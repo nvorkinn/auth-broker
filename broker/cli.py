@@ -1,6 +1,6 @@
-"""Manual admin for the broker's devices, for development.
+"""Admin commands for the broker's devices, screens' weather places and the configs in the store.
 
-Run it inside the container:
+Run them inside the container:
 
 docker exec auth-broker flask --app wsgi devices list
 docker exec auth-broker flask --app wsgi devices code <device_id>
@@ -32,10 +32,10 @@ config = AppGroup("config", help="The screens' configs in the store.")
 
 
 def publish_store() -> None:
-    """Write what the broker keeps in the store from the database: the subscriptions and every screen's config.
+    """Write the subscriptions and every screen's config to the store from the database.
 
-    Redis keeps nothing on disk, so the broker does this as it starts (gunicorn.conf.py), and `flask config publish`
-    on demand. Needs an app context; an unreachable Redis is logged, not raised.
+    Run as the broker starts (gunicorn.conf.py) and by `flask config publish`. Needs an app context; an unreachable
+    Redis is logged, not raised.
     """
     _write_subscriptions_to_redis()
     config_store.publish_all()
@@ -88,14 +88,14 @@ def code(device_id: str) -> None:
 @click.argument("device_id")
 @click.argument("user")
 def owner(device_id: str, user: str) -> None:
-    """Make a user (their Authentik user id) the owner of a device, e.g. one paired before owners existed."""
+    """Make a user (their Authentik user id) the owner of a device."""
     device = _get_device(device_id)
     previous = device.owner
     device.owner = user
     if device.paired_at is None:
         device.paired_at = datetime.now(UTC)
-    assignments.auto_name(device)  # as pairing does, so the render pool draws it
-    # It has its owner, so no code to show (as pairing does).
+    # As pairing does: named, so the render pool draws it, and no code left to show.
+    assignments.auto_name(device)
     device.pairing_codes.clear()
     db.session.commit()
     if previous != user:
@@ -128,13 +128,12 @@ def unpair(device_id: str, *, wipe_config: bool) -> None:
         device.apple_music_token = None
         device.apple_music_plays = []
     db.session.commit()
-    # Its data in the store (energy, music, developer), so the next owner never sees the last one's. With its accounts
-    # kept (no --config), the providers write their keys again from them.
+    # Its data in the store, so the next owner never sees the last one's. With its accounts kept (no --config), the
+    # providers write their keys again from them.
     device_keys.forget(device_id)
     if wipe_config:
-        # The screen's frame too, so the next owner never sees the last one's screen.
         frame_record.forget(device_id)
-    # A code for the pool to draw (its pairing key), as an unpaired device has no config in the store to draw.
+    # A code for the pool to draw, as an unpaired device has no config in the store to draw.
     new_code = pairing.issue_code(device_id)
     config_store.publish(device_id)
     minutes = int(pairing.CODE_TTL.total_seconds() // 60)
@@ -152,8 +151,8 @@ def forget(device_id: str) -> None:
     # The relationships cascade, so the device's codes, config, tokens and name go with it.
     db.session.delete(device)
     db.session.commit()
-    frame_record.forget(device_id)  # and the frame the pool keeps in Redis
-    device_keys.forget(device_id)  # and the providers' data for it
+    frame_record.forget(device_id)
+    device_keys.forget(device_id)
     config_store.publish(device_id)
     click.echo(f"{device_id} forgotten; delete its credentials file so it registers again.")
 
@@ -162,13 +161,11 @@ def forget(device_id: str) -> None:
 def backfill() -> None:
     """Give every config with a weather location but no picked place the place Open-Meteo finds first for it.
 
-    That's the place a renderer looking the name up finds too. weather_location itself is left as it is. Safe to run
-    again: a config with a place is skipped. One Open-Meteo can't find is reported and left without a place; if
-    Open-Meteo can't be asked, run it again later.
+    weather_location itself is left as it is. Safe to run again: a config with a place is skipped. One Open-Meteo
+    can't find is reported and left without a place; if Open-Meteo can't be asked, run it again later.
 
-    Then it rewrites the subscriptions and the configs in the store, as a config save does, since a place changes the
-    key a screen's weather is subscribed and read under (weather_place.weather_key, the config's weather.key); so
-    running it also moves the store to the current keys without waiting for someone to save a config.
+    Then it rewrites the subscriptions and the configs in the store, as a place changes the key a screen's weather is
+    subscribed and read under (weather_place.weather_key).
     """
     configs = db.session.scalars(
         select(DeviceConfig)
@@ -204,9 +201,9 @@ def backfill() -> None:
 def publish() -> None:
     """Write every screen's config, and the subscriptions, to the store from the database.
 
-    The broker does this on every config save and as it starts; this is for when Redis has lost them (it keeps
-    nothing on disk) and the broker hasn't restarted since. Safe to run at any time: only what changed is written,
-    and only the screens whose config changed are drawn again.
+    The broker does this on every config save and as it starts, and rewrites the configs every minute; this restores
+    the subscriptions at once after Redis has lost them (it keeps nothing on disk). Safe to run at any time: only the
+    screens whose config changed are drawn again.
     """
     publish_store()
     click.echo("Wrote the configs and the subscriptions to the store (the log warns if Redis couldn't be reached).")

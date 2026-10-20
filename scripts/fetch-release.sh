@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Fed over ssh by release.yml's deploy jobs. Downloads a release's deploy bundle
-# from GitHub Releases into /opt/auth-broker/releases/<tag>/ (skipped when that
-# release is already there with the same checksum), then runs the bundle's own
-# deploy.sh, so the host only ever deploys what the release published.
+# into /opt/auth-broker/releases/<tag>/ (unless it's already there with the same
+# checksum), then runs the bundle's own deploy.sh, so the host only ever deploys
+# what the release published.
 # Usage: fetch-release.sh <service> <tag> <bundle url> <bundle sha256>
 set -euo pipefail
 
@@ -13,7 +13,7 @@ sha256="$4"
 releases="${DEPLOY_DIR:-/opt/auth-broker}/releases"
 mkdir -p "$releases"
 
-# The two deploy jobs of a release can run at once; only one downloads.
+# A release's deploy jobs can run at once; only one downloads.
 (
   flock 9
   if [ "$(cat "$releases/$tag/.sha256" 2>/dev/null)" = "$sha256" ]; then

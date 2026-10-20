@@ -648,7 +648,7 @@ def test_device_config_shows_one_style_picker_with_the_stored_style_selected(app
     html = client.get("/device").get_data(as_text=True)
     assert re.findall(r'name="style" value="(\w+)"', html) == ["airy", "hero", "card"]
     assert re.findall(r'name="style" value="(\w+)" checked', html) == ["airy"]  # the default
-    # The panels' own pickers are gone: the one style is for all of them.
+    # One style for every panel: no picker per panel.
     assert not re.search(r'name="(tfl|spotify|notices)_style"', html)
     with app.app_context():
         db.session.get(DeviceConfig, device_id).style = "card"
@@ -788,7 +788,7 @@ def test_saving_the_config_publishes_subscriptions_to_redis(paired_client, fake_
         "weather": {"london-gb-2643743"},
         "spotify": {device_id},
     }
-    # The providers are nudged; the screen gets a render job instead (tests/services/test_config_store.py).
+    # The providers are nudged, and the screen gets a render job (tests/services/test_config_store.py).
     assert fake_redis.published == [("v1:sub:changed", "")]
     assert device_id in fake_redis.jobs
 

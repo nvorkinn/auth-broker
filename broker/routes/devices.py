@@ -1,4 +1,4 @@
-"""A screen's own lifecycle: registering on first boot (its frames are routes/frames.py's)."""
+"""A screen's registration (its frames are routes/frames.py's)."""
 
 from typing import TYPE_CHECKING
 
@@ -14,7 +14,6 @@ if TYPE_CHECKING:
 
 bp = Blueprint("devices", __name__, url_prefix="/api/devices")
 
-# The shortest secret a screen may register with.
 MIN_SECRET_LENGTH = 16
 
 
@@ -22,12 +21,9 @@ MIN_SECRET_LENGTH = 16
 def register() -> ResponseReturnValue:
     """Give a screen its identity.
 
-    The screen generates its own secret, keeps it locally forever after, and sends it with every
-    request; only its hash is stored here, and that hash alone identifies the device.
-    Safe to call again with the same secret, e.g. on every boot.
-
-    {"secret": ..., "width": ..., "height": ...}, the screen's size in pixels, becomes a device at once
-    (201 {device_id}), which its owner pairs with and names; the render pool then draws it. A repeat is a 200.
+    {"secret": ..., "width": ..., "height": ...}, the secret the screen generated and keeps and its size in pixels,
+    becomes a device at once (201 {device_id}); only the secret's hash is stored, and identifies the device. A repeat,
+    e.g. on every boot, is a 200.
 
     Throttled per IP, every call counting, as anyone can call it.
     """
@@ -53,8 +49,7 @@ def register() -> ResponseReturnValue:
     try:
         found = registration.register_screen(secret_hash, width, height)
     except IntegrityError:
-        # The same secret registered by a simultaneous request (e.g. a quick retry) that got in
-        # first: answer as for any repeat.
+        # The same secret registered by a simultaneous request that got in first: answer as for any repeat.
         db.session.rollback()
         found = registration.register_screen(secret_hash, width, height)
 

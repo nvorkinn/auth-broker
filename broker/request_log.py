@@ -1,8 +1,7 @@
-"""QA tracing: with LOG_REQUEST_HEADERS on, one JSON log line per request.
+"""Request tracing: with LOG_REQUEST_HEADERS on, one JSON log line per request, for debugging sign-in redirects.
 
-The line has the request's method, path, query and every header, and the response's status and Location. It is
-what shows where the login proxy sent a browser and what it sent back. Credentials are never logged:
-Authorization and Cookie values are replaced.
+The line has the request's method, path, query and every header, and the response's status and Location.
+Authorization and Cookie values are replaced, never logged.
 """
 
 import json

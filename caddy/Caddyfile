@@ -1,6 +1,5 @@
-# Only admins get in: an Authentik login in the admin group (forward auth),
-# then proxied to the upstream given as the argument, e.g.
-# `import admin_only 127.0.0.1:9428`.
+# Only admins get in (an authentik login in the admin group, by forward auth),
+# then proxied to the upstream given, e.g. `import admin_only 127.0.0.1:9428`.
 (admin_only) {
 	reverse_proxy /outpost.goauthentik.io/* 127.0.0.1:9000
 	forward_auth 127.0.0.1:9000 {
@@ -11,11 +10,10 @@
 	reverse_proxy {args[0]}
 }
 
-# QA tracing: with LOG_REQUEST_HEADERS=true in Caddy's environment (set in docker-compose.yml, with the
-# broker's), every request to the two hosts a sign-in passes through is logged as JSON with all its
-# headers and the response's, which is where each redirect's Location shows. Caddy redacts
-# Authorization, Cookie and Set-Cookie unless `log_credentials` is set in the global options.
-# With anything else, `log_skip` drops the access log.
+# QA tracing: with LOG_REQUEST_HEADERS=true (docker-compose.yml), every request to the two hosts a
+# sign-in passes through is logged as JSON with its headers and the response's, which show each
+# redirect's Location. Caddy redacts Authorization, Cookie and Set-Cookie unless `log_credentials`
+# is set in the global options.
 (access_log) {
 	log {
 		output stdout
@@ -29,22 +27,21 @@
 auth.nikolaivorkinn.com {
 	import access_log
 
-	# The broker trusts X-Authentik-Uid as the signed-in user (and shows the username and email), so
-	# nothing a visitor sends in them may get through: strip them from every request, and let forward
-	# auth set them on the browser pages.
+	# The broker trusts X-Authentik-Uid as the signed-in user (and shows the username), so nothing a
+	# visitor sends in these may get through: strip them from every request, and let forward auth set
+	# them on the browser pages.
 	request_header -X-Authentik-Uid
 	request_header -X-Authentik-Username
 	request_header -X-Authentik-Email
 
-	# A screen polls /api/frame about twice a minute, and most answers are 304s. A 304 has no body and,
-	# through Caddy, no Content-Length, so the ESP32's HTTP client waits for a body until Caddy closes the
-	# idle connection, 5 minutes later, before it sleeps. The screen opens a new connection for every poll
-	# anyway, so close each one after its answer.
+	# Most frame answers are 304s, which through Caddy have no Content-Length, so the ESP32 reads until
+	# the connection closes: Caddy's idle timeout, 5 minutes. The screen opens a new connection for every
+	# poll anyway, so close each one after its answer.
 	header /api/frame Connection close
 
-	# Everything but the screens' API (Bearer secrets, no login), the status endpoint (its own token)
-	# and the public page about the display (/about and its pictures) is for browsers and needs an
-	# Authentik login. The stop search under /api/stops is a browser call.
+	# Everything but the screens' API (Bearer secrets), the status endpoint (its own token) and the
+	# public /about page with its pictures needs an authentik login. /api/stops and /api/places are
+	# browser calls.
 	@browser {
 		not path /api/frame /api/frame/* /api/devices/* /api/status/* /about /static/display/*
 	}
@@ -55,7 +52,6 @@ auth.nikolaivorkinn.com {
 			copy_headers X-Authentik-Uid X-Authentik-Username X-Authentik-Email
 			trusted_proxies private_ranges
 		}
-		# The broker's published port.
 		reverse_proxy 127.0.0.1:5000
 	}
 	handle {
@@ -78,8 +74,8 @@ logs.nikolaivorkinn.com {
 	}
 }
 
-# VictoriaMetrics, the victoria-metrics compose service. Pushes use the same
-# ingest token as logs.
+# VictoriaMetrics, the victoria-metrics compose service, with the same ingest
+# token as logs.
 metrics.nikolaivorkinn.com {
 	@ingest {
 		path /api/v1/write /api/v1/import /api/v1/import/* /influx/*
@@ -96,6 +92,6 @@ metrics.nikolaivorkinn.com {
 
 sso.nikolaivorkinn.com {
 	import access_log
-	# Authentik, published on loopback only.
+	# authentik, published on loopback only.
 	reverse_proxy 127.0.0.1:9000
 }

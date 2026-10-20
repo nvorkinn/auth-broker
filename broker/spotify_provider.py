@@ -2,19 +2,12 @@
 
     python -m broker.spotify_provider
 
-It runs from the broker's image with the broker's settings and database, and calls Spotify and Apple Music with the
-broker's own clients (broker/clients/spotify.py, broker/services/music.py), so the tokens never leave the broker, and
-a refreshed Spotify token is stored back in the database. The renderers get the music area only from the store. Reading
-Apple Music also logs its new plays, which its top lists are counted from (apple_music.record_plays); nothing else logs
-them. The keys and what they hold are in the countdown-api store contract.
+It runs in the broker's full app (create_app), as it writes to the database: refreshed Spotify tokens, and Apple
+Music's new plays, which the top lists are counted from (apple_music.record_plays) and nothing else logs. The playing
+tracks' covers are stored too (broker/album_art.py). The keys are the countdown-api store contract's.
 
-The playing track's cover is stored too, once per image however many screens show it (broker/album_art.py), so the
-renderers never call Spotify's or Apple's image hosts either.
-
-The loop is pi-dashboard's provider runner (countdown_providers/runner.py) in miniature: a cycle at once on start,
-then on every epoch-aligned tick of INTERVAL_S, or early on a `v1:sub:changed` message (a config was saved). SIGINT
-and SIGTERM stop it between devices. A device whose fetch fails is logged and skipped (its keys expire if it keeps
-failing); an unreachable Redis is logged and tried again on the next tick.
+Its loop works as provider_loop.ProviderLoop's, at a fixed INTERVAL_S. A device whose fetch fails is logged and
+skipped; its keys expire if it keeps failing.
 """
 
 import json
@@ -50,10 +43,9 @@ if TYPE_CHECKING:
 # By name, not __name__, which is "__main__" when run with -m.
 logger = logging.getLogger("broker.spotify_provider")
 
-# What's playing: fetched every minute. That's as often as a renderer's music panel moves on today (and it shows the
-# player only every other page), so the provider makes no more Spotify calls than the renderers it stands in for.
+# What's playing: fetched every minute, as often as the screens are rendered.
 INTERVAL_S = 60
-# Three missed cycles, then the player is gone (and the renderer's panel says it's not available). The store contract's.
+# Three missed cycles, then the player is gone and the panel says it's not available. The store contract's.
 PLAYER_TTL_S = store_keys.SPOTIFY_TTL_S
 # The top lists change slowly: fetched every half hour, and kept for four missed fetches (the store contract's TTL).
 TOP_INTERVAL_S = 30 * 60
@@ -70,10 +62,9 @@ APPLE_MUSIC = "apple_music"
 # again until it says (Retry-After, in seconds), or until this long when it doesn't say.
 DEFAULT_BACKOFF_S = 60
 
+# As in provider_loop.
 SUB_CHANGED = store_keys.SUB_CHANGED
-# How long each wait for a `v1:sub:changed` message lasts, so a stop is noticed within it.
 LISTEN_S = 1.0
-# How long to wait before subscribing again after losing Redis.
 RESUBSCRIBE_S = 5.0
 
 
@@ -127,7 +118,7 @@ def wanted_devices() -> list[Wanted]:
 
 def spotify_queue(device_id: str) -> dict[str, object]:
     """Return the device's Spotify queue, as Spotify's /me/player/queue answers it; nothing playing (204) as such."""
-    # get_queue hands over [] for a 204, which the screen can't read as a queue; the store says what it means.
+    # get_queue's [] for a 204 isn't a queue the screen can read.
     return spotify.get_queue(device_id) or music.nothing_playing()
 
 
@@ -221,8 +212,8 @@ class MusicProvider:
     def run_cycle(self) -> int:
         """Fetch every wanted device and write what came back; return how many of their keys were written.
 
-        Not counting the covers (logged apart). Raises RedisError if Redis can't be written, ending the cycle; a
-        failing device only loses its own keys.
+        Not counting the covers. Raises RedisError if Redis can't be written, ending the cycle; a failing device only
+        loses its own keys.
         """
         self.art.new_cycle()
         with self.app.app_context():
@@ -256,7 +247,7 @@ class MusicProvider:
             for service in want.services:
                 player_part = self._fetch(PLAYER_FETCHERS[service], want.device_id, service, "player", now)
                 if player_part is None:
-                    # The same failure would only repeat (a revoked token is refreshed once per call).
+                    # Its top lists would fail the same way (each call tries to refresh a revoked token).
                     continue
                 player[service] = player_part
                 if top_due and (top_part := self._fetch(TOP_FETCHERS[service], want.device_id, service, "top", now)):
@@ -274,8 +265,8 @@ class MusicProvider:
             if player:
                 pipe.set(player_key(want.device_id), stored(fetched_at, player), ex=PLAYER_TTL_S)
             if top:
-                # Short of a service, only if there's nothing there: an older full copy is better than a gap, and
-                # it's tried again next cycle.
+                # Missing a service: written only if there's nothing there, as an older full copy is better. The
+                # next cycle tries again.
                 pipe.set(top_key(want.device_id), stored(fetched_at, top), ex=TOP_TTL_S, nx=not top_complete)
             pipe.execute()
         if top_due and top_complete:
@@ -320,7 +311,7 @@ class MusicProvider:
         except RedisError as e:
             logger.warning("Music: couldn't reach Redis (%s); trying again next tick", e)
         except Exception:
-            # The database, say: a provider that stops would have to be restarted by hand.
+            # The database, say.
             logger.exception("Music: the cycle failed; trying again next tick")
 
     def _wait_for_next_cycle(self) -> None:
@@ -332,11 +323,7 @@ class MusicProvider:
                 return
 
     def _listen(self, timeout: float) -> bool:
-        """Wait up to `timeout` for a `v1:sub:changed` message; return whether one came.
-
-        A message that came during a cycle is already waiting, so the next cycle starts at once. Losing Redis only
-        means waiting for the tick: every cycle reads the devices afresh anyway.
-        """
+        """Wait up to `timeout` for a `v1:sub:changed` message; return whether one came."""
         if self._pubsub is None and self._resubscribe_at is not None and self.clock() < self._resubscribe_at:
             self._stopping.wait(timeout)
             return False
@@ -369,7 +356,7 @@ class MusicProvider:
 
 
 def connect() -> redis.Redis:
-    """Return a client for the store, from REDIS_URL and REDIS_PASSWORD, as the broker's own."""
+    """Return a client for the store, from REDIS_URL and REDIS_PASSWORD."""
     return redis.Redis.from_url(
         os.environ.get("REDIS_URL", "redis://127.0.0.1:6379/0"),
         password=os.environ.get("REDIS_PASSWORD") or None,
@@ -380,7 +367,7 @@ def connect() -> redis.Redis:
 
 
 def _configure_logging() -> None:
-    """JSON lines on stdout, as gunicorn's are (gunicorn.conf.py), so Fluent Bit ships them the same way."""
+    """Log JSON lines to stdout, as provider_loop.configure_logging does."""
     from broker.log_format import JsonFormatter  # noqa: PLC0415 -- it imports gunicorn, which only this needs here
 
     handler = logging.StreamHandler(sys.stdout)
@@ -394,7 +381,6 @@ def main() -> None:
     from broker import create_app  # noqa: PLC0415 -- after logging is set up, so the app's start is logged too
 
     provider = MusicProvider(create_app(), connect())
-    # As a container's PID 1 nothing handles SIGTERM unless we do, and docker stop would have to kill us.
     for signum in (signal.SIGINT, signal.SIGTERM):
         signal.signal(signum, lambda *_: provider.stop())
     provider.run()

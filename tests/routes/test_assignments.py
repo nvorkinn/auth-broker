@@ -1,6 +1,4 @@
-"""Test naming a screen: its stable name at pairing (services/assignments.py), and its friendly name.
-
-The friendly name is set on its settings page.
+"""Test naming a screen: its stable name at pairing (services/assignments.py), and the friendly name its owner sets.
 
 Which named screens the pool draws is tests/services/test_render_screens.py's.
 """
@@ -46,7 +44,7 @@ def test_pairing_names_the_screen_by_its_own_id_and_opens_its_settings(app, clie
     # The stable name the pool lists it under and its metrics are labelled with: never shown.
     assert _assignment(app, paired).slug == paired
     assert client.get("/device").status_code == 200
-    # Where a new screen used to be named first.
+    # /device/name only redirects to the settings page, where the name is set.
     assert client.get("/device/name").headers["Location"] == f"/device/{paired}"
     assert client.post(f"/device/{paired}/name", data={"slug": "lisa"}).headers["Location"] == f"/device/{paired}"
 

@@ -1,7 +1,6 @@
 """The AI plans the developer panel shows: what each is, when it renews, and how much is used where that's known.
 
-Copilot's usage comes from GitHub. Claude and Gemini have no API to ask yet, so they're placeholders here: when one
-turns up, its plan is built from it in place of its STUB_PLANS entry, and nothing else changes.
+Copilot's usage comes from GitHub. Claude and Gemini have no API to ask, so theirs are placeholders (STUB_PLANS).
 """
 
 from calendar import monthrange
@@ -13,7 +12,7 @@ DECEMBER = 12
 COPILOT_PLAN = "Pro"
 COPILOT_ALLOWANCE = 300
 
-# Placeholders until there's an API to ask: the name, the plan, and the day of the month it renews.
+# The name, the plan, and the day of the month it renews.
 STUB_PLANS = (("Claude", "Max", 3), ("Gemini", "AI Pro", 22))
 
 

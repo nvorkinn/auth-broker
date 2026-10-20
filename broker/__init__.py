@@ -26,13 +26,13 @@ from .services.pair_throttle import MAX_REGISTRATION_LOCKOUT_SECONDS, REGISTRATI
 def create_app() -> Flask:
     """Build the app: logging, config, database, throttles, blueprints and the CLI."""
     # Before app.logger is first used, as Flask gives it a plain-text handler of its own if nothing else would write
-    # its records. Under gunicorn and in a provider, logging is set up already, and this leaves it as it is.
+    # its records.
     log_format.configure_logging()
     app = Flask(__name__)
 
-    # Caddy, on the same host, is the only thing that reaches the app (the port is published on
-    # 127.0.0.1 only), so trust the one X-Forwarded-For hop it adds: request.remote_addr is then the
-    # visitor's IP rather than Caddy's, which the /pair throttle depends on.
+    # Caddy, on the same host, is the only thing that reaches the app (gunicorn binds 127.0.0.1 only), so trust the
+    # one X-Forwarded-For hop it adds: request.remote_addr is then the visitor's IP rather than Caddy's, which the
+    # /pair and /register throttles depend on.
     app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1)
 
     config.load(app)
@@ -53,8 +53,8 @@ def create_app() -> Flask:
         socket_timeout=1,  # a dead Redis can't hang a config save
         socket_connect_timeout=1,
     )
-    # The same Redis, for the values that are bytes, not text: the screens' frames (services/frame_record.py). A client
-    # of its own, as redis-py decodes per client, not per call.
+    # The same Redis for the screens' frames, which are bytes (services/frame_record.py): redis-py decodes per client,
+    # not per call.
     app.extensions["redis_bytes"] = redis.Redis.from_url(
         os.environ.get("REDIS_URL", "redis://127.0.0.1:6379/0"),
         password=os.environ.get("REDIS_PASSWORD"),

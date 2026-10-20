@@ -43,7 +43,7 @@ def _since_epoch(at: datetime) -> float:
     return (at - datetime(1970, 1, 1, tzinfo=UTC)).total_seconds()
 
 
-# --- the numbers settled in this step ----------------------------------------------------------------------------
+# --- the constants -----------------------------------------------------------------------------------------------
 
 
 def test_the_settled_numbers():
@@ -254,7 +254,7 @@ def test_a_naive_time_is_refused():
         sleep_s(datetime(2026, 10, 18, 12, 0), [])  # noqa: DTZ001 -- the point of the test
 
 
-# --- the hints a screen has: its pace keys, and the legacy lease --------------------------------------------------
+# --- the hints a screen has: its panels' pace keys ----------------------------------------------------------------
 
 
 @pytest.fixture
@@ -352,6 +352,5 @@ def test_redis_down_is_no_hints(app, screen):
 
 
 def test_the_legacy_hint_is_gone():
-    # Renderers sent it with PUT /api/frame; the pool's providers' pace keys are all there is now.
     assert not hasattr(pace, "PACE_LEASE_S")
     assert not hasattr(pace, "parse_hint")

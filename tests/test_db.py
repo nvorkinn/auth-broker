@@ -51,10 +51,9 @@ def test_schema_creates_expected_tables(app):
 
 
 def _downgrade(revision: str) -> None:
-    """Downgrade to `revision`, past 0023 giving every device a renderer secret, which the schema before 0006 needs.
+    """Downgrade to `revision` (needs an app context), giving every device a renderer secret on the way past 0023.
 
-    (0006's downgrade makes the renderer's secret NOT NULL again; 0023's brings the column back empty.) Needs an app
-    context.
+    0023's downgrade brings that column back empty, and 0006's makes it NOT NULL again.
     """
     downgrade(revision="0022")
     with db.engine.begin() as conn:
@@ -501,7 +500,7 @@ def test_0013_backfills_english_and_keeps_existing_settings(app, register_device
 
 
 def _styles(columns):
-    """Every device's values of `columns`, read with SQL, as the models no longer have the old style columns."""
+    """Return every device's values of `columns`, read with SQL: the models don't have the old style columns."""
     with db.engine.begin() as conn:
         rows = conn.exec_driver_sql(f"SELECT device_id, {', '.join(columns)} FROM device_config").all()  # noqa: S608
     return {row[0]: tuple(row[1:]) for row in rows}

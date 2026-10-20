@@ -54,7 +54,7 @@ def test_list_with_no_devices(cli):
 def test_list_shows_device_name_when_set_and_unnamed_otherwise(app, client, register_device, cli):
     named_id, _secret = register_device()
     with app.app_context():
-        db.session.get(Device, named_id).device_name = "camilla"  # from before the screens' names were their slugs
+        db.session.get(Device, named_id).device_name = "camilla"
         db.session.commit()
     screen = {"secret": "a-screen-with-no-name-yet-at-all", "width": 800, "height": 480}
     unnamed_id = client.post("/api/devices/register", json=screen).get_json()["device_id"]
@@ -223,7 +223,7 @@ def test_weather_backfill_gives_each_free_text_location_a_place(app, register_de
     assert sorted(call.args[0] for call in search.call_args_list) == ["Nowhere", "london"]
     with app.app_context():
         config = db.session.get(DeviceConfig, london)
-        # What renderers are sent stays as it was.
+        # weather_location itself is left as it was.
         assert (config.weather_location, config.weather_place_id, config.weather_country_code) == (
             "london",
             2643743,
@@ -263,12 +263,12 @@ def test_weather_backfill_rewrites_the_subscriptions_by_the_places_it_gave(app, 
 
 
 def test_weather_backfill_rewrites_the_subscriptions_even_with_nothing_to_backfill(app, register_device, fake_redis):
-    """Run after deploying a broker that subscribes by place, it moves the old subscriptions over."""
+    """With every place picked already, it still rewrites the subscriptions under the current keys."""
     device_id, _ = register_device()
     with app.app_context():
         weather_place.store(db.session.get(DeviceConfig, device_id), LONDON)
         db.session.commit()
-    fake_redis.sets["v1:sub:weather"] = {"London"}  # as an older broker subscribed it
+    fake_redis.sets["v1:sub:weather"] = {"London"}  # a key no config has
 
     with patch("broker.clients.weather.search_places") as search:
         result = _backfill(app)

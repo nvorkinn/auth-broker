@@ -72,7 +72,7 @@ def test_forgetting_a_device_deletes_all_its_data_and_no_one_elses(store, paired
 
     assert _left(store, device_id) == set()
     assert _left(store, other_id) == EVERYTHING
-    assert not store.exists(config_store.key(device_id))  # config_store's, as before
+    assert not store.exists(config_store.key(device_id))  # config_store removes its own
 
 
 @pytest.mark.parametrize("args", [(), ("--config",)], ids=["unpair", "unpair --config"])

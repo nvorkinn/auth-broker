@@ -24,14 +24,11 @@ logconfig_dict = {
 
 
 def post_worker_init(worker: Worker) -> None:
-    """Once the broker has loaded, write the subscriptions and every screen's config to the store from the database.
+    """Once the broker has loaded, write the store from the database, then start the minute's resync.
 
-    Redis keeps nothing on disk, so after it restarts, or the first time a broker that writes the configs starts, this
-    puts back what the renderers and providers read; the same as `flask config publish`. Redis being down is logged,
-    and the broker serves regardless (the render pool draws nothing new until the store has them).
-
-    Then it starts the thread that rewrites the configs and the render pool's screens every minute
-    (config_store.start_resync), so a Redis that restarts while the broker runs gets them back too.
+    Redis keeps nothing on disk, so this puts back what the render pool and providers read, as `flask config publish`
+    does; Redis being down is logged and the broker serves regardless. The resync thread (config_store.start_resync)
+    brings back a Redis that restarts while the broker runs.
     """
     # Here, not at the top: gunicorn reads this file before it loads the app, and the app's own modules with it.
     from broker.cli import publish_store  # noqa: PLC0415

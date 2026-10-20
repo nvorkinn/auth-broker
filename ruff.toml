@@ -4,8 +4,7 @@ target-version = "py314"
 extend-exclude = [".venv", "vendor"]
 
 [lint]
-# Every rule Ruff has. A Ruff upgrade turns on its new rules too, so bumping the
-# pinned version may need a round of fixes.
+# Every rule Ruff has, so bumping the pinned version may need a round of fixes.
 select = ["ALL"]
 ignore = [
     # Contradict D211 and D212, which we keep: no blank line before a class

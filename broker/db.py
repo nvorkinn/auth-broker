@@ -63,10 +63,10 @@ def _enable_foreign_keys(dbapi_conn: sqlite3.Connection, _record: ConnectionPool
 
 
 def upgrade_db() -> None:
-    """Bring the DB to the latest revision; needs an app context.
+    """Bring the DB to the latest revision, under a file lock; needs an app context.
 
-    Same as `flask db upgrade`, except it leaves logging alone: env.py's logging setup
-    would silence the app's own logger.
+    Same as `flask db upgrade`, except it leaves logging alone: env.py's logging setup would silence the app's own
+    logger.
     """
     with Path(f"{_db_path()}.migrate.lock").open("a") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
@@ -78,11 +78,10 @@ def upgrade_db() -> None:
 def init_read_only_app(app: Flask) -> None:
     """Point `app` at the broker's database for reading only: SQLite's mode=ro, and no migrations.
 
-    For the providers, which only read it: a write raises ("attempt to write a readonly database"), and none can
-    hold the write lock the broker's own writes would wait for. It works with ./data mounted read-only because the
-    database is in SQLite's default rollback-journal mode, where a reader only takes shared locks on the file itself
-    and creates nothing next to it. In WAL mode every reader needs the -shm file, which it can't create on a read-only
-    mount (tests/test_db.py pins the journal mode).
+    For the glow and developer providers: a write raises, and none can hold the write lock the broker's own writes
+    would wait for. It works with ./data mounted read-only because the database is in SQLite's default rollback-journal
+    mode, where a reader only takes shared locks on the file and creates nothing next to it; in WAL mode every reader
+    needs the -shm file, which it can't create on a read-only mount (tests/test_db.py pins the journal mode).
     """
     app.config["SQLALCHEMY_DATABASE_URI"] = f"sqlite:///file:{_db_path()}?mode=ro&uri=true"
     db.init_app(app)

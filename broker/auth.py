@@ -20,14 +20,13 @@ if TYPE_CHECKING:
 # A Flask view function, as the decorators here take and return it.
 type View = Callable[..., ResponseReturnValue]
 
-# How stale devices.last_seen_at may get before a request updates it. Some device endpoints are
-# polled every few seconds; this keeps that from being a database write each time.
+# How stale a device's last-seen times may get before a request updates them, so a screen's polls aren't each a
+# database write.
 LAST_SEEN_RESOLUTION = timedelta(minutes=1)
 
 
-# The roles a device's secrets can hold, in the order a presented secret is checked against them.
-# Each has its own column, devices.<role>_secret_hash. Only the screen's is left: the render pool, which draws every
-# screen, needs no secret (its frames go through Redis).
+# The roles a device's secrets can hold, in the order a presented secret is checked against them, each with its own
+# column, devices.<role>_secret_hash. There is one: the screen's.
 ROLES = ("display",)
 
 
@@ -65,7 +64,7 @@ def authenticate_device(authorization: str, roles: Collection[str] = frozenset(R
 
     The secret that matches decides the caller's role: a valid secret for a role not in `roles` is a 403,
     anything else a 401 (DeviceAuthError). Sets g.device_id and g.role, logs the request and records the
-    device as seen. The prefix is matched exactly: `bearer x` is no more a secret than a bare one.
+    device as seen. The prefix is case-sensitive: `bearer x` is refused.
     """
     secret = authorization.removeprefix("Bearer ")
     if not authorization.startswith("Bearer ") or not secret:
@@ -78,8 +77,8 @@ def authenticate_device(authorization: str, roles: Collection[str] = frozenset(R
         raise DeviceAuthError(403, "forbidden")
 
     g.device_id, g.role = device.device_id, role
-    # The screen's slug, purely so a log line reads as a name instead of an opaque id. Not its friendly name
-    # (device_name): that's whatever its owner typed, which could name a place, and nothing logged may.
+    # The slug, not the friendly name (device_name): that's whatever its owner typed, which could name a place, and
+    # nothing logged may.
     current_app.logger.info(
         "%s %s device=%s (%s) role=%s",
         request.method,
@@ -93,10 +92,7 @@ def authenticate_device(authorization: str, roles: Collection[str] = frozenset(R
 
 
 def require_device_auth(roles: Collection[str] = frozenset(ROLES)) -> Callable[[View], View]:
-    """Protect device-facing endpoints with one of the device's own bearer secrets.
-
-    Checked as authenticate_device does, and passes device_id to the view.
-    """
+    """Protect a device-facing endpoint with the device's bearer secret (authenticate_device), passing device_id."""
 
     def decorator(view: View) -> View:
         @functools.wraps(view)
@@ -169,10 +165,9 @@ require_status_token = _require_bearer_token("STATUS_TOKEN")
 
 
 def current_user() -> str | None:
-    """Return the signed-in user's id.
+    """Return the signed-in user's id, from the header the login proxy sets.
 
-    It is the header the login proxy sets on every browser-facing request, which the broker
-    trusts because only the proxy can reach it (see caddy/Caddyfile).
+    The broker trusts it because only the proxy can reach it (see caddy/Caddyfile).
     """
     return request.headers.get(current_app.config["USER_HEADER"], "").strip() or None
 
@@ -180,8 +175,7 @@ def current_user() -> str | None:
 def current_username() -> str | None:
     """Return the signed-in user's username, from the header the login proxy sets next to the user id.
 
-    It's only for display and for naming their screens: it's not the user's identity (that's current_user) and
-    it can change.
+    It's only for display: it's not the user's identity (that's current_user) and it can change.
     """
     return request.headers.get(current_app.config["USERNAME_HEADER"], "").strip() or None
 
@@ -207,8 +201,8 @@ def paired_device_id() -> str | None:
 def screen_label(device: Device) -> str:
     """Return what a screen is called on the pages.
 
-    That is the name its owner gave it, else the slug they chose when screens were named by one, else "Screen" and a
-    piece of its id (its slug, if it has one, is then that id: never shown).
+    That is its friendly name, else a slug its owner chose, else "Screen" and a piece of its id (a slug that is the
+    device id is never shown).
     """
     if device.device_name:
         return device.device_name
@@ -233,7 +227,7 @@ def require_user(view: View) -> View:
 
 
 def require_paired_user(view: View) -> View:
-    """Protect browser pages that act on one of 'the signed-in user's devices'.
+    """Protect browser pages that act on one of the signed-in user's devices.
 
     A page with a `device_id` in its URL is for that device, and 404s unless it's the user's (never admits it
     exists); one without is for the one paired most recently. A user with none goes to /pair. Sets g.device_id,

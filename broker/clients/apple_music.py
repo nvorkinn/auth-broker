@@ -1,13 +1,12 @@
 """Talks to Apple Music on a device's behalf, and keeps the log of plays its top lists are counted from.
 
 Apple Music's web API has no now playing, no queue and no top tracks or artists: only the tracks played recently,
-newest first and without times. So the screen gets the last played track and the ones before it, and the top lists
-are counted from the plays this broker has seen (see record_plays). Everything is handed over in the shapes the
-screen already reads Spotify's in, so it draws them the same way.
+newest first and without times. So the music area gets the last played track and the ones before it, and the top lists
+are counted from the plays this broker has seen (see record_plays), all in Spotify's shapes.
 
 Calls need two tokens: a developer token, which the broker signs itself with the MusicKit key from the owner's Apple
-Developer account (APPLE_MUSIC_*), and the listener's Music User Token, which MusicKit JS gets on the config page when
-they sign in to Apple.
+Developer account (APPLE_MUSIC_*), and the listener's Music User Token, which MusicKit JS gets on the settings page
+when they sign in to Apple.
 """
 
 import base64
@@ -28,11 +27,11 @@ from broker.db import db
 from broker.models import AppleMusicPlay, AppleMusicToken
 
 API_URL = "https://api.music.apple.com/v1"
-# How many recently played tracks are read on each call: Apple hands them over ten to a page.
+# How many pages of recently played tracks are read on each call: Apple hands them over ten to a page.
 RECENT_PAGES = 2
-# What the top lists' time_range (Spotify's names, which the screen sends) counts back over.
+# How far back the top lists count, by Spotify's time_range names.
 TIME_RANGES = {"short_term": timedelta(weeks=4), "medium_term": timedelta(days=183), "long_term": timedelta(days=365)}
-# The cover size asked for; the screen scales it down to its own.
+# The cover size asked for; the renderer scales it down to its own.
 ARTWORK_SIZE = 300
 # A developer token may last up to six months; a fresh one each half day keeps a leaked one short-lived.
 DEVELOPER_TOKEN_LIFETIME = timedelta(hours=12)
@@ -103,7 +102,7 @@ def recently_played(user_token: str) -> list[dict]:
 
 
 def as_track(song: dict) -> dict:
-    """Return Apple's song resource in the shape of a Spotify track, as far as the screen reads one."""
+    """Return Apple's song resource in the shape of a Spotify track, as far as the renderer reads one."""
     attributes = song.get("attributes", {})
     artwork = attributes.get("artwork")
     images = []
@@ -135,7 +134,7 @@ def new_plays(seen: list[str], recent: list[str]) -> list[str]:
 def recent_tracks(device_id: str) -> list[dict] | None:
     """Return the device's listener's recently played tracks, newest first, logging any new plays on the way.
 
-    None when Apple Music isn't connected, or Apple has refused the token (which is then forgotten, so the config
+    None when Apple Music isn't connected, or Apple has refused the token (which is then forgotten, so the settings
     page asks to connect again).
     """
     stored = db.session.get(AppleMusicToken, device_id)

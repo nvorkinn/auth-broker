@@ -53,8 +53,7 @@ def app(tmp_path, monkeypatch, migrated_db):
     application = create_app()
     application.config.update(TESTING=True)
     application.extensions["redis"] = FakeRedis()
-    # The frames' client (services/frame_record.py): an empty Redis, so a frame is the database's unless a test puts
-    # a record there (see frames_redis in tests/routes/test_frame_record.py).
+    # The frame records' client (services/frame_record.py), which doesn't decode: empty until a test draws a frame.
     application.extensions["redis_bytes"] = fakeredis.FakeRedis()
     # Tests register far more devices a minute than the real limit allows; the throttle's own
     # tests put the real one back (see register_throttle).
@@ -68,10 +67,9 @@ def app(tmp_path, monkeypatch, migrated_db):
 class FakeRedis:
     """Just enough of Redis to see what a config save writes: sets, strings (configs, pairing keys), what's published.
 
-    And the render jobs queued (services/render_jobs.py): `jobs`, oldest first, a device at most once, as the queue's
-    script does (its flag never lapses here), for the screens in `pooled`, the render pool's `v1:render:screens` (its
-    slugs by device id, which the broker writes: services/render_screens.py). A TTL is ignored.
-    tests/services/test_render_jobs.py runs the real script.
+    `jobs` are the render jobs queued (services/render_jobs.py), oldest first and each device once, as the real script
+    queues them (tests/services/test_render_jobs.py runs it), for the screens in `pooled` (`v1:render:screens`). TTLs
+    are ignored, so a job's flag never lapses.
     """
 
     def __init__(self):
@@ -250,7 +248,7 @@ def cli(app):
 
 
 def name_screen(device_id: str) -> None:
-    """Give a registered screen its stable name, as pairing does, which puts it on the render pool (app context)."""
+    """Give a registered screen its stable name, as pairing does, so the render pool can list it (app context)."""
     assignments.auto_name(db.session.get(Device, device_id))
     db.session.commit()
 
@@ -272,10 +270,7 @@ def register_device(app, client):
 
 @pytest.fixture
 def paired_client(app, client, register_device):
-    """Return a test client whose user is already paired with a freshly-registered, named device.
-
-    Paired with a code, as the fallback flow does: (client, device_id, the screen's secret).
-    """
+    """Return (client, device_id, the screen's secret): the client's user paired by a code with a new named screen."""
     device_id, device_secret = register_device()
     with app.app_context():
         code = pairing.issue_code(device_id)

@@ -1,8 +1,4 @@
-"""Talks to Spotify on a device's behalf.
-
-It does the OAuth token exchange, keeps each device's tokens fresh, and makes the Web API calls the music provider
-(broker/spotify_provider.py) writes to the store.
-"""
+"""Talks to Spotify on a device's behalf: the OAuth token exchange, keeping its tokens fresh, and the Web API calls."""
 
 import urllib.parse
 from datetime import UTC, datetime
@@ -96,9 +92,9 @@ def _get_access_token(device_id: str) -> str | None:
 
 
 def get_queue(device_id: str) -> list[dict[str, object]]:
-    """Upcoming items (not the one currently playing), in play order.
+    """Return Spotify's /me/player/queue for the device: what's playing and what's up next.
 
-    Empty when Spotify isn't linked or nothing is queued.
+    [] when Spotify isn't linked or nothing is playing (204).
     """
     access_token = _get_access_token(device_id)
     if access_token is None:

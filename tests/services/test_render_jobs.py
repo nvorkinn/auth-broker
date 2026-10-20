@@ -1,13 +1,10 @@
 """Jobs for the render pool (broker/services/render_jobs.py): the pool's own enqueue script, and who queues a job.
 
-The script is the store contract's (countdown_api.scripts.ENQUEUE), which pi-dashboard's render pool runs too, so the
-broker queues jobs exactly as the pool's ticker does; the contract's render_queue.json (countdown_api.fixtures) pins its
-SHA1, its keys and its TTL, and pi-dashboard's tests check its side against that same file.
-
-The script runs on fakeredis's Lua and, where marked, on a real Redis too: a redis-server of the tests' own, on a free
-port, when one is installed (CI installs it); those are skipped otherwise. Who queues: the developer provider
-(tests/test_developer_provider.py), and here a config save, a code issued and a code spent, through the real routes
-and `flask devices` commands with the broker's Redis a fakeredis.
+The script is the store contract's (countdown_api.scripts.ENQUEUE), which pi-dashboard's render pool runs too; the
+contract's render_queue.json pins its SHA1, keys and TTL, and pi-dashboard's tests check their side against that file.
+It runs on fakeredis's Lua and, where marked, on a redis-server of the tests' own when one is installed (CI installs
+it). Who queues: here a config save, a code issued and a code spent; the developer provider in
+tests/test_developer_provider.py.
 """
 
 import hashlib
@@ -29,7 +26,6 @@ from broker.models import Device
 from broker.services import assignments, config_store, pairing, pairing_key, render_jobs, render_screens
 from broker.services.render_jobs import JOBS, QUEUED_TTL_MS, SCREENS, enqueue, queued_key
 
-# The store contract's canonical example, which pi-dashboard's test_render_queue.py checks too.
 SHARED = fixtures.load("render_queue.json")
 DEVICE = SHARED["device_id"]
 OTHER = "0f9e8d7c6b5a"
@@ -44,12 +40,10 @@ def pool():
 
 
 def test_the_script_is_the_store_contracts_byte_for_byte():
-    # The one pi-dashboard's render pool runs too.
     assert scripts.ENQUEUE.source == render_jobs._ENQUEUE
 
 
 def test_the_keys_are_the_pools():
-    # The store contract's RENDER_JOBS, RENDER_SCREENS and render_queued, as pi-dashboard's pool reads them.
     assert JOBS == "v1:render:jobs"
     assert SCREENS == "v1:render:screens"
     assert queued_key("a1b2c3d4e5f6") == "v1:render:queued:a1b2c3d4e5f6"
@@ -95,7 +89,7 @@ def test_only_the_screens_the_pool_renders_are_queued(pool):
 
 
 def test_with_no_pool_nothing_is_written():
-    # Before the pool is deployed nothing would take jobs off the list, which has no TTL.
+    # With no pool running nothing would take jobs off the list, which has no TTL.
     pool = fakeredis.FakeRedis(decode_responses=True)
 
     assert enqueue(pool, ["a"]) == 0
@@ -218,7 +212,6 @@ def test_enqueue_queues_the_screen_and_flags_it(redis_client):
     assert render_jobs.enqueue(redis_client, [DEVICE]) == 1
 
     assert redis_client.lrange(SHARED["jobs_key"], 0, -1) == [DEVICE]
-    # The flag holds when it was queued, by Redis's clock, in Unix ms; and lapses within the minute.
     assert before_ms <= int(redis_client.get(SHARED["queued_key"])) <= before_ms + 2000
     assert 0 < redis_client.pttl(SHARED["queued_key"]) <= SHARED["queued_ttl_ms"]
 
@@ -239,7 +232,6 @@ def test_a_screen_is_queued_again_once_its_job_is_claimed(redis_client):
 
 
 def test_a_screen_the_pool_doesnt_render_is_not_queued(redis_client):
-    # Nothing takes jobs off the list until a pool runs, and it has no TTL: so nothing is written for such a screen.
     assert render_jobs.enqueue(redis_client, ["not-pooled", DEVICE]) == 1
 
     assert redis_client.lrange(SHARED["jobs_key"], 0, -1) == [DEVICE]

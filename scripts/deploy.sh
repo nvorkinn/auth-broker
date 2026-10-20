@@ -1,25 +1,19 @@
 #!/usr/bin/env bash
-# Ships inside each release's deploy bundle (deploy-<tag>.tar.gz) next to that
-# release's docker-compose.yml. release.yml unpacks the bundle on the host into
-# /opt/auth-broker/releases/<tag>/ and runs this copy, which installs the
-# bundled docker-compose.yml, pins one compose service to the tag in .env, then
-# pulls and restarts just that service.
+# Ships in each release's deploy bundle, next to that release's
+# docker-compose.yml; fetch-release.sh unpacks it into
+# /opt/auth-broker/releases/<tag>/ and runs it. It installs the bundled
+# docker-compose.yml, pins the service to the tag in .env, then pulls and
+# recreates just that service.
 # Usage: deploy.sh <auth-broker|caddy|fluent-bit|victoria-logs|victoria-metrics|redis|authentik> <tag>
 #
-# Secrets come from the bundle's SOPS-encrypted secrets/<name>.env, all of
-# them decrypted on every deploy with the host's age key into <name>.env next
-# to the compose file (compose won't load the file if any service's env_file
-# is missing). Nobody edits those files.
+# Every secrets/<name>.env in the bundle is decrypted on every deploy, with the
+# host's age key, into <name>.env next to the compose file (compose won't load
+# the file if any service's env_file is missing). Nobody edits those files.
 #
-# authentik is the three Authentik services. Their image is upstream's, pinned
-# by hand with AUTHENTIK_VERSION in .env (one minor version at a time), so
-# they aren't pinned to the release tag: this installs the compose file and
-# the brand assets the server serves, and brings them up on whatever is
-# pinned. What Authentik is configured with is Terraform's (terraform/).
-#
-# redis is upstream's image too, pinned in docker-compose.yml itself. Like
-# authentik, it's brought up rather than force-recreated, so a release that
-# doesn't change its service leaves it running with its cache.
+# authentik (its three services) and redis run upstream's images, pinned by
+# hand (AUTHENTIK_VERSION in .env, redis's tag in docker-compose.yml), so
+# they aren't pinned to the release tag. They're brought up rather than
+# force-recreated, so a release that doesn't change them leaves them running.
 set -euo pipefail
 
 service="$1"
@@ -70,8 +64,8 @@ if [ ! -x "$sops" ]; then
 fi
 for encrypted in "$bundle"/secrets/*.env; do
   name="$(basename "$encrypted")"
-  # mktemp's file is readable by the deploy user only; a unique name per job,
-  # as the deploy jobs can run at once, then mv to replace it in one step.
+  # mktemp's file is readable by the deploy user only, and unique per job, as
+  # the deploy jobs can run at once; mv replaces the old one in one step.
   tmp="$(mktemp "$name.XXXXXX")"
   "$sops" decrypt --output-type dotenv "$encrypted" > "$tmp"
   mv "$tmp" "$name"
@@ -88,7 +82,7 @@ src.backup(sqlite3.connect('/app/data/broker.db.bak-$tag'))
   echo "Backed up the database to data/broker.db.bak-$tag"
 fi
 
-# The two deploy jobs can run at once and both edit .env and the compose file.
+# The deploy jobs can run at once, and each edits .env and the compose file.
 (
   flock 9
   # Copy then mv, so compose never reads a half-written file.
@@ -101,8 +95,8 @@ fi
     cp "$bundle/authentik-assets/countdown-pill.svg" authentik-assets/.countdown-pill.svg.tmp
     mv authentik-assets/.countdown-pill.svg.tmp authentik-assets/countdown-pill.svg
   fi
-  # The broker's secrets and settings used to live in .env; now they come
-  # from broker.env and the compose file, so keep only the version pins.
+  # Keep only the version pins: secrets are in the *.env files and settings
+  # in the compose file.
   (umask 077 && grep -E '^[A-Z0-9_]+_VERSION=' .env > .env.tmp || true)
   mv .env.tmp .env
   if [ -n "$var" ]; then
@@ -119,8 +113,7 @@ docker compose pull "${services[@]}"
 if [ -n "$var" ]; then
   docker compose up -d --no-deps --force-recreate "${services[@]}"
 else
-  # Recreates only what changed, so a release that doesn't touch Authentik
-  # (or Redis) leaves it running. The authentik and deploy-config (for
+  # Recreates only what changed. The deploy-authentik and deploy-config (for
   # redis) jobs can run at once, so they take turns.
   (
     flock 9

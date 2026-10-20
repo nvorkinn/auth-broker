@@ -1,19 +1,16 @@
-"""Stand in for a real screen (e.g. the ESP32) during development.
+"""Stand in for a screen (the ESP32) during development.
 
-It registers as a display, as the real screen would, so you can test the /pair -> /device browser flow without
-the hardware. A screen doesn't ask for a pairing code itself; the script says how to issue one. Works against a
-local broker or the deployed one.
+It registers as a screen would, so you can try /pair and the settings pages without the hardware, against a local
+broker or the deployed one. A screen never asks for a pairing code itself; the script says how to issue one.
 
-With --token it plays a screen that has just finished WiFi setup instead: it prints the /pair URL its
-owner's browser would be redirected to, and registers only once you've opened it, so you can watch the
-page wait.
+With --token it plays a screen that has just finished Wi-Fi setup: it prints the /pair URL its owner's browser would
+be sent to, and registers only once you've opened it, so you can watch the page wait.
 
-/pair itself needs a logged-in user. Deployed, that's your Authentik login in the browser; locally
-there is no login proxy, so send the user header yourself (e.g. a ModHeader extension:
-X-Authentik-Uid: me).
+/pair needs a signed-in user. Deployed, that's your authentik login; locally there is no login proxy, so send the
+header yourself (e.g. with a ModHeader extension: X-Authentik-Uid: me).
 
-Each run is a new screen with a random secret, unless you pass --secret (any random string of 16+
-characters, e.g. from `openssl rand -hex 16`); pass the same one to be that screen again.
+Each run is a new screen with a random secret, unless you pass --secret (any random string of 16+ characters, e.g.
+from `openssl rand -hex 16`); pass the same one to be that screen again.
 
 Usage: python scripts/simulate_device.py [--token] [--secret SECRET] [base_url]
 """

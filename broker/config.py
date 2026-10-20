@@ -20,7 +20,7 @@ def load(app: Flask) -> None:
     # The request header the login proxy (Caddy forward auth to Authentik) puts the signed-in user's
     # id in. Caddy overwrites it on every browser-facing request; see caddy/Caddyfile.
     app.config["USER_HEADER"] = os.environ.get("AUTH_USER_HEADER", "X-Authentik-Uid")
-    # The header with the signed-in user's username, which is only shown and used to prefix a screen's name.
+    # The header with the signed-in user's username, which is only shown.
     app.config["USERNAME_HEADER"] = os.environ.get("AUTH_USERNAME_HEADER", "X-Authentik-Username")
 
     app.config["SPOTIFY_CLIENT_ID"] = os.environ["SPOTIFY_CLIENT_ID"]
@@ -34,15 +34,14 @@ def load(app: Flask) -> None:
     # The name Apple's sign-in shows the listener.
     app.config["APPLE_MUSIC_APP_NAME"] = os.environ.get("APPLE_MUSIC_APP_NAME", "Countdown")
     app.config["TFL_APP_KEY"] = os.environ.get("TFL_APP_KEY", "")
-    # Where the IP location data for suggesting a weather location is (see services/geoip.py). The image
-    # has it in /app/geodata, which is the default.
+    # The IP location data for suggesting a weather location (services/geoip.py); the image has it in /app/geodata.
     app.config["GEODATA_DIR"] = os.environ.get("GEODATA_DIR", str(Path(__file__).resolve().parent.parent / "geodata"))
     app.config["CREDENTIAL_ENCRYPTION_KEY"] = os.environ["CREDENTIAL_ENCRYPTION_KEY"]
     # Unset (the default) turns GET /api/status/devices off.
     app.config["STATUS_TOKEN"] = os.environ.get("STATUS_TOKEN", "")
-    # The personal GitHub dashboard is off until both are set. The PAT stays on the server.
+    # The personal GitHub dashboard is off until both are set.
     app.config["GITHUB_DASHBOARD_TOKEN"] = os.environ.get("GITHUB_DASHBOARD_TOKEN", "")
     app.config["GITHUB_DASHBOARD_USER_ID"] = os.environ.get("GITHUB_DASHBOARD_USER_ID", "")
 
-    # QA only: logs every request's headers and the response's status and Location (see request_log.py).
+    # For debugging sign-in redirects only (request_log.py).
     app.config["LOG_REQUEST_HEADERS"] = os.environ.get("LOG_REQUEST_HEADERS", "").lower() in ("1", "true")

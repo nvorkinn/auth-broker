@@ -3,9 +3,9 @@
     python3 scripts/check_vmui_dashboards.py http://127.0.0.1:8428
 
 The image job in .github/workflows/tests.yml runs this on the victoria-metrics image it has just built, started with
-the image's own CMD (so with -vmui.customDashboardsPath). A query VictoriaMetrics can't parse answers 400; one that
-finds nothing (as here, with no data) is fine, which is also how a dashboard stays safe to deploy before the series it
-reads exist. tests/test_vmui_dashboards.py checks the files' shape without VictoriaMetrics.
+the image's own CMD. A query VictoriaMetrics can't parse answers 400; one that finds nothing (as here, with no data) is
+fine, so a dashboard is safe to deploy before the series it reads exist. tests/test_vmui_dashboards.py checks the
+files' shape without VictoriaMetrics.
 
 Standard library only, as it runs on the CI runner's own Python.
 """

@@ -1,8 +1,3 @@
-# To get started with Dependabot version updates, you'll need to specify which
-# package ecosystems to update and where the package manifests are located.
-# Please see the documentation for all configuration options:
-# https://docs.github.com/code-security/dependabot/dependabot-version-updates/configuration-options-for-the-dependabot.yml-file
-
 version: 2
 updates:
   # pyproject.toml and uv.lock. Ruff is also pinned in .pre-commit-config.yaml, which this doesn't update: keep it in step.
@@ -35,8 +30,8 @@ updates:
     directory: "/"
     schedule:
       interval: "weekly"
-  # vendor/countdown-api: a new commit of the API contract shows up as a PR, and the broker's build fails on it
-  # until every route it adds is implemented.
+  # vendor/countdown-api: a new commit of the store contract shows up as a PR, which tests/test_store_contract.py
+  # checks the broker against.
   - package-ecosystem: "gitsubmodule"
     directory: "/"
     schedule:
