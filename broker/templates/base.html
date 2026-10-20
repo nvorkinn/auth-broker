@@ -332,16 +332,19 @@
             display: flex;
             align-items: center;
             justify-content: space-between;
+            gap: 12px;
             padding: 12px 16px;
             background: #f8fafc;
             border: 1px solid var(--border);
             border-radius: 8px;
         }
 
+        /* The name and lines wrap, so a long one never pushes the buttons out of the card. */
         .stop-order {
             display: flex;
             align-items: center;
             gap: 12px;
+            min-width: 0;
         }
 
         .order-badge {
@@ -355,12 +358,33 @@
             align-items: center;
             justify-content: center;
             border-radius: 9999px;
+            flex-shrink: 0;
         }
 
         .stop-actions {
             display: flex;
             align-items: center;
             gap: 6px;
+            flex-shrink: 0;
+        }
+
+        @media (max-width: 600px) {
+            .stop-card {
+                gap: 8px;
+                padding: 10px 12px;
+            }
+
+            .stop-order {
+                gap: 8px;
+            }
+
+            .stop-actions {
+                gap: 4px;
+            }
+
+            .stop-actions .btn-action {
+                padding: 6px 8px;
+            }
         }
 
         .btn-action {
