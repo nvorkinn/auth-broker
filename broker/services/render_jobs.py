@@ -1,6 +1,6 @@
 """Jobs for the render pool: asking for a screen to be drawn now, rather than at the next minute's tick.
 
-pi-dashboard's render pool (its docs/stateless-renderers.md, "Config saves and bursts push jobs") draws a screen when a
+pi-dashboard's render pool (its docs/stateless-renderers.md, "What queues a render") draws a screen when a
 job for it is on `v1:render:jobs`. Its ticker queues every pooled screen on the minute; the broker and its providers
 queue one sooner when what it shows has just changed (the developer provider on each cycle of a release, so a pooled
 screen follows the release at the burst's pace).
