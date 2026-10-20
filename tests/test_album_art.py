@@ -39,7 +39,6 @@ def server():
 
 @pytest.fixture
 def store(server):
-    """Return the provider's client, which decodes replies."""
     return fakeredis.FakeRedis(server=server, decode_responses=True)
 
 
@@ -105,7 +104,7 @@ def test_a_cycle_stores_each_playing_tracks_cover_as_raw_bytes(art, binary, host
     ("sizes", "stored"),
     [
         ((640, 300, 64), 300),  # Spotify's: the next size up from 120, not the closer but smaller 64
-        ((64, 640, 300), 300),  # in whatever order
+        ((64, 640, 300), 300),
         ((300,), 300),  # Apple Music's one
         ((120, 300), 120),
         ((64, 32), 64),  # none tall enough: the tallest

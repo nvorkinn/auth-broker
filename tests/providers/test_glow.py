@@ -38,10 +38,7 @@ def add_device(app, device_id, *, username="me@example.com", password="hunter2",
 
 
 class FakeGlowmarkt:
-    """Glowmarkt answering as in the fixture, for any account but the ones told to fail.
-
-    A sign-in gets the fixture's token, or the next of `tokens`; a token in `expired` is refused with a 401.
-    """
+    """Glowmarkt answering as in the fixture, for any account but the ones told to fail."""
 
     def __init__(self, rsps):
         self.rsps = rsps
