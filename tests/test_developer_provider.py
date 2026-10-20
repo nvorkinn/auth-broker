@@ -69,8 +69,6 @@ def provider(provider_app, store):
 
 @pytest.fixture
 def device(app, register_device):
-    """Make a device with the developer panel on (and a GitHub token, by default); return its id."""
-
     def _make(*, enabled=True, token="github_pat_abc", secret="a-very-long-device-secret-1"):  # noqa: S107
         device_id, _ = register_device(secret)
         with app.app_context():
@@ -86,7 +84,6 @@ def device(app, register_device):
 
 
 def _run(provider, github=GITHUB):
-    """Run a cycle against a GitHub that answers with `github` (the Copilot plan as the fixture has it)."""
     with (
         patch("broker.clients.github.summary", return_value=github) as summary,
         patch("broker.clients.github.copilot_premium_requests", return_value=280),
@@ -139,7 +136,7 @@ def test_the_pace_is_withdrawn_once_the_release_is_off_the_panel(provider, store
 
 
 def _pool(store, *device_ids):
-    """List the screens in the render pool, as the broker does (services/render_screens.py)."""
+    """Put screens in the render pool, as services/render_screens.py does."""
     store.hset(SCREENS, mapping={device_id: f"screen-{device_id}" for device_id in device_ids})
 
 
@@ -301,7 +298,6 @@ def test_a_github_failure_writes_nothing_and_keeps_the_pace_of_a_running_release
         provider.run_cycle()
 
     assert store.get(stored_key(device_id)) == before
-    # One hiccup mid-release doesn't slow the polls down.
     assert provider.interval_s() == BURST_INTERVAL_S
 
 

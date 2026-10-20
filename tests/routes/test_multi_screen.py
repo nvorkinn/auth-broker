@@ -1,8 +1,4 @@
-"""Test that a user can own several screens.
-
-Each has its own pages at /device/<id>, /device alone is the one paired most recently, and nobody can
-reach a screen that isn't theirs.
-"""
+"""A user can own several screens: each has its own pages, and nobody else can reach them."""
 
 from unittest.mock import patch
 
@@ -20,7 +16,6 @@ OTHER_SECRET = "someone-elses-secret-0123456789"
 
 
 def _pair(app, client, secret):
-    """Register a screen, name it and pair the client's user with it by a code; return the device's id."""
     device_id = client.post("/api/devices/register", json={"secret": secret, "width": 480, "height": 800}).get_json()[
         "device_id"
     ]
@@ -39,7 +34,6 @@ def two_screens(app, client):
 
 @pytest.fixture
 def other_screen(app):
-    """Pair a screen to someone else: return its id."""
     stranger = app.test_client()
     stranger.environ_base["HTTP_X_AUTHENTIK_UID"] = "user-2"
     stranger.environ_base["HTTP_X_AUTHENTIK_USERNAME"] = "stranger"
