@@ -1,7 +1,8 @@
 """Registering screens.
 
-A screen becomes a device straight away: it exists from its first call, so its owner can pair with it and name it
-(services/assignments.py), after which the render pool draws it.
+A screen becomes a device straight away: it exists from its first call, so its owner can pair with it, with a code
+it shows the moment it registers (services/pairing.py), and name it (services/assignments.py). The render pool
+draws it from then on: its pairing screen first, then its dashboard.
 
 Secrets arrive already hashed (auth.hash_secret); the hash is what identifies the caller here.
 """
@@ -51,6 +52,8 @@ def register_screen(secret_hash: str, width: int, height: int) -> Registered | N
         return None
     device_id = _new_device(secret_hash, width, height)
     db.session.commit()
+    # So its screen shows a code to pair with by hand right away, if its owner isn't sent to /pair by WiFi setup.
+    pairing.issue_code(device_id)
     return Registered(device_id=device_id, created=True)
 
 

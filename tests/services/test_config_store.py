@@ -143,7 +143,9 @@ def test_a_save_queues_only_the_screens_whose_config_changed(app, store, nudges,
     client, device_id, _ = paired_client
     other_id, _ = register_device("another-very-long-device-secret")
     with app.app_context():
-        db.session.get(Device, other_id).paired_at = datetime.now(UTC)
+        other = db.session.get(Device, other_id)
+        other.paired_at = datetime.now(UTC)
+        other.pairing_codes.clear()  # as pairing does: the code it registered with is spent
         db.session.commit()
         config_store.publish_all()
     nudges()

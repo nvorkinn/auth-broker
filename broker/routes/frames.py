@@ -11,7 +11,7 @@ import requests
 from flask import Blueprint, Response, jsonify, request
 
 from broker.auth import require_device_auth
-from broker.services import frame_record, pace
+from broker.services import frame_record, pace, pairing
 
 if TYPE_CHECKING:
     from flask.typing import ResponseReturnValue
@@ -52,6 +52,8 @@ def post_frame(device_id: str) -> ResponseReturnValue:
     services/pace.py, the only place a sleep is worked out). It reports its logs and metrics here to save it a
     request; both are forwarded without making the screen wait.
     """
+    # A screen still waiting to be paired always has a code to show, however long its owner takes.
+    pairing.ensure_code(device_id)
     body = request.get_json(silent=True)
     if isinstance(body, dict):
         metrics, logs = body.get("metrics"), body.get("logs")

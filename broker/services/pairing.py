@@ -20,7 +20,7 @@ from sqlalchemy import delete, or_, select
 
 from broker.db import db
 from broker.models import Device, PairingCode
-from broker.services import assignments, device_keys, pairing_key, render_jobs
+from broker.services import assignments, device_keys, pairing_key, render_jobs, render_screens
 
 # Excludes visually ambiguous characters (0/O, 1/I/L) since this gets typed in by hand.
 CODE_ALPHABET = "".join(c for c in string.ascii_uppercase + string.digits if c not in "0O1IL")
@@ -101,9 +101,23 @@ def issue_code(device_id: str) -> str:
     db.session.commit()
     # For a screen the pool draws, which reads only the store; over the key of any code this one replaces.
     pairing_key.write(device_id, code, expires_at)
-    # And draws it now, after the key's written.
+    # A screen waiting to be paired is in the pool's list only while it has a code (this one, now), and is drawn
+    # at once if that just listed it.
+    render_screens.write()
+    # And draws it now, after the key's written, if it was listed already.
     render_jobs.enqueue(current_app.extensions["redis"], [device_id])
     return code
+
+
+def ensure_code(device_id: str) -> None:
+    """Issue the device a code if it is waiting to be paired and has none live, so its screen always shows one.
+
+    A code lapses after CODE_TTL and a screen may wait for its owner much longer, so the screen's own polls call this.
+    """
+    device = db.session.get(Device, device_id)
+    if device is None or device.paired_at is not None or live_code(device_id) is not None:
+        return
+    issue_code(device_id)
 
 
 def live_code(device_id: str) -> str | None:

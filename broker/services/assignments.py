@@ -64,7 +64,11 @@ def is_quiet(assignment: RendererAssignment, now: datetime) -> bool:
 
     The assignment must have a device.
     """
-    device = assignment.device
+    return screen_is_quiet(assignment.device, now, named_at=assignment.created_at)
+
+
+def screen_is_quiet(device: Device, now: datetime, *, named_at: datetime | None = None) -> bool:
+    """Whether the device has been unseen for SUSPEND_AFTER; `named_at` is when it was named, if it has been."""
     # A screen named while it was away isn't left out before it's ever drawn.
-    seen = max(filter(None, [device.display_last_seen_at, device.created_at, assignment.created_at]))
+    seen = max(filter(None, [device.display_last_seen_at, device.created_at, named_at]))
     return now - seen >= SUSPEND_AFTER
