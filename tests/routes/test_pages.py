@@ -361,10 +361,32 @@ def test_device_config_shows_resolved_stop_names(paired_client):
     html = response.get_data(as_text=True)
     assert "Euston" in html
     assert "Victoria" in html
-    # The card keeps the id to save the order with, but doesn't show London's ids.
+    # The card keeps the id to save the order with, but doesn't show it.
     assert 'data-id="940GZZLUEUS"' in html
     assert "NaPTAN" not in html
     assert "<code>940GZZLUEUS</code>" not in html
+
+
+def test_device_config_shows_a_norwegian_platform_without_its_id(paired_client):
+    client, _device_id, _ = paired_client
+    client.post("/device", data={"stops_order": "NSR:Quay:11145", "interval": "15"})
+
+    platform = {
+        "id": "NSR:Quay:11145",
+        "source": "entur",
+        "name": "Majorstuen",
+        "mode": "metro",
+        "letter": "",
+        "lines": ["1", "3"],
+        "indent": True,
+        "subtitle": "Platform 2 • 1, 3",
+    }
+    with patch("broker.services.stops.entur.resolve_stops", return_value={"NSR:Quay:11145": platform}):
+        html = client.get("/device").get_data(as_text=True)
+
+    assert "Platform 2" in html
+    assert 'data-id="NSR:Quay:11145"' in html
+    assert "<code>NSR:Quay:11145</code>" not in html
 
 
 def test_disconnect_removes_stored_token(app, paired_client):
