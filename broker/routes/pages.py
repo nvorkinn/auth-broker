@@ -129,13 +129,13 @@ def pair() -> ResponseReturnValue:
 
     A device that has just finished Wi-Fi setup sends its owner's browser here with a pairing token (?t=, or the URL
     fragment): the page waits for the device to register, then goes to its settings. Without a token it asks for the
-    code the device shows. A code in ?t= (or the fragment) is filled in and sent at once, through the same POST as a
-    typed one, so it's throttled the same.
+    code the device shows. A code in ?code= is filled in and sent at once, through the same POST as a typed one, so it's
+    throttled the same.
     """
     if request.method == "GET":
-        token = request.args.get("t", "")
-        code = token.strip().upper() if pairing.looks_like_code(token) else ""
-        return _render_pair(error=None, token=token, code=code)
+        code = request.args.get("code", "")
+        code = code.strip().upper() if pairing.looks_like_code(code) else ""
+        return _render_pair(error=None, token=request.args.get("t", ""), code=code)
 
     # Codes are guessable given enough tries, so wrong ones are throttled per IP; a locked-out IP is
     # refused even with the right code, or the lockout wouldn't slow guessing down.
@@ -167,14 +167,7 @@ def _too_many_attempts(retry_after: int) -> ResponseReturnValue:
 
 
 def _render_pair(error: str | None, token: str = "", code: str = "") -> str:
-    return render_template(
-        "pair.html",
-        error=error,
-        token=token,
-        code=code,
-        code_alphabet=pairing.CODE_ALPHABET,
-        code_length=pairing.CODE_LENGTH,
-    )
+    return render_template("pair.html", error=error, token=token, code=code)
 
 
 @bp.post("/pair/token")

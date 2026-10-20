@@ -5,7 +5,7 @@ There are two ways in:
 - A pairing token: a device that sends its owner's browser to /pair right after WiFi setup puts a
   token in the URL, derived from its secret (token_for), so the browser can pair with a device that
   hasn't registered yet by waiting for it. This is the main path.
-- A code: the device shows a short-lived code, which the user enters at /pair (or a link puts in ?t=,
+- A code: the device shows a short-lived code, which the user enters at /pair (or a link puts in ?code=,
   for the page to send as if typed). It's the fallback for when that redirect doesn't happen.
 """
 
@@ -121,7 +121,7 @@ def ensure_code(device_id: str) -> None:
 
 
 def looks_like_code(value: str) -> bool:
-    """Whether `value` has the shape of a code (any case, spaces around ignored), so /pair can tell one from a token."""
+    """Whether `value` has the shape of a code (any case, spaces around ignored), so /pair fills in nothing else."""
     value = value.strip().upper()
     return len(value) == CODE_LENGTH and all(c in CODE_ALPHABET for c in value)
 

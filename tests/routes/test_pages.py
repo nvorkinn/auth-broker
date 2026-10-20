@@ -92,18 +92,22 @@ def _prefilled_code(response):
 
 
 def test_pair_fills_in_a_code_given_in_the_link(client):
-    response = client.get("/pair?t=abc234")
+    response = client.get("/pair?code=abc234")
     assert response.status_code == 200
     assert _prefilled_code(response) == "ABC234"
 
 
-@pytest.mark.parametrize("t", ["", "a" * 64, "ABC12", "ABC2345", "ABCD0O", "<b>12"])
-def test_pair_fills_in_nothing_that_isnt_a_code(client, t):
-    assert _prefilled_code(client.get("/pair", query_string={"t": t})) == ""
+@pytest.mark.parametrize("code", ["", "a" * 64, "ABC12", "ABC2345", "ABCD0O", "<b>12"])
+def test_pair_fills_in_nothing_that_isnt_a_code(client, code):
+    assert _prefilled_code(client.get("/pair", query_string={"code": code})) == ""
+
+
+def test_pair_takes_the_code_only_from_code_not_t(client):
+    assert _prefilled_code(client.get("/pair?t=ABC234")) == ""
 
 
 def test_pair_sends_the_code_to_pair_itself_so_a_wrong_one_isnt_sent_again(client):
-    response = client.get("/pair?t=ABC234")
+    response = client.get("/pair?code=ABC234")
     assert b'action="/pair"' in response.data
 
 
@@ -111,7 +115,7 @@ def test_a_code_from_the_link_pairs_like_a_typed_one(app, client, register_devic
     device_id, _secret = register_device()
     code = _issue(app, device_id)
 
-    page = client.get(f"/pair?t={code.lower()}")
+    page = client.get(f"/pair?code={code.lower()}")
     response = client.post("/pair", data={"code": _prefilled_code(page)})
 
     assert response.status_code == 302
