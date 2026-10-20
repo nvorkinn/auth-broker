@@ -5,6 +5,7 @@ both repositories' tests read that file. The rest goes through the real routes a
 broker's Redis a fakeredis.
 """
 
+import json
 import threading
 from datetime import UTC, datetime, timedelta
 from unittest.mock import patch
@@ -15,8 +16,8 @@ import redis
 from countdown_api import fixtures
 
 from broker.db import db
-from broker.models import Device, DeviceConfig, RendererAssignment
-from broker.services import assignments, config_store, pairing, render_jobs, render_screens
+from broker.models import Device, DeviceConfig, PairingCode, RendererAssignment
+from broker.services import assignments, config_store, pairing, pairing_key, render_jobs, render_screens
 
 FIXTURE = fixtures.load("render_screens.json")
 SCREENS = FIXTURE["key"]
@@ -142,6 +143,59 @@ def test_an_unpaired_screen_is_listed_only_while_it_has_a_code_to_show(app, stor
     assert store.hgetall(SCREENS) == {}
 
 
+def test_a_new_screen_is_listed_under_its_id_while_it_has_a_code_and_no_name(app, store):
+    with app.app_context():
+        device = _add_screen("a1b2c3d4e5f6", "unused", paired=False)
+        db.session.delete(device.assignment)
+        db.session.commit()
+        render_screens.write()
+        assert store.hgetall(SCREENS) == {}  # no code to show
+
+        pairing.issue_code("a1b2c3d4e5f6")  # lists it itself
+
+    assert store.hgetall(SCREENS) == {"a1b2c3d4e5f6": "a1b2c3d4e5f6"}
+    assert "a1b2c3d4e5f6" in _jobs(store)
+
+
+def test_registering_a_screen_gives_it_a_code_the_pool_draws(app, store, client):
+    device_id = client.post(
+        "/api/devices/register", json={"secret": "display-secret-for-a-new-screen", "width": 480, "height": 800}
+    ).get_json()["device_id"]
+
+    assert store.hgetall(SCREENS) == {device_id: device_id}
+    assert json.loads(store.get(pairing_key.key(device_id)))["pairing_code"]
+    assert device_id in _jobs(store)
+
+
+def test_an_unpaired_screens_poll_brings_back_a_lapsed_code(app, store, client):
+    secret = "display-secret-for-a-waiting-screen"
+    device_id = client.post("/api/devices/register", json={"secret": secret, "width": 480, "height": 800}).get_json()[
+        "device_id"
+    ]
+    with app.app_context():
+        first = pairing.live_code(device_id)
+        for code in db.session.scalars(db.select(PairingCode)):
+            code.expires_at = datetime.now(UTC) - timedelta(seconds=1)
+        db.session.commit()
+        render_screens.write()
+        assert store.hgetall(SCREENS) == {}  # the code lapsed, and with it the pairing screen
+
+    client.post("/api/frame", headers=_headers(secret))
+
+    with app.app_context():
+        assert pairing.live_code(device_id) not in (None, first)
+    assert store.hgetall(SCREENS) == {device_id: device_id}
+
+
+def test_a_paired_screens_poll_issues_no_code(app, store, client, paired_client):
+    client, device_id, secret = paired_client
+
+    client.post("/api/frame", headers=_headers(secret))
+
+    with app.app_context():
+        assert pairing.live_code(device_id) is None
+
+
 def test_a_paired_screen_showing_a_code_stays_listed(app, store):
     # Its config isn't in the store while the code is live (renderer_config.for_store), but the code's key is.
     with app.app_context():
@@ -220,7 +274,8 @@ def test_pairing_names_the_screen_and_lists_and_draws_it_at_once(app, store, cli
     ]
     with app.app_context():
         token = db.session.get(Device, device_id).pairing_token
-    assert store.hgetall(SCREENS) == {}  # not paired yet
+    # Not paired yet, but it shows a code to pair with by hand: listed under its id, as naming it will make it.
+    assert store.hgetall(SCREENS) == {device_id: device_id}
 
     assert client.post("/pair/token", json={"token": token}).status_code == 200
 

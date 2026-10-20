@@ -6,7 +6,8 @@ of the pool's metrics), and drops a job for any other. The broker is the only on
 
 A screen is listed while the pool has something to draw for it:
 
-- it has been named (services/assignments.py), so it has a slug;
+- it has been named (services/assignments.py), so it has a slug; or it has a live pairing code, which a screen
+  waiting to be paired has and which is all it needs: its slug is its device id, as naming it will make it;
 - it has settings (a device_config row);
 - it's paired, so its config is in the store (services/config_store.py), or it has a live pairing code, whose key
   (services/pairing_key.py) the pool draws the pairing screen from;
@@ -34,7 +35,7 @@ from redis import Redis, RedisError
 from sqlalchemy import select
 
 from broker.db import db
-from broker.models import PairingCode, RendererAssignment
+from broker.models import Device, PairingCode
 from broker.services import assignments, render_jobs
 
 logger = logging.getLogger(__name__)
@@ -47,17 +48,18 @@ def listed(now: datetime) -> dict[str, str]:
     """Return the screens the pool is to draw as of `now`: their slugs by device id, from the database."""
     coded = set(db.session.scalars(select(PairingCode.device_id).where(PairingCode.expires_at > now)))
     screens: dict[str, str] = {}
-    for assignment in db.session.scalars(select(RendererAssignment)):
-        device = assignment.device
+    for device in db.session.scalars(select(Device)):
+        assignment = device.assignment
+        # Not named yet (a new screen, which is named when it's paired): its own id, which is what naming it gives it.
+        slug = assignment.slug if assignment is not None else device.device_id
         if (
-            device is None
-            or device.config is None
-            or (device.paired_at is None and device.device_id not in coded)
-            or not assignments.SLUG_RE.match(assignment.slug)
-            or assignments.is_quiet(assignment, now)
+            device.config is None
+            or ((device.paired_at is None or assignment is None) and device.device_id not in coded)
+            or not assignments.SLUG_RE.match(slug)
+            or assignments.screen_is_quiet(device, now, named_at=assignment.created_at if assignment else None)
         ):
             continue
-        screens[device.device_id] = assignment.slug
+        screens[device.device_id] = slug
     return screens
 
 
