@@ -43,9 +43,9 @@ def _broker_apps() -> dict[str, dict]:
 def _read_only_apps() -> dict[str, dict]:
     """Return the providers that read the database in provider_loop.read_only_app().
 
-    The glow-provider's module names it; the others run in provider_loop.serve(), which uses it.
+    The ones run in provider_loop.serve(), which uses it unless given broker.create_app (the music provider).
     """
-    return _providers("read_only_app", "provider_loop.serve")
+    return {name: s for name, s in _providers("provider_loop.serve").items() if name not in _broker_apps()}
 
 
 def test_the_services_that_start_an_app_are_found():

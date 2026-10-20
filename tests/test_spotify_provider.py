@@ -7,7 +7,6 @@ the rest of the covers' tests.
 """
 
 import json
-import threading
 import time
 from datetime import UTC, datetime
 from unittest.mock import Mock, patch
@@ -19,7 +18,7 @@ import responses
 from countdown_api import fixtures
 from sqlalchemy import select
 
-from broker import spotify_provider
+from broker import create_app, provider_loop, spotify_provider
 from broker.album_art import ART_TTL_S
 from broker.clients import spotify as spotify_client
 from broker.db import db
@@ -35,7 +34,6 @@ from broker.spotify_provider import (
     TOP_INTERVAL_S,
     TOP_TTL_S,
     MusicProvider,
-    next_tick,
     pace_key,
     player_key,
     top_key,
@@ -293,7 +291,7 @@ def test_a_failure_storing_the_covers_doesnt_cost_the_player(provider, store, de
 
     with (
         patch.object(provider.art, "keep", side_effect=ValueError("boom")),
-        patch.object(spotify_provider, "logger") as logger,
+        patch.object(provider, "logger") as logger,
     ):
         assert _run(provider) == 2
 
@@ -528,7 +526,7 @@ def test_redis_down_is_logged_and_tried_next_tick(app, store, device, caplog):
     # Patched rather than caplog: other tests (alembic's logging set-up) can leave loggers disabled.
     with (
         patch("broker.clients.spotify.requests.get", side_effect=FakeSpotify().get),
-        patch.object(spotify_provider, "logger") as logger,
+        patch.object(provider, "logger") as logger,
     ):
         provider._try_cycle()  # the loop's own error handling: it doesn't raise
 
@@ -540,30 +538,14 @@ def test_redis_down_is_logged_and_tried_next_tick(app, store, device, caplog):
     assert provider.store.get(top_key(device_id)) is not None
 
 
-def test_a_nudge_on_sub_changed_ends_the_wait_early(app, store):
-    provider = MusicProvider(app, store, clock=lambda: FETCHED_AT)
-    assert not provider._listen(0.01)  # subscribes; nothing published yet
+def test_main_runs_the_provider_in_the_brokers_own_app(monkeypatch):
+    """Not provider_loop's read-only one: it writes refreshed tokens and Apple Music's plays to the database."""
+    served = []
+    monkeypatch.setattr(provider_loop, "serve", lambda *args: served.append(args))
 
-    store.publish(spotify_provider.SUB_CHANGED, "")
+    spotify_provider.main()
 
-    assert provider._listen(0.5)
-
-
-def test_stop_ends_the_wait(app, store):
-    """Within a second, though the next tick is most of a minute away."""
-    provider = MusicProvider(app, store, clock=lambda: FETCHED_AT + 1)
-    threading.Timer(0.1, provider.stop).start()
-
-    started = time.monotonic()
-    provider._wait_for_next_cycle()
-
-    assert time.monotonic() - started < 2
-
-
-def test_ticks_are_epoch_aligned():
-    assert next_tick(120.0, 60) == 180.0
-    assert next_tick(179.9, 60) == 180.0
-    assert datetime.fromtimestamp(next_tick(FETCHED_AT + 1, 60), UTC).second == 0
+    assert served == [(MusicProvider, create_app)]
 
 
 @pytest.mark.parametrize(("headers", "wait"), [({"Retry-After": "120"}, 120), ({}, spotify_provider.DEFAULT_BACKOFF_S)])
@@ -574,7 +556,7 @@ def test_a_429_stops_all_spotify_calls_until_retry_after(app, store, device, hea
     provider = MusicProvider(app, store, clock=lambda: now[0])
     throttled = FakeSpotify(top_429=headers)
 
-    with patch.object(spotify_provider, "logger") as logger:
+    with patch.object(provider, "logger") as logger:
         _run(provider, throttled)
     logger.warning.assert_called_once_with(
         "Music: %s is rate-limiting the app (429); calling it again in %ds", "spotify", wait

@@ -35,7 +35,7 @@ STARTED = {
     "auth-broker": "http://127.0.0.1:5000/about",
     "spotify-provider": "Starting the music provider",
     "developer-provider": "Starting the developer provider",
-    "glow-provider": "Fetching Glowmarkt readings",
+    "glow-provider": "Starting the glow provider",
 }
 
 # Stand-ins for what deploy.sh decrypts into each env_file on the host: the secrets broker.create_app() and

@@ -432,9 +432,18 @@ def test_stop_ends_the_wait(app, store):
     threading.Timer(0.1, provider.stop).start()
 
     started = time.monotonic()
-    provider._wait_for_next_cycle()
+    assert provider._wait_for_next_cycle() is False
 
     assert time.monotonic() - started < 2
+
+
+def test_the_wait_says_when_a_message_ended_it(app, store):
+    """So the next cycle knows it was nudged (provider_loop.ProviderLoop.nudged)."""
+    provider = DeveloperProvider(app, store, clock=lambda: FETCHED_AT + 1)
+    provider._listen(0.01)  # subscribes
+    store.publish(SUB_CHANGED, "")
+
+    assert provider._wait_for_next_cycle() is True
 
 
 def test_ticks_are_epoch_aligned_at_the_current_interval(app, store):

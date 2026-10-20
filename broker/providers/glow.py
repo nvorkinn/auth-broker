@@ -2,23 +2,16 @@
 
     python -m broker.providers.glow
 
-It runs in provider_loop.read_only_app() and decrypts the Glowmarkt passwords itself, so they never leave the broker.
-Each device's readings go to `v1:energy:<device id>`: Glowmarkt's own answers in a thin wrapper (countdown-api's
-StoredEnergy).
+It runs on provider_loop's loop, in read_only_app(), and decrypts the Glowmarkt passwords itself, so they never leave
+the broker. Each device's readings go to `v1:energy:<device id>`: Glowmarkt's own answers in a thin wrapper
+(countdown-api's StoredEnergy).
 
-Its loop is its own: a cycle at once, then on every epoch-aligned tick of INTERVAL_S, or sooner on `v1:sub:changed`,
-when only accounts new or changed since the last tick are fetched. A device that fails is logged and skipped (its key
-expires if it keeps failing); an unreachable Redis is logged and tried again on the next tick. SIGTERM and SIGINT stop
-it between devices.
+A cycle runs every INTERVAL_S; one started early by `v1:sub:changed` only fetches the accounts new or changed since the
+last tick. A device that fails is logged and skipped (its key expires if it keeps failing).
 """
 
-import contextlib
 import json
 import logging
-import os
-import signal
-import sys
-import threading
 import time
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -29,14 +22,13 @@ import redis
 from countdown_api import keys as store_keys
 from cryptography.fernet import InvalidToken
 from sqlalchemy import select
-from sqlalchemy.exc import SQLAlchemyError
 
+from broker import provider_loop
 from broker.clients.glowmarkt import DAILY, HOURLY, MONTHLY, PERIODS, GlowmarktAccount, local_now, utc_offset_param
 from broker.clients.glowmarkt import window_start as page_window_start
 from broker.db import db
-from broker.log_format import JsonFormatter
 from broker.models import DeviceConfig, GlowmarktCredentials
-from broker.provider_loop import read_only_app
+from broker.provider_loop import ProviderLoop
 from broker.services.postcodes import postcode_country
 from broker.services.renderer_config import timezone
 
@@ -45,10 +37,10 @@ if TYPE_CHECKING:
 
     from flask import Flask
 
-logger = logging.getLogger("broker.providers.glow")
+# The name ProviderLoop gives the provider's own logger, so the module's lines and the loop's go under one name.
+logger = logging.getLogger("broker.glow_provider")
 
 SOURCE = store_keys.GLOW
-SUB_CHANGED = store_keys.SUB_CHANGED
 # Glowmarkt has a new half-hour's reading at most every 30 minutes (DCC data often lags by hours): every 15 minutes
 # keeps the open hour's bar within a quarter of an hour, at three readings requests per device.
 INTERVAL_S = 15 * 60
@@ -56,8 +48,6 @@ INTERVAL_S = 15 * 60
 # without a fetch the key is gone and the energy panel says it's not available. The renderers keep no copy, so this
 # is the only expiry.
 TTL_S = store_keys.ENERGY_TTL_S
-# How long to wait before asking Redis again for the nudges, when it can't be reached.
-RESUBSCRIBE_S = 5
 # The renderer's default zone when its config has none (the countdown-api contract's).
 DEFAULT_ZONE = "Europe/London"
 
@@ -130,8 +120,10 @@ def stored_value(account: Account, glow: GlowmarktAccount, now: datetime) -> dic
     }
 
 
-class GlowProvider:
-    """The loop: fetch every account's readings, write them with a TTL, wait for the next tick or a nudge."""
+class GlowProvider(ProviderLoop):
+    """Fetches every account's readings each cycle and writes them with a TTL."""
+
+    label = "Glow"
 
     def __init__(  # noqa: PLR0913 -- the clocks and the Glowmarkt client are there for the tests
         self,
@@ -144,36 +136,31 @@ class GlowProvider:
         now: Callable[[], datetime] = lambda: datetime.now(UTC),
         new_account: Callable[[str, str], GlowmarktAccount] = GlowmarktAccount,
     ) -> None:
-        """Read accounts with `app`, write to `store`; `clock` (epoch seconds) times the ticks, `now` dates the data."""
-        self.app = app
-        self.store = store
-        self.interval_s = interval_s
+        """See ProviderLoop; `now` dates the data, and `new_account` signs in to Glowmarkt."""
+        super().__init__(app, store, clock)
+        self._interval_s = interval_s
         self.ttl_s = ttl_s
-        self.clock = clock
         self.now = now
         self.new_account = new_account
-        self.stopping = threading.Event()
         # Kept between cycles, so a token is reused until Glowmarkt refuses it. By device id.
         self._glow: dict[str, GlowmarktAccount] = {}
         # The accounts written since the last tick, which a nudge needn't fetch again.
         self._written: set[Account] = set()
-        self._pubsub: redis.client.PubSub | None = None
 
-    def stop(self, *_: object) -> None:
-        """Stop after the device being fetched. The SIGTERM and SIGINT handler."""
-        self.stopping.set()
+    def interval_s(self) -> float:
+        """Return how far apart the ticks are: INTERVAL_S unless the tests say otherwise."""
+        return self._interval_s
 
-    def run_cycle(self, *, nudged: bool = False) -> int:
+    def run_cycle(self) -> int:
         """Fetch and write every account's readings, and return how many were written.
 
         A nudged cycle (a config was saved) only fetches accounts that are new or changed since the last tick.
         """
-        try:
-            with self.app.app_context():
-                wanted = accounts()
-        except SQLAlchemyError:
-            logger.warning("Couldn't read the Glowmarkt accounts; trying again next tick", exc_info=True)
-            return 0
+        if not self.nudged:
+            self._written.clear()
+        # A database that can't be read fails the cycle, which the loop logs.
+        with self.app.app_context():
+            wanted = accounts()
         # Forget devices that are gone, and accounts whose credentials changed.
         self._glow = {a.device_id: self._glow[a.device_id] for a in wanted if self._is_current(a)}
         self._written &= set(wanted)
@@ -181,9 +168,9 @@ class GlowProvider:
         values = {}
         written = []
         for account in wanted:
-            if self.stopping.is_set():
+            if self._stopping.is_set():
                 break
-            if nudged and account in self._written:
+            if self.nudged and account in self._written:
                 continue
             glow = self._glow.get(account.device_id)
             if glow is None:
@@ -212,62 +199,10 @@ class GlowProvider:
         glow = self._glow.get(account.device_id)
         return glow is not None and (glow.username, glow.password) == (account.username, account.password)
 
-    def serve(self) -> None:
-        """Run cycles until stopped: on every tick of the interval, and whenever the subscriptions change."""
-        logger.info("Fetching Glowmarkt readings every %ds, kept for %ds", self.interval_s, self.ttl_s)
-        nudged = False
-        while not self.stopping.is_set():
-            if not nudged:
-                self._written.clear()
-            self.run_cycle(nudged=nudged)
-            next_tick = (self.clock() // self.interval_s + 1) * self.interval_s
-            nudged = self._wait(next_tick)
-        self._unsubscribe()
-        logger.info("Stopped")
-
-    def _wait(self, deadline: float) -> bool:
-        """Wait until `deadline` (epoch seconds), a nudge on `v1:sub:changed` or a stop; return whether nudged."""
-        while not self.stopping.is_set():
-            remaining = deadline - self.clock()
-            if remaining <= 0:
-                return False
-            try:
-                if self._pubsub is None:
-                    self._pubsub = self.store.pubsub(ignore_subscribe_messages=True)
-                    self._pubsub.subscribe(SUB_CHANGED)
-                # At most a second at a time, so a stop is seen promptly.
-                if self._pubsub.get_message(timeout=min(remaining, 1.0)) is not None:
-                    logger.debug("Subscriptions changed")
-                    return True
-            except redis.RedisError:
-                logger.debug("Can't listen for subscription changes", exc_info=True)
-                self._unsubscribe()
-                self.stopping.wait(min(remaining, RESUBSCRIBE_S))
-        return False
-
-    def _unsubscribe(self) -> None:
-        if self._pubsub is not None:
-            with contextlib.suppress(redis.RedisError):
-                self._pubsub.close()
-            self._pubsub = None
-
 
 def main() -> None:
     """Run the glow-provider until SIGTERM or SIGINT."""
-    handler = logging.StreamHandler(sys.stdout)
-    handler.setFormatter(JsonFormatter())
-    logging.basicConfig(level=os.environ.get("LOG_LEVEL", "INFO").upper(), handlers=[handler])
-    store = redis.Redis.from_url(
-        os.environ.get("REDIS_URL", "redis://127.0.0.1:6379/0"),
-        password=os.environ.get("REDIS_PASSWORD") or None,
-        decode_responses=True,
-        socket_timeout=5,
-        socket_connect_timeout=5,
-    )
-    provider = GlowProvider(read_only_app(), store)
-    signal.signal(signal.SIGTERM, provider.stop)
-    signal.signal(signal.SIGINT, provider.stop)
-    provider.serve()
+    provider_loop.serve(GlowProvider)
 
 
 if __name__ == "__main__":
