@@ -30,7 +30,7 @@ def source_of(stop_id: str) -> str:
 def resolve(stop_ids: list[str]) -> list[dict[str, Any]]:
     """Return what the settings page shows for each saved stop, in order.
 
-    Any its source couldn't describe gets a placeholder.
+    A stop its source couldn't describe gets a placeholder.
     """
     entur_stops = entur.resolve_stops([s for s in stop_ids if source_of(s) == "entur"])
     tfl_stops = iter(tfl.resolve_stops([s for s in stop_ids if source_of(s) == "tfl"]))
