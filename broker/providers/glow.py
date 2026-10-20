@@ -40,7 +40,6 @@ if TYPE_CHECKING:
 # The name ProviderLoop gives the provider's own logger, so the module's lines and the loop's go under one name.
 logger = logging.getLogger("broker.glow_provider")
 
-SOURCE = store_keys.GLOW
 # Glowmarkt has a new half-hour's reading at most every 30 minutes (DCC data often lags by hours): every 15 minutes
 # keeps the open hour's bar within a quarter of an hour, at three readings requests per device.
 INTERVAL_S = 15 * 60
