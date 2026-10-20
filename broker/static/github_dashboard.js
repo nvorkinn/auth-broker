@@ -124,6 +124,19 @@ function checkList(checks) {
     return list;
 }
 
+// The Claude Code session that opened the PR: claude:// opens it in the Claude app, and the claude.ai link is the
+// fallback, which the phone apps also open as a universal link.
+function sessionLinks(session) {
+    const links = element("p", undefined, "session-links");
+    const app = element("a", "Open in Claude", "session-app");
+    app.href = `claude://code/${session}`;
+    app.title = "Open the Claude Code session behind this PR in the Claude app";
+    const web = link("web", `https://claude.ai/code/${session}`);
+    web.title = "Open the session on claude.ai";
+    links.append(app, document.createTextNode(" · "), web);
+    return links;
+}
+
 function renderPull(pr, project) {
     const row = element("article", undefined, "pull");
     row.dataset.key = `${project.repo.full_name}#${pr.number}`;
@@ -132,6 +145,7 @@ function renderPull(pr, project) {
     title.className = "pull-title";
     identity.append(element("span", project.repo.full_name, "repo-label"), title,
         element("p", `${pr.author} · ${pr.head} → ${pr.base}`, "pull-meta"));
+    if (/^session_[A-Za-z0-9]+$/.test(pr.session || "")) identity.append(sessionLinks(pr.session));
     const readiness = element("div", undefined, "readiness");
     if (pr.draft) readiness.append(badge("Draft"));
     readiness.append(pr.mergeable === false

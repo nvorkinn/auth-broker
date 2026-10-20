@@ -37,6 +37,9 @@ button:focus-visible, a:focus-visible, summary:focus-visible { outline: 2px soli
 .pull { display: grid; grid-template-columns: minmax(0, 1fr) 116px minmax(0, .9fr); gap: 10px; padding: 10px 12px; border-bottom: 1px solid var(--border); align-items: start; }
 .pull:last-child { border-bottom: 0; }
 .pull-identity, .pull-checks { min-width: 0; }
+.session-links { margin-top: 4px; font-size: 11px; color: var(--muted); }
+.session-app { display: inline-block; color: var(--text); background: #223047; border: 1px solid #405475; border-radius: 5px; padding: 1px 7px; text-decoration: none; }
+.session-app:hover { border-color: #8abaff; }
 .repo-label { display: block; font-size: 11px; color: var(--muted); margin-bottom: 2px; }
 .pull-title { display: block; font-weight: 600; }
 .pull-meta { color: var(--muted); font-size: 11px; margin-top: 3px; overflow-wrap: anywhere; }

@@ -37,6 +37,8 @@ PAGE_SIZE = 100
 FAILED = {"failure", "timed_out", "startup_failure"}
 # A workflow is a release if its name says so.
 RELEASE = re.compile(r"release|deploy", re.IGNORECASE)
+# PRs opened by a Claude Code session end their description with a link to it.
+CLAUDE_SESSION = re.compile(r"https://claude\.ai/code/(session_[A-Za-z0-9]+)")
 # Runs started this recently are looked through for a release: one takes minutes, so this is plenty.
 RECENT_RUNS = timedelta(hours=6)
 # A finished release stays on the screen this long, so its result is seen. The developer provider keeps the fast pace
@@ -232,6 +234,12 @@ def _release(session: requests.Session, repo: dict, now: datetime) -> dict | Non
         "finished": run["updated_at"] if finished else None,
         "jobs": workflow_graph.nodes(_workflow_jobs(session, repo, run), jobs),
     }
+
+
+def _claude_session(body: str | None) -> str | None:
+    """Return the ID of the Claude Code session a PR description links to last, if any."""
+    sessions = CLAUDE_SESSION.findall(body or "")
+    return sessions[-1] if sessions else None
 
 
 def _is_release(run: dict) -> bool:
@@ -476,6 +484,7 @@ class Dashboard:
             "mergeable": pr["mergeable"],
             "merge_state": pr["mergeable_state"],
             "created_at": pr["created_at"],
+            "session": _claude_session(pr.get("body")),
             "checks": checks,
             "refresh": pr["mergeable"] is None or any(check["pending"] for check in checks),
         }
