@@ -6,7 +6,7 @@ readings to `v1:energy:<device id>` with a TTL, so the passwords never leave the
 (pi-dashboard's GlowClient) draw the energy panel from there; standalone ones still call Glowmarkt with the
 credentials in their config.
 
-The value is Glowmarkt's own answers, as they came, in a thin wrapper (see "The energy provider" in the README):
+The value is Glowmarkt's own answers, as they came, in a thin wrapper (countdown-api's StoredEnergy):
 
     {"fetched_at": <ISO 8601, UTC>, "device_id": ..., "offset": <Glowmarkt's offset param, e.g. "-60">,
      "resource_id": ..., "hourly": <readings, PT1H>, "daily": <readings, P1D>, "monthly": <readings, P1M>}

@@ -71,9 +71,9 @@ services:
       SPOTIFY_REDIRECT_URI: https://auth.nikolaivorkinn.com/auth/spotify/callback
 
   # The music provider: what each screen's Spotify and Apple Music are playing, written to Redis for the renderers
-  # (see "Music in the store" in the README). The broker's image and settings, as it uses the broker's database and
-  # Spotify code (and writes refreshed tokens back to it). Deployed with the broker (deploy.sh's auth-broker), on the
-  # same AUTH_BROKER_VERSION.
+  # (the keys are in the countdown-api store contract). The broker's image and settings, as it uses the broker's
+  # database and Spotify code (and writes refreshed tokens back to it). Deployed with the broker (deploy.sh's
+  # auth-broker), on the same AUTH_BROKER_VERSION.
   spotify-provider:
     <<: *release-image
     image: ghcr.io/nvorkinn/auth-broker:${AUTH_BROKER_VERSION:-latest}
