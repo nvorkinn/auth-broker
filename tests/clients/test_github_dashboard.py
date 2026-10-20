@@ -105,6 +105,21 @@ def test_owned_repository_rechecks_access(api, repo):
         api.owned_repository("alice", "project")
 
 
+@pytest.mark.parametrize(
+    ("body", "session"),
+    [
+        (None, None),
+        ("No link here.", None),
+        ("See https://claude.ai/code/project/chan_01X?thread=cmsg_01Y", None),
+        ("https://claude.ai/code/session_01Abc?x=1", "session_01Abc"),
+        ("Written by https://claude.ai/code/session_01Abc.", "session_01Abc"),
+        ("https://evil.example/claude.ai/code/session_01Abc", None),
+    ],
+)
+def test_a_pr_links_its_claude_session_only_from_a_claude_ai_url(body, session):
+    assert github._claude_session(body) == session
+
+
 def test_a_closed_pull_request_reads_as_none_and_is_left_out(api):
     api.get = Mock(return_value={"state": "closed"})
     assert api.pull("/repos/alice/project", 7) is None
@@ -127,6 +142,7 @@ def test_pull_checks_include_paginated_checks_and_latest_legacy_statuses(api):
             "mergeable": False,
             "mergeable_state": "dirty",
             "created_at": "2026-10-19T08:00:00Z",
+            "body": "Change.\n\nhttps://claude.ai/code/session_01Old\n\nhttps://claude.ai/code/session_01Fwmw2krp",
             "state": "open",
         },
     )
@@ -144,6 +160,7 @@ def test_pull_checks_include_paginated_checks_and_latest_legacy_statuses(api):
     pr = api.pull(path, 7)
     assert pr["mergeable"] is False
     assert pr["created_at"] == "2026-10-19T08:00:00Z"
+    assert pr["session"] == "session_01Fwmw2krp"
     assert len(pr["checks"]) == 103
     assert pr["refresh"] is True
     assert [check["state"] for check in pr["checks"][-2:]] == ["success", "pending"]

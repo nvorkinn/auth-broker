@@ -207,6 +207,22 @@ test("PRs from all repositories share one list with repository labels, newest fi
     assert.equal(app.ids.get("projects").querySelectorAll("button").length, 2, "one New Release per project");
 });
 
+test("a PR opened by a Claude session links to it in the app and on the web; others have no link", async () => {
+    const app = await harness({ ...idle, pulls: [
+        { ...active.pulls[0], session: "session_01Abc" },
+        { ...active.pulls[0], number: 5, session: null },
+        { ...active.pulls[0], number: 6, session: "javascript:alert(1)" },
+    ] });
+    const rows = app.ids.get("pulls").children;
+    const links = rows.map(row => row.querySelectorAll(".session-links"));
+    assert.deepEqual(links.map(found => found.length), [1, 0, 0]);
+    const [open, , web] = links[0][0].children;
+    assert.equal(open.href, "claude://code/session_01Abc");
+    assert.equal(open.target, undefined);
+    assert.equal(web.href, "https://claude.ai/code/session_01Abc");
+    assert.equal(web.target, "_blank");
+});
+
 test("completed check details stay inline and open across refreshes; completed-only rows are compact", async () => {
     const checks = [{ name: "Tests", state: "success", pending: false, url: "https://github.com/check/1" }];
     const app = await harness({ ...idle, pulls: [{ ...active.pulls[0], mergeable: true, checks }] });
