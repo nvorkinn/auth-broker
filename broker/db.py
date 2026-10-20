@@ -7,10 +7,11 @@ from pathlib import Path
 from typing import TYPE_CHECKING, override
 
 from alembic import command
+from alembic.script import ScriptDirectory
 from flask import current_app
 from flask_migrate import Migrate
 from flask_sqlalchemy import SQLAlchemy
-from sqlalchemy import DateTime, event
+from sqlalchemy import DateTime, event, inspect, text
 from sqlalchemy.orm import DeclarativeBase
 from sqlalchemy.types import TypeDecorator
 
@@ -62,15 +63,30 @@ def _enable_foreign_keys(dbapi_conn: sqlite3.Connection, _record: ConnectionPool
     dbapi_conn.execute("PRAGMA foreign_keys = ON")
 
 
+def _applied_revisions() -> set[str]:
+    """Return the revisions the DB is at, read straight from alembic_version; needs an app context.
+
+    Not through Alembic's MigrationContext, which logs two INFO lines ("Context impl SQLiteImpl.") each time it is
+    built.
+    """
+    with db.engine.connect() as conn:
+        if not inspect(conn).has_table("alembic_version"):
+            return set()
+        return set(conn.execute(text("SELECT version_num FROM alembic_version")).scalars())
+
+
 def upgrade_db() -> None:
     """Bring the DB to the latest revision, under a file lock; needs an app context.
 
     Same as `flask db upgrade`, except it leaves logging alone: env.py's logging setup would silence the app's own
-    logger.
+    logger. A DB already at head is left alone, so starting the app (every `flask` command does) logs nothing from
+    Alembic unless a migration actually runs.
     """
     with Path(f"{_db_path()}.migrate.lock").open("a") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
         config = current_app.extensions["migrate"].migrate.get_config()
+        if _applied_revisions() == set(ScriptDirectory.from_config(config).get_heads()):
+            return
         config.attributes["app_startup"] = True
         command.upgrade(config, "head")
 
