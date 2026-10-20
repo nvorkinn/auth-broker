@@ -101,7 +101,7 @@ def repositories() -> ResponseReturnValue:
 @bp.get("/repositories/<owner>/<name>")
 @dashboard_view
 def project(owner: str, name: str) -> ResponseReturnValue:
-    """Read a project's PRs and unfinished Actions runs, or only one of the two."""
+    """Read a project's PRs and release runs, or only one of the two."""
     known = request.args.get("runs", "").split(",") if request.args.get("runs") else []
     if len(known) > MAX_KNOWN_RUNS or not all(run.isascii() and run.isdecimal() and int(run) > 0 for run in known):
         return jsonify(error="Invalid workflow run IDs."), 400
@@ -118,7 +118,7 @@ def project(owner: str, name: str) -> ResponseReturnValue:
 @bp.get("/repositories/<owner>/<name>/runs/<run_id>")
 @dashboard_view
 def run(owner: str, name: str, run_id: str) -> ResponseReturnValue:
-    """Read one release run's current state, for the Refresh button on a running workflow."""
+    """Read one release run's current state, for quick polling and the Refresh button on a running workflow."""
     if not run_id.isascii() or not run_id.isdecimal() or int(run_id) <= 0:
         return jsonify(error="Invalid workflow run ID."), 400
     api = github.Dashboard(current_app.config["GITHUB_DASHBOARD_TOKEN"], current_app.extensions["redis"])
@@ -129,6 +129,23 @@ def run(owner: str, name: str, run_id: str) -> ResponseReturnValue:
     if workflow is None:
         return jsonify(error="This release workflow run no longer exists."), 404
     return jsonify(workflow=workflow)
+
+
+@bp.get("/repositories/<owner>/<name>/pulls/<number>")
+@dashboard_view
+def pull(owner: str, name: str, number: str) -> ResponseReturnValue:
+    """Read one open PR's checks and mergeability, for quick polling while it is busy."""
+    if not number.isascii() or not number.isdecimal() or int(number) <= 0:
+        return jsonify(error="Invalid pull request number."), 400
+    api = github.Dashboard(current_app.config["GITHUB_DASHBOARD_TOKEN"], current_app.extensions["redis"])
+    try:
+        repo = api.owned_repository(owner, name)
+        found = api.pull(f"/repos/{repo['full_name']}", int(number))
+    finally:
+        api.close()
+    if found is None:
+        return jsonify(error="This pull request is no longer open."), 404
+    return jsonify(pull=found)
 
 
 @bp.post("/repositories/<owner>/<name>/release")

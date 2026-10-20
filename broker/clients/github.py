@@ -362,7 +362,7 @@ class Dashboard:
     def project(self, repo: dict, known: Iterable[int] = (), section: str = "all") -> dict:
         """Return a project's open PRs and/or unfinished release workflows, without a recency cutoff.
 
-        A section's key is only present when it was read, and "active" covers only the sections read.
+        A section's key is only present when it was read.
         """
         path = f"/repos/{repo['full_name']}"
         sections = {
@@ -370,22 +370,17 @@ class Dashboard:
             "workflows": lambda: self.release_workflows(repo, known),
         }
         wanted = list(sections) if section == "all" else [section]
-        result = {}
-        active = False
-        for name, (items, busy) in zip(wanted, _parallel(sections[name] for name in wanted), strict=True):
-            result[name] = items
-            active = active or busy
-        return {**result, "active": active}
+        return dict(zip(wanted, _parallel(sections[name] for name in wanted), strict=True))
 
-    def pulls(self, path: str) -> tuple[list[dict], bool]:
-        """Return every open PR with its checks, and whether any is still changing."""
+    def pulls(self, path: str) -> list[dict]:
+        """Return every open PR with its checks, leaving out any that closed while being read."""
         pulls = _parallel(
             [lambda number=pr["number"]: self.pull(path, number) for pr in self.pages(f"{path}/pulls", state="open")]
         )
-        return pulls, any(pr["refresh"] for pr in pulls)
+        return [pr for pr in pulls if pr is not None]
 
-    def release_workflows(self, repo: dict, known: Iterable[int] = ()) -> tuple[list[dict], bool]:
-        """Return every unfinished release run drawn as a graph, and whether any run (release or not) is unfinished."""
+    def release_workflows(self, repo: dict, known: Iterable[int] = ()) -> list[dict]:
+        """Return every unfinished release run drawn as a graph, then the latest finished one."""
         path = f"/repos/{repo['full_name']}"
         # Query each unfinished status: a first page of recent runs would hide old approval waits.
         # One after another and in lifecycle order, so a run that moves on during the sweep (say, just approved) is
@@ -399,14 +394,13 @@ class Dashboard:
         for run in _parallel([lambda run_id=run_id: self.run(path, run_id) for run_id in missed]):
             if run:
                 runs[run["id"]] = run
-        ongoing = [run for run in runs.values() if run["status"] != "completed"]
-        shown = [run for run in ongoing if _is_release(run)]
+        shown = [run for run in runs.values() if run["status"] != "completed" and _is_release(run)]
         # The latest finished release stays too, so its outcome is still there after looking away. A run rechecked
         # by ID may have finished more recently than the per-workflow lists say yet.
         finished = [run for run in runs.values() if run["status"] == "completed" and _is_release(run)]
         if latest := max([*finished, *self.finished_releases(path)], key=lambda run: run["id"], default=None):
             shown.append(latest)
-        return _parallel([lambda run=run: self.workflow(repo, run) for run in shown]), bool(ongoing)
+        return _parallel([lambda run=run: self.workflow(repo, run) for run in shown])
 
     def finished_releases(self, path: str) -> list[dict]:
         """Return the latest finished run of each release workflow."""
@@ -437,9 +431,11 @@ class Dashboard:
                 return None
             raise
 
-    def pull(self, path: str, number: int) -> dict:
-        """Read mergeability and both Checks API and legacy commit-status checks for the exact PR head."""
+    def pull(self, path: str, number: int) -> dict | None:
+        """Read mergeability and both Checks API and legacy commit-status checks for an open PR head; None if closed."""
         pr = self.get(f"{path}/pulls/{number}")
+        if pr["state"] != "open":
+            return None
         sha = pr["head"]["sha"]
         check_runs, status_list = _parallel(
             [

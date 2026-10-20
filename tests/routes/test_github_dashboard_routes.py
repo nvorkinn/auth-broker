@@ -41,8 +41,8 @@ def test_repositories_and_project(client, dashboard):
     dashboard.repositories.return_value = [{"full_name": "alice/project"}]
     assert client.get("/github/repositories").json == {"repositories": [{"full_name": "alice/project"}]}
     dashboard.owned_repository.return_value = {"full_name": "alice/project"}
-    dashboard.project.return_value = {"pulls": [], "workflows": [], "active": False}
-    assert client.get("/github/repositories/alice/project").json["active"] is False
+    dashboard.project.return_value = {"pulls": [], "workflows": []}
+    assert client.get("/github/repositories/alice/project").json == {"pulls": [], "workflows": []}
     dashboard.owned_repository.assert_called_once_with("alice", "project")
     assert dashboard.project.call_args.args[1] == []
     dashboard.close.assert_called()
@@ -50,7 +50,7 @@ def test_repositories_and_project(client, dashboard):
 
 @pytest.mark.parametrize("section", ["pulls", "workflows"])
 def test_project_can_read_one_section(client, dashboard, section):
-    dashboard.project.return_value = {section: [], "active": False}
+    dashboard.project.return_value = {section: []}
     assert client.get("/github/repositories/alice/project", query_string={"section": section}).status_code == 200
     assert dashboard.project.call_args.args[2] == section
 
@@ -61,7 +61,7 @@ def test_project_rejects_unknown_sections(client, dashboard):
 
 
 def test_project_passes_previously_shown_runs(client, dashboard):
-    dashboard.project.return_value = {"pulls": [], "workflows": [], "active": True}
+    dashboard.project.return_value = {"pulls": [], "workflows": []}
     assert client.get("/github/repositories/alice/project?runs=7,12").status_code == 200
     assert dashboard.project.call_args.args[1] == [7, 12]
 
@@ -204,3 +204,23 @@ def test_a_run_that_is_gone_or_not_a_release_is_not_found(client, dashboard):
 def test_reading_a_run_validates_its_id(client, dashboard, run_id):
     assert client.get(f"/github/repositories/alice/project/runs/{run_id}").status_code == 400
     dashboard.release_run.assert_not_called()
+
+
+def test_one_pull_request_is_read_for_quick_polling(client, dashboard):
+    dashboard.owned_repository.return_value = {"full_name": "alice/project"}
+    dashboard.pull.return_value = {"number": 7, "refresh": True}
+    assert client.get("/github/repositories/alice/project/pulls/7").json == {"pull": {"number": 7, "refresh": True}}
+    dashboard.pull.assert_called_once_with("/repos/alice/project", 7)
+    dashboard.close.assert_called()
+
+
+def test_a_closed_pull_request_is_not_found(client, dashboard):
+    dashboard.owned_repository.return_value = {"full_name": "alice/project"}
+    dashboard.pull.return_value = None
+    assert client.get("/github/repositories/alice/project/pulls/7").status_code == 404
+
+
+@pytest.mark.parametrize("number", ["0", "-1", "abc"])
+def test_reading_a_pull_request_validates_its_number(client, dashboard, number):
+    assert client.get(f"/github/repositories/alice/project/pulls/{number}").status_code == 400
+    dashboard.pull.assert_not_called()

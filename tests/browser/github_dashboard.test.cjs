@@ -74,9 +74,11 @@ const active = {
     pulls: [{
         number: 4, title: "A change", url: "https://github.com/alice/project/pull/4",
         author: "alice", head: "feature", base: "main", mergeable: false,
-        checks: [{ name: "Build", state: "in_progress", pending: true }],
+        checks: [{ name: "Build", state: "in_progress", pending: true }], refresh: true,
     }],
 };
+// Whole-project reads, leaving out quick polls of single runs and PRs.
+const fullCalls = (app, name = "alice/project") => app.calls.filter(call => new RegExp(`/${name}(\\?|$)`).test(call.url));
 
 async function harness(initial = active, repositories = [repo], storage = null) {
     let now = 100000;
@@ -103,6 +105,18 @@ async function harness(initial = active, repositories = [repo], storage = null) 
         fetch: async (url, options) => {
             calls.push({ url, options });
             const error = url !== "/github/repositories" ? failure : null;
+            // One run or PR is served from the project data, unless a test answers it itself.
+            const item = typeof data !== "function" && !data.workflow && !data.pull
+                && url.match(/\/(runs|pulls)\/(\d+)$/);
+            const found = item && (item[1] === "runs"
+                ? (data.workflows || []).find(run => run.id === Number(item[2]))
+                : (data.pulls || []).find(pr => pr.number === Number(item[2])));
+            if (item && !error) {
+                return {
+                    ok: !!found, status: found ? 200 : 404, headers: { get: () => "application/json" },
+                    json: async () => !found ? { error: "Not found." } : item[1] === "runs" ? { workflow: found } : { pull: found },
+                };
+            }
             return {
                 ok: !error,
                 status: error ? error.status : 200,
@@ -124,30 +138,22 @@ async function harness(initial = active, repositories = [repo], storage = null) 
     };
 }
 
-test("pending PR checks refresh after 10 seconds, switching to 60 seconds when idle", async () => {
+test("projects are read in full every 60 seconds, whatever is running", async () => {
     const app = await harness();
-    const projectCalls = () => app.calls.filter(call => call.url.endsWith("/alice/project")).length;
-    assert.equal(projectCalls(), 1);
-    app.advance(9999);
-    await app.tick();
-    assert.equal(projectCalls(), 1);
-    app.setData(idle);
-    app.advance(1);
-    await app.tick();
-    assert.equal(projectCalls(), 2);
+    assert.equal(fullCalls(app).length, 1);
     app.advance(59999);
     await app.tick();
-    assert.equal(projectCalls(), 2);
+    assert.equal(fullCalls(app).length, 1);
     app.advance(1);
     await app.tick();
-    assert.equal(projectCalls(), 3);
+    assert.equal(fullCalls(app).length, 2);
     assert.ok(app.intervals.some(timer => timer.interval === 60000));
 });
 
 test("hidden tabs pause polling and rate-limit backoff prevents further requests", async () => {
-    const app = await harness();
+    const app = await harness(idle);
     app.document.hidden = true;
-    app.advance(10000);
+    app.advance(60000);
     await app.tick();
     assert.equal(app.calls.length, 2);
     app.document.hidden = false;
@@ -221,13 +227,13 @@ test("completed check details stay inline and open across refreshes; completed-o
 test("failed refreshes retain aggregated PRs with a stale marker and recover without duplicates", async () => {
     const app = await harness();
     app.setFailure({ status: 502, message: "GitHub unavailable" });
-    app.advance(10000);
+    app.advance(60000);
     await app.tick();
     assert.equal(app.ids.get("pull-count").textContent, "1");
     assert.match(text(app.ids.get("pulls")), /Stale data/);
     assert.match(app.ids.get("summary").textContent, /1 refresh errors/);
     app.setFailure(null);
-    app.advance(10000);
+    app.advance(60000);
     await app.tick();
     assert.equal(app.ids.get("pulls").children.length, 1);
     assert.doesNotMatch(text(app.ids.get("pulls")), /Stale data/);
@@ -268,7 +274,7 @@ test("repository removal drops its aggregate rows and initial failures do not cl
     const failed = await harness();
     failed.evaluate('projects.get("alice/project").data = null');
     failed.setFailure({ status: 502, message: "GitHub unavailable" });
-    failed.advance(10000);
+    failed.advance(60000);
     await failed.tick();
     assert.match(text(failed.ids.get("pulls")), /Waiting for project data/);
     assert.doesNotMatch(text(failed.ids.get("pulls")), /No open pull requests/);
@@ -467,28 +473,23 @@ test("a section's Refresh reads only that section and leaves the other's schedul
     const app = await harness({ ...idle, active: true, workflows: [waitingRelease] });
     app.advance(4000);
     await app.ids.get("refresh-pulls").listeners.click();
-    assert.equal(app.calls.at(-1).url, "/github/repositories/alice/project?section=pulls");
-    app.advance(5999);
+    assert.equal(fullCalls(app).at(-1).url, "/github/repositories/alice/project?section=pulls");
+    app.advance(55999);
     await app.tick();
-    assert.equal(app.calls.length, 3, "the full refresh due 10s after the first is not pushed back");
+    assert.equal(fullCalls(app).length, 2, "the full refresh due 60s after the first is not pushed back");
     app.advance(1);
     await app.tick();
-    assert.equal(app.calls.at(-1).url, "/github/repositories/alice/project?runs=7");
+    assert.equal(fullCalls(app).at(-1).url, "/github/repositories/alice/project?runs=7");
     await app.ids.get("refresh-workflows").listeners.click();
-    assert.equal(app.calls.at(-1).url, "/github/repositories/alice/project?section=workflows&runs=7");
+    assert.equal(fullCalls(app).at(-1).url, "/github/repositories/alice/project?section=workflows&runs=7");
 });
 
-test("a section's data is merged into the other's and keeps the project polling while it is active", async () => {
-    const app = await harness({ ...idle, workflows: [waitingRelease], active: true });
-    app.setData({ pulls: [], active: false });
+test("a section's data is merged into the other's", async () => {
+    const app = await harness({ ...idle, workflows: [waitingRelease] });
+    app.setData({ pulls: [] });
     app.advance(1000);
     await app.ids.get("refresh-pulls").listeners.click();
     assert.equal(app.ids.get("workflows").children.length, 1);
-    assert.equal(app.evaluate("projects.get('alice/project').active"), true);
-    app.setData({ ...active, workflows: [], pulls: [], active: false });
-    app.advance(9000);
-    await app.tick();
-    assert.equal(app.evaluate("projects.get('alice/project').active"), false);
 });
 
 test("Refresh for a section skips background projects and asks for everything when a project has no data yet", async () => {
@@ -613,10 +614,10 @@ test("a finished release collapses at once when a newer one runs, and can be ope
     list.querySelectorAll(".finished-toggle")[0].listeners.click();
     assert.equal(list.querySelectorAll(".collapsed").length, 0);
     assert.equal(list.querySelectorAll(".finished-toggle")[0].textContent, "Collapse");
-    app.advance(10000);
+    app.advance(60000);
     await app.tick();
     assert.equal(list.querySelectorAll(".collapsed").length, 0);
-    assert.equal(app.calls.at(-1).url, "/github/repositories/alice/project?runs=9", "finished runs aren't rechecked");
+    assert.equal(fullCalls(app).at(-1).url, "/github/repositories/alice/project?runs=9", "finished runs aren't rechecked");
 });
 
 test("a run refreshed to finished replaces the older finished release", async () => {
@@ -626,4 +627,75 @@ test("a run refreshed to finished replaces the older finished release", async ()
     assert.match(workflowsText(app), /Release #9/);
     assert.doesNotMatch(workflowsText(app), /Release #8/);
     assert.equal(app.ids.get("workflows").querySelectorAll(".graph-scroll").length, 1);
+});
+
+const quickCalls = (app, item) => app.calls.filter(call => call.url.endsWith(`/alice/project/${item}`));
+const pool = app => [...app.evaluate('projects.get("alice/project")').pool.keys()];
+async function steps(app, count, ms = 5000) {
+    for (let index = 0; index < count; index += 1) {
+        app.advance(ms);
+        await app.tick();
+    }
+}
+const busyPull = (checks = "in_progress") => ({ ...active.pulls[0], checks: [{ name: "Build", state: checks, pending: true }] });
+
+test("a busy PR and a running release are polled on their own every 5 seconds, and leave once done", async () => {
+    const app = await harness({ ...idle, pulls: [busyPull()], workflows: [waitingRelease] });
+    assert.deepEqual(pool(app).sort(), ["pull:4", "run:7"]);
+    let step = 0;
+    app.setData(url => {
+        step += 1;
+        if (url.endsWith("/pulls/4")) return { pull: { ...busyPull(`step ${step}`), refresh: step < 3 } };
+        if (url.endsWith("/runs/7")) return { workflow: { ...waitingRelease, status: "in_progress", attempt: step } };
+        return idle;
+    });
+    await steps(app, 1, 4999);
+    assert.equal(quickCalls(app, "pulls/4").length, 0);
+    await steps(app, 1, 1);
+    assert.equal(quickCalls(app, "pulls/4").length, 1);
+    assert.equal(quickCalls(app, "runs/7").length, 1);
+    await steps(app, 2);
+    assert.equal(quickCalls(app, "pulls/4").length, 2, "the PR left the pool once its checks were done");
+    assert.deepEqual(pool(app), ["run:7"]);
+    assert.equal(quickCalls(app, "runs/7").length, 3);
+    assert.equal(fullCalls(app).length, 1);
+});
+
+test("an item that stops changing leaves after 10 polls, and a full read brings it back only once it changes", async () => {
+    const app = await harness({ ...idle, workflows: [waitingRelease] });
+    await steps(app, 10);
+    assert.equal(quickCalls(app, "runs/7").length, 10);
+    assert.deepEqual(pool(app), []);
+    await steps(app, 2);
+    assert.equal(quickCalls(app, "runs/7").length, 10);
+    await steps(app, 1, 60000);
+    assert.equal(fullCalls(app).length, 3);
+    assert.deepEqual(pool(app), [], "full reads that find it the same leave it out");
+    app.setData({ ...idle, workflows: [{ ...waitingRelease, status: "in_progress" }] });
+    await steps(app, 1, 60000);
+    assert.deepEqual(pool(app), ["run:7"]);
+    await steps(app, 1);
+    assert.equal(quickCalls(app, "runs/7").length, 11);
+});
+
+test("a PR that closes between full reads goes from the list", async () => {
+    const app = await harness({ ...idle, pulls: [busyPull()] });
+    app.setData(idle);
+    await steps(app, 1);
+    assert.equal(app.ids.get("pull-count").textContent, "0");
+    assert.deepEqual(pool(app), []);
+});
+
+test("after New Release, full reads come every 10 seconds until its run appears", async () => {
+    const app = await harness(idle);
+    app.setData({ tag: "v1.20.0", url: "https://github.com/alice/project/actions" });
+    await app.evaluate('publish(projects.get("alice/project"), document.getElementById("refresh"))');
+    app.setData(idle);
+    await steps(app, 2, 10000);
+    assert.equal(fullCalls(app).length, 3);
+    app.setData({ ...idle, workflows: [waitingRelease] });
+    await steps(app, 1, 10000);
+    assert.equal(fullCalls(app).length, 4);
+    await steps(app, 5, 10000);
+    assert.equal(fullCalls(app).length, 4, "back to once a minute once the run is shown");
 });

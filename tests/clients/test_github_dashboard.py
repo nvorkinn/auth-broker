@@ -105,6 +105,13 @@ def test_owned_repository_rechecks_access(api, repo):
         api.owned_repository("alice", "project")
 
 
+def test_a_closed_pull_request_reads_as_none_and_is_left_out(api):
+    api.get = Mock(return_value={"state": "closed"})
+    assert api.pull("/repos/alice/project", 7) is None
+    api.pages = Mock(return_value=[{"number": 7}])
+    assert api.pulls("/repos/alice/project") == []
+
+
 @responses.activate
 def test_pull_checks_include_paginated_checks_and_latest_legacy_statuses(api):
     path = "/repos/alice/project"
@@ -119,6 +126,7 @@ def test_pull_checks_include_paginated_checks_and_latest_legacy_statuses(api):
             "draft": False,
             "mergeable": False,
             "mergeable_state": "dirty",
+            "state": "open",
         },
     )
     check = {"name": "build", "conclusion": None, "status": "queued", "html_url": None}
@@ -162,7 +170,6 @@ def test_project_reads_every_unfinished_status_and_deduplicates(api):
     api.workflow = Mock(side_effect=lambda _repo, run: run)
     result = api.project(REPO)
     assert sorted(run["id"] for run in result["workflows"]) == [1, 2]
-    assert result["active"] is True
     # Lifecycle order: a run approved mid-sweep leaves "waiting" for a status that is queried later.
     assert [call.kwargs["status"] for call in api.pages.call_args_list if "status" in call.kwargs] == [
         "requested",
@@ -178,13 +185,13 @@ def test_project_reads_only_the_section_asked_for(api):
     api.pull = Mock(return_value={"refresh": False})
     api.workflow = Mock(side_effect=lambda _repo, run: run)
     pulls = api.project(REPO, section="pulls")
-    assert pulls == {"pulls": [{"refresh": False}], "active": False}
+    assert pulls == {"pulls": [{"refresh": False}]}
     api.workflow.assert_not_called()
     assert all(call.args[0].endswith("/pulls") for call in api.pages.call_args_list)
     api.pages.reset_mock()
     api.pull.reset_mock()
     workflows = api.project(REPO, section="workflows")
-    assert workflows == {"workflows": [{"id": 1, "name": "Release", "status": "queued"}], "active": True}
+    assert workflows == {"workflows": [{"id": 1, "name": "Release", "status": "queued"}]}
     api.pull.assert_not_called()
     assert not any(call.args[0].endswith("/pulls") for call in api.pages.call_args_list)
 
@@ -220,7 +227,6 @@ def test_project_rechecks_known_runs_that_the_status_lists_missed(api):
     result = api.project(REPO, [1, 7, 8, 9])
     # Run 8 finished since the last look, so it stays as the latest finished release.
     assert [run["id"] for run in result["workflows"]] == [1, 7, 8]
-    assert result["active"] is True
     assert sorted(call.request.url.split("/")[-1] for call in responses.calls) == ["7", "8", "9"]
 
 
@@ -235,7 +241,6 @@ def test_the_latest_finished_release_is_kept_after_the_ongoing_ones(api):
     api.workflow = Mock(side_effect=lambda _repo, run: run)
     result = api.project(REPO)
     assert [run["id"] for run in result["workflows"]] == [15]
-    assert result["active"] is True
     assert sorted(call.args[0].split("/")[-2] for call in api.get.call_args_list) == ["1", "3"]
     assert all(call.kwargs == {"status": "completed", "per_page": 1} for call in api.get.call_args_list)
 
@@ -301,14 +306,13 @@ def test_release_run_reads_one_release_and_nothing_else(api, status, body, found
         ("Deploy", False),
     ],
 )
-def test_only_release_workflows_are_drawn_but_other_ci_still_keeps_fast_polling(api, name, shown):
+def test_only_release_workflows_are_drawn(api, name, shown):
     run = {"id": 7, "name": name, "status": "waiting"}
     api.pages = _runs_by_status(waiting=[run])
     api.pull = Mock(return_value={"refresh": False})
     api.workflow = Mock(return_value=run)
     result = api.project(REPO)
     assert result["workflows"] == ([run] if shown else [])
-    assert result["active"] is True
     assert api.workflow.call_count == int(shown)
 
 

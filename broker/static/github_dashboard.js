@@ -11,6 +11,15 @@ const workflowsList = document.getElementById("workflows");
 const FAILED_CHECKS = new Set(["failure", "timed_out", "cancelled", "error", "startup_failure", "action_required", "stale"]);
 let discovering = false;
 let pausedUntil = 0;
+// Projects are read in full once a minute. Their running releases and busy PRs join a quick-poll pool, read one by
+// one every few seconds until they finish or stop changing; a full read that finds them changed brings them back.
+const FULL_POLL_MS = 60000;
+const QUICK_POLL_MS = 5000;
+const QUICK_STRIKES = 10;
+const QUICK_IN_FLIGHT = 4;
+// After New Release, full reads come this often until its run appears, for at most PUBLISH_WATCH_MS.
+const PUBLISH_POLL_MS = 10000;
+const PUBLISH_WATCH_MS = 300000;
 
 // Per-browser choices: hidden projects are neither shown nor fetched; background ones keep auto-refreshing but are
 // left out of the Refresh buttons. Storage can be blocked, in which case the choices last until the page closes.
@@ -86,7 +95,7 @@ async function api(path, options = {}) {
         if (response.status === 429) {
             pausedUntil = Date.now() + Math.max(60, Number(response.headers.get("Retry-After")) || 60) * 1000;
         }
-        throw new Error(data.error || `Request failed (${response.status}).`);
+        throw Object.assign(new Error(data.error || `Request failed (${response.status}).`), { status: response.status });
     }
     return data;
 }
@@ -431,16 +440,20 @@ async function refreshProject(project) {
         const parts = [];
         if (section !== "all") parts.push(`section=${section}`);
         if (known.length && section !== "pulls") parts.push(`runs=${known.slice(0, 20).join(",")}`);
-        const { active, ...sections } = await api(`${projectPath(project.repo.full_name)}${parts.length ? `?${parts.join("&")}` : ""}`);
+        const sections = await api(`${projectPath(project.repo.full_name)}${parts.length ? `?${parts.join("&")}` : ""}`);
         const data = { ...project.data, ...sections };
         project.data = data;
         project.errorText = "";
         project.error.hidden = true;
-        for (const name of section === "all" ? ["pulls", "workflows"] : [section]) project.sectionActive[name] = active;
-        project.active = project.sectionActive.pulls || project.sectionActive.workflows;
+        track(project, [...(sections.pulls || []).map(pullItem), ...(sections.workflows || []).map(runItem)]);
+        if (sections.pulls) forgetMissing(project, "pull", sections.pulls.map(pr => pr.number));
+        if (sections.workflows) forgetMissing(project, "run", sections.workflows.map(run => run.id));
         if (project.publishedTag) {
             const run = data.workflows.find(run => run.branch === project.publishedTag);
-            if (run) project.result.replaceChildren(link(`Published ${project.publishedTag} — view workflow`, run.url));
+            if (run) {
+                project.result.replaceChildren(link(`Published ${project.publishedTag} — view workflow`, run.url));
+                project.watchUntil = 0;
+            }
         }
         project.card.title = `${project.repo.description || project.repo.full_name} · Updated ${new Date().toLocaleTimeString()}`;
     } catch (error) {
@@ -450,27 +463,101 @@ async function refreshProject(project) {
         project.card.title = "Refresh failed; previously shown data is stale.";
     } finally {
         project.loading = false;
-        // A refresh of one section leaves the other's turn where it was, unless activity means sooner.
-        const next = Date.now() + (project.active ? 10000 : 60000);
+        // A refresh of one section leaves the other's turn where it was, unless a new release is awaited.
+        const next = Date.now() + (Date.now() < project.watchUntil ? PUBLISH_POLL_MS : FULL_POLL_MS);
         project.nextRefresh = Math.max(pausedUntil, partial ? Math.min(partial.resume, next) : next);
         renderProject(project);
     }
 }
 
-// Reads just this run, leaving the project's own schedule alone.
+const runItem = run => ({ key: `run:${run.id}`, kind: "run", id: run.id, active: !finished(run), value: run });
+const pullItem = pr => ({ key: `pull:${pr.number}`, kind: "pull", id: pr.number, active: pr.refresh, value: pr });
+
+// Pools what is active and new or changed; a pooled item that comes back the same QUICK_STRIKES times in a row, or
+// is no longer active, leaves the pool until a read finds it changed again.
+function track(project, items) {
+    for (const item of items) {
+        const print = JSON.stringify(item.value);
+        const changed = project.prints.get(item.key) !== print;
+        project.prints.set(item.key, print);
+        const entry = project.pool.get(item.key);
+        if (!item.active) {
+            project.pool.delete(item.key);
+        } else if (changed && entry) {
+            entry.strikes = 0;
+        } else if (changed) {
+            project.pool.set(item.key, { kind: item.kind, id: item.id, strikes: 0, next: Date.now() + QUICK_POLL_MS });
+        } else if (entry && ++entry.strikes >= QUICK_STRIKES) {
+            project.pool.delete(item.key);
+        }
+    }
+}
+
+function forgetMissing(project, kind, ids) {
+    const kept = new Set(ids.map(id => `${kind}:${id}`));
+    for (const map of [project.pool, project.prints]) {
+        for (const key of map.keys()) if (key.startsWith(`${kind}:`) && !kept.has(key)) map.delete(key);
+    }
+}
+
+// Reads one run or PR and merges it in, leaving the project's own schedule alone. A PR that has closed goes.
+async function pollItem(project, kind, id) {
+    const base = projectPath(project.repo.full_name);
+    try {
+        if (kind === "run") {
+            const { workflow } = await api(`${base}/runs/${id}`);
+            const runs = project.data?.workflows || [];
+            project.data = { ...project.data, workflows: runs.map(other => other.id === workflow.id ? workflow : other) };
+            track(project, [runItem(workflow)]);
+        } else {
+            const { pull } = await api(`${base}/pulls/${id}`);
+            const pulls = project.data?.pulls || [];
+            project.data = { ...project.data, pulls: pulls.map(other => other.number === pull.number ? pull : other) };
+            track(project, [pullItem(pull)]);
+        }
+    } catch (error) {
+        if (error.status === 404) {
+            if (kind === "pull") project.data = { ...project.data, pulls: project.data.pulls.filter(pr => pr.number !== id) };
+            project.pool.delete(`${kind}:${id}`);
+            project.prints.delete(`${kind}:${id}`);
+        }
+        throw error;
+    } finally {
+        const entry = project.pool.get(`${kind}:${id}`);
+        if (entry) entry.next = Math.max(pausedUntil, Date.now() + QUICK_POLL_MS);
+        renderProject(project);
+    }
+}
+
+// The Refresh button on a running workflow.
 async function refreshRun(project, run) {
     if (project.runRefresh.get(run.id)?.busy) return;
     project.runRefresh.set(run.id, { busy: true });
     renderProject(project);
     try {
-        const { workflow } = await api(`${projectPath(project.repo.full_name)}/runs/${run.id}`);
-        const runs = project.data?.workflows || [];
-        project.data = { ...project.data, workflows: runs.map(other => other.id === workflow.id ? workflow : other) };
+        await pollItem(project, "run", run.id);
         project.runRefresh.delete(run.id);
     } catch (error) {
         project.runRefresh.set(run.id, { message: error.message });
     }
     renderProject(project);
+}
+
+let quickInFlight = 0;
+
+// Quick polls run alongside full reads, but never for an item already being read or a project mid full read.
+async function quickPoll(project, entry) {
+    entry.busy = true;
+    quickInFlight += 1;
+    try {
+        await pollItem(project, entry.kind, entry.id);
+    } catch {
+        // A failed quick poll counts as unchanged, so a broken item leaves the pool; the full read reports errors.
+        if (++entry.strikes >= QUICK_STRIKES) project.pool.delete(`${entry.kind}:${entry.id}`);
+    } finally {
+        entry.busy = false;
+        quickInFlight -= 1;
+    }
 }
 
 async function publish(project, button) {
@@ -483,8 +570,8 @@ async function publish(project, button) {
         const data = await api(`${projectPath(project.repo.full_name)}/release`, { method: "POST" });
         project.publishedTag = data.tag;
         project.result.replaceChildren(link(`Published ${data.tag} — view workflow`, data.url));
-        project.active = true;
-        project.nextRefresh = Date.now() + 10000;
+        project.watchUntil = Date.now() + PUBLISH_WATCH_MS;
+        project.nextRefresh = Date.now() + PUBLISH_POLL_MS;
     } catch (error) {
         project.result.replaceChildren(element("span",
             `${error.message} Check GitHub Actions and releases before trying again.`, "error"));
@@ -508,7 +595,6 @@ async function approveDeployment(project, run, deployment) {
     } catch (error) {
         project.approvals.set(key, { message: `${error.message} Refresh to check deployment status before retrying.` });
     } finally {
-        project.active = true;
         project.nextRefresh = 0;
         renderProject(project);
     }
@@ -542,9 +628,9 @@ function addProject(repo) {
     card.append(heading, result, error);
     document.getElementById("projects").append(card);
     const project = { repo, card, error, result, data: null, pullRows: [], workflowRows: [],
-        errorText: "", active: true, loading: false, nextRefresh: 0, approvals: new Map(), publishing: false,
-        background: !checkbox.checked, partial: null, matrixMode: new Map(), sectionActive: { pulls: true, workflows: true },
-        runRefresh: new Map(), finishedMode: new Map(), redrawAt: Infinity };
+        errorText: "", loading: false, nextRefresh: 0, approvals: new Map(), publishing: false,
+        background: !checkbox.checked, partial: null, matrixMode: new Map(), runRefresh: new Map(),
+        finishedMode: new Map(), redrawAt: Infinity, pool: new Map(), prints: new Map(), watchUntil: 0 };
     button.addEventListener("click", () => publish(project, button));
     checkbox.addEventListener("change", () => {
         project.background = !checkbox.checked;
@@ -592,8 +678,14 @@ async function tick() {
     if (document.hidden || Date.now() < pausedUntil) return;
     const available = 3 - [...projects.values()].filter(project => project.loading).length;
     const due = [...projects.values()].filter(project => !project.loading && project.nextRefresh <= Date.now())
-        .sort((a, b) => Number(a.background) - Number(b.background) || a.nextRefresh - b.nextRefresh);
-    await Promise.all(due.slice(0, Math.max(0, available)).map(refreshProject));
+        .sort((a, b) => Number(a.background) - Number(b.background) || a.nextRefresh - b.nextRefresh)
+        .slice(0, Math.max(0, available));
+    // A full read covers its project's pooled items, so they wait for the next tick.
+    const quick = [...projects.values()].filter(project => !project.loading && !due.includes(project))
+        .flatMap(project => [...project.pool.values()].filter(entry => !entry.busy && entry.next <= Date.now())
+            .map(entry => ({ project, entry })))
+        .sort((a, b) => a.entry.next - b.entry.next).slice(0, Math.max(0, QUICK_IN_FLIGHT - quickInFlight));
+    await Promise.all([...due.map(refreshProject), ...quick.map(({ project, entry }) => quickPoll(project, entry))]);
 }
 
 // Brings one section forward alone, remembering when the full refresh was due, so the other never waits on it.
