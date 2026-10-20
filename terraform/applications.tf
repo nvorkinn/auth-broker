@@ -45,11 +45,10 @@ import {
   id = local.ids.providers[each.value.name]
 }
 
-# A proxy provider is also an OAuth2 provider (one object in Authentik), and the old blueprint pinned the OAuth2
-# side of Logs and Metrics: a fixed client id and secret, and the grants. Terraform manages that side through a
-# second resource on the same provider, which is why these are imported with the same ids as the proxy ones.
-# The grants are narrowed to the authorization code, all a forward-auth proxy uses: the old blueprint also enabled
-# password, which skips the second factor, and client_credentials, which nothing here uses.
+# A proxy provider is also an OAuth2 provider (one object in Authentik). Logs and Metrics have a fixed client id and
+# secret, and this resource manages their OAuth2 side too: it is a second resource on the same provider, which is why
+# these are imported with the same ids as the proxy ones. The only grant is the authorization code, all a forward-auth
+# proxy uses: password would skip the second factor, and client_credentials isn't used here.
 # The redirect URIs are listed here too: Authentik derives them from each proxy provider's external host, and
 # this resource would otherwise blank them. The Broker's provider has nothing pinned, so it has no entry.
 locals {
