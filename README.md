@@ -135,7 +135,7 @@ GitHub's Settings → Developer settings → GitHub Apps:
   and merging). After changing them, accept them on the App's installation; GitHub doesn't apply them until you do.
 - Then install it on your account, for the repositories the dashboard should show.
 
-Enable it with `sops secrets/broker.env`, then release:
+Enable it with `sops secrets/dev/broker.env`, then release:
 
 ```dotenv
 GITHUB_DASHBOARD_USER_ID=<your X-Authentik-Uid>
@@ -253,18 +253,20 @@ It builds five images for amd64 and arm64, tagged with the release and `latest`:
 - `ghcr.io/nvorkinn/auth-broker-victoria-metrics` (with the vmui dashboards)
 
 It also attaches a deploy bundle to the release (`docker-compose.yml`, `scripts/deploy.sh`, the encrypted secrets and
-authentik's brand assets), then waits for approval of two sets of deploy jobs:
+authentik's brand assets) for each environment, with only that environment's secrets, then waits for approval of two
+sets of deploy jobs (`deploy-services.yml` and `deploy-authentik.yml`, called once per environment):
 
-| Environment | Deploys |
+| Approval environment | Deploys |
 |---|---|
 | `deploy-infra` | Caddy, the broker and its providers, Fluent Bit, VictoriaLogs, VictoriaMetrics and Redis, a job each, two at a time |
 | `deploy-authentik` | authentik, on the `AUTHENTIK_VERSION` pinned in the host's `.env` |
 
-An approved job SSHes into the host and runs `scripts/fetch-release.sh`, which downloads the bundle into
+An approved job SSHes into the host named by its target environment's secrets (`dev-qa` today) and runs
+`scripts/fetch-release.sh`, which downloads the bundle into
 `/opt/auth-broker/releases/<tag>/` (checking its SHA-256) and runs its `deploy.sh`. That decrypts the secrets, installs
 the compose file, backs up the database (`data/broker.db.bak-<tag>`) when deploying the broker, pins the service's
 `<SERVICE>_VERSION` in `/opt/auth-broker/.env` and recreates it. Redis and authentik are only recreated if their service
-changed. After `deploy-authentik`, the `terraform` job applies this tag's authentik configuration, asking for approval
+changed. After authentik is deployed, the `terraform` job applies this tag's authentik configuration, asking for approval
 only when the plan changes something (see [terraform/README.md](terraform/README.md)).
 
 To roll back, re-run the deploy jobs of an older release's workflow run. To deploy by hand, set the versions in
@@ -274,27 +276,34 @@ host's copy.
 **One-time setup** in the repository's settings:
 
 - **Environments** `deploy-infra`, `deploy-authentik` and `terraform`, each with yourself as a
-  required reviewer (that's what stops them running on their own). `terraform` also needs a branch rule: see
+  required reviewer (that's what stops them running on their own), and one per deploy target (`dev-qa`), with no
+  reviewers: it only holds that target's secrets. (A job can name only one environment, and a matrix of jobs that
+  named a protected one would ask for approval each, which is why the approval is a separate environment's.) `terraform` also needs a branch rule: see
   [terraform/README.md](terraform/README.md#applying).
-- **Secrets:** `DEPLOY_HOST`, `DEPLOY_USER` (in the `docker` group, owning `/opt/auth-broker/`), `ORACLE_SSH_TOKEN` (a
+- **Secrets,** in each target's environment (an environment's secret takes precedence over a repository's of the same
+  name, so a repository-level copy is only a fallback, and best deleted once every target has its own):
+  `DEPLOY_HOST`, `DEPLOY_USER` (in the `docker` group, owning `/opt/auth-broker/`), `ORACLE_SSH_TOKEN` (a
   private key for that user) and `DEPLOY_SSH_KNOWN_HOSTS` (`ssh-keyscan <host>`), plus the Terraform ones in
   [terraform/README.md](terraform/README.md#secrets) and `CODECOV_TOKEN`.
 - **The host** needs Docker Compose v2 (`sudo apt install docker-compose-v2`), `curl` and its age key (below).
 
 ### Secrets
 
-Every secret is in `secrets/` (`broker.env`, `caddy.env`, `authentik.env`, `redis.env`), encrypted with
-[SOPS](https://github.com/getsops/sops) and age; the `.example` files list what each holds. `.sops.yaml` lists who can
-decrypt them: your laptop's age key and the host's (`/opt/auth-broker/age.key`). `deploy.sh` decrypts them all on every
-deploy, and CI fails if any value isn't encrypted. Settings that aren't secret are in `docker-compose.yml`.
+Every secret is in `secrets/<environment>/` (`dev/` today; `prod/` for production), as `broker.env`, `caddy.env`,
+`authentik.env` and `redis.env`, encrypted with [SOPS](https://github.com/getsops/sops) and age; the `.example` files in
+`secrets/` list what each holds. `.sops.yaml` lists who can decrypt each environment's files: your laptop's age key and
+that environment's host's (`/opt/auth-broker/age.key`), so one environment's host can't decrypt another's secrets. A
+release's deploy bundle for an environment holds only that environment's files, and `deploy.sh` decrypts them all on
+every deploy. CI fails if any value isn't encrypted. Settings that aren't secret are in `docker-compose.yml`.
 
 ```bash
-sops secrets/broker.env    # edit, re-encrypted on save; then commit, release and deploy
+sops secrets/dev/broker.env    # edit, re-encrypted on save; then commit, release and deploy
 ```
 
 To set up: `age-keygen -o ~/.config/sops/age/keys.txt` on your laptop (and keep a copy somewhere safe: it's the only
-key that can edit the secrets), `age-keygen -o /opt/auth-broker/age.key` on the host, put both public keys in
-`.sops.yaml`, and run `sops updatekeys secrets/*.env` whenever a key changes.
+key that can edit the secrets), `age-keygen -o /opt/auth-broker/age.key` on each host, put the laptop's public key and
+that host's in `.sops.yaml`'s rule for its environment, and run `sops updatekeys secrets/<environment>/*.env` whenever a
+key changes.
 
 ## Operations
 

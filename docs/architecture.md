@@ -82,14 +82,14 @@ makes it safe for the broker to trust them. The broker has no user table: the ui
 | **Apple Music user token** | MusicKit JS on the settings page | `apple_music_tokens`, encrypted | Lasts about six months, can't be refreshed: cleared when Apple refuses it. |
 | **Glowmarkt password** | the owner, on the settings page | `glowmarkt_credentials`, encrypted | Never leaves the broker's image: the glow provider signs in with it. |
 | **GitHub token** | the owner, on the settings page | `github_tokens`, encrypted | A read-only fine-grained PAT, used only by the developer provider. |
-| **`CREDENTIAL_ENCRYPTION_KEY`** | operator | `secrets/broker.env` | The Fernet key for the encrypted columns. Changing it makes them unreadable. |
-| **App keys** | operator | `secrets/broker.env` | Spotify client id and secret, the MusicKit key (signs Apple developer tokens), `TFL_APP_KEY` (only for the settings page's stop search). |
-| **`FLASK_SECRET_KEY`** | operator | `secrets/broker.env` | Signs the session cookie, which holds only the Spotify OAuth state (and which screen it's for) and the GitHub dashboard's CSRF token. |
-| **`STATUS_TOKEN`** | operator | `secrets/broker.env` | Bearer for `GET /api/status/devices`. |
+| **`CREDENTIAL_ENCRYPTION_KEY`** | operator | `secrets/<environment>/broker.env` | The Fernet key for the encrypted columns. Changing it makes them unreadable. |
+| **App keys** | operator | `secrets/<environment>/broker.env` | Spotify client id and secret, the MusicKit key (signs Apple developer tokens), `TFL_APP_KEY` (only for the settings page's stop search). |
+| **`FLASK_SECRET_KEY`** | operator | `secrets/<environment>/broker.env` | Signs the session cookie, which holds only the Spotify OAuth state (and which screen it's for) and the GitHub dashboard's CSRF token. |
+| **`STATUS_TOKEN`** | operator | `secrets/<environment>/broker.env` | Bearer for `GET /api/status/devices`. |
 | **GitHub App sign-in** | the dashboard's user, through Connect GitHub | `github_app_tokens`, encrypted | Acts as them for 8 hours, renewed for 6 months. The `/github` dashboard's only GitHub access. |
-| **`GITHUB_APP_CLIENT_SECRET`**, **`GITHUB_APP_WEBHOOK_SECRET`** | operator | `secrets/broker.env` | The dashboard's GitHub App: signing in, and checking its webhook's signature. |
-| **`REDIS_PASSWORD`** | operator | `secrets/redis.env` | Used by everything that talks to Redis, including pi-dashboard. |
-| **`LOGS_INGEST_TOKEN`** | operator | `secrets/caddy.env` | Bearer for the ingest paths on `logs.` and `metrics.`. The broker forwards on loopback without it. |
+| **`GITHUB_APP_CLIENT_SECRET`**, **`GITHUB_APP_WEBHOOK_SECRET`** | operator | `secrets/<environment>/broker.env` | The dashboard's GitHub App: signing in, and checking its webhook's signature. |
+| **`REDIS_PASSWORD`** | operator | `secrets/<environment>/redis.env` | Used by everything that talks to Redis, including pi-dashboard. |
+| **`LOGS_INGEST_TOKEN`** | operator | `secrets/<environment>/caddy.env` | Bearer for the ingest paths on `logs.` and `metrics.`. The broker forwards on loopback without it. |
 
 No credential is ever written to Redis: configs carry only flags like `glowmarkt.enabled`, and the providers write only
 the data they fetched. The pairing code is the exception, in `v1:pairing:<device id>` for its ten minutes.

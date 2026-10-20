@@ -2,7 +2,7 @@ name: Terraform
 
 # Checks and plans terraform/ on pull requests that change it. The plan reads the live Authentik, so it needs the
 # secrets below and is skipped without them (fork and Dependabot pull requests). Applies run only from a release tag:
-# the Release workflow calls this with apply on, after deploy-authentik. The "Run workflow" button (Actions >
+# the Release workflow calls this with apply on, after the authentik deploy. The "Run workflow" button (Actions >
 # Terraform) plans any ref, which shows drift; with "apply" ticked it also applies, on the latest release tag only,
 # which is how a failed apply is retried. See terraform/README.md.
 on:

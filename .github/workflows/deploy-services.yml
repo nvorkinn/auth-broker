@@ -1,0 +1,89 @@
+name: Deploy services
+
+# One target's deploy of this repo's own services (Caddy, the broker and its providers, Fluent Bit, VictoriaLogs,
+# VictoriaMetrics, Redis), called by release.yml once per environment. See also deploy-authentik.yml.
+on:
+  workflow_call:
+    inputs:
+      environment:
+        description: The GitHub environment holding this target's DEPLOY_* secrets, e.g. dev-qa.
+        type: string
+        required: true
+      approval:
+        description: The GitHub environment whose reviewers approve this deploy (a different one from `environment`, as
+          each job of a matrix that named a protected environment would ask again).
+        type: string
+        required: true
+      target:
+        description: The bundle's suffix, naming its secrets/<target>/ directory, e.g. dev.
+        type: string
+        required: true
+      tag:
+        type: string
+        required: true
+      bundle_sha256:
+        description: The SHA-256 of this target's deploy bundle.
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  # One approval for all of them: a job queued behind max-parallel would only
+  # reach its own environment's gate when a slot freed up, and ask again.
+  approve:
+    name: approve ${{ inputs.environment }}
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.approval }}
+    steps:
+      - run: echo "Approved"
+
+  # Each has the host fetch this release's bundle and run its deploy.sh for one
+  # service, once approved.
+  deploy:
+    name: deploy ${{ matrix.service }} (${{ inputs.environment }})
+    needs: approve
+    runs-on: ubuntu-latest
+    # The target's secrets, with no reviewers of its own: the approval was `approve`'s.
+    environment: ${{ inputs.environment }}
+    strategy:
+      fail-fast: false
+      # Two at a time, in this order, the next starting as one finishes. The
+      # services are independent, so a failure doesn't stop the rest.
+      max-parallel: 2
+      matrix:
+        include:
+          - service: caddy
+          - service: auth-broker
+          - service: fluent-bit
+          - service: victoria-logs
+          - service: victoria-metrics
+          # Recreated only when its service changes.
+          - service: redis
+    concurrency:
+      # Per service: a group the whole matrix shared would cancel all but one
+      # of its pending jobs.
+      group: deploy-${{ inputs.environment }}-${{ matrix.service }}-${{ inputs.tag }}
+      cancel-in-progress: false
+    env:
+      TAG: ${{ inputs.tag }}
+      SERVICE: ${{ matrix.service }}
+      DEPLOY_TARGET: ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}
+      BUNDLE_URL: ${{ github.server_url }}/${{ github.repository }}/releases/download/${{ inputs.tag }}/deploy-${{ inputs.tag }}-${{ inputs.target }}.tar.gz
+      BUNDLE_SHA256: ${{ inputs.bundle_sha256 }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up SSH
+        env:
+          ORACLE_SSH_TOKEN: ${{ secrets.ORACLE_SSH_TOKEN }}
+          DEPLOY_SSH_KNOWN_HOSTS: ${{ secrets.DEPLOY_SSH_KNOWN_HOSTS }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$ORACLE_SSH_TOKEN" > ~/.ssh/id_deploy
+          chmod 600 ~/.ssh/id_deploy
+          printf '%s\n' "$DEPLOY_SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
+
+      - name: Deploy ${{ matrix.service }}
+        run: ssh -i ~/.ssh/id_deploy "$DEPLOY_TARGET" bash -s -- "$SERVICE" "$TAG" "$BUNDLE_URL" "$BUNDLE_SHA256" < scripts/fetch-release.sh

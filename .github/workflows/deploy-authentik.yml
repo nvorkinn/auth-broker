@@ -1,0 +1,83 @@
+name: Deploy authentik
+
+# One target's deploy of authentik, then of its configuration, called by release.yml once per environment. It runs
+# upstream's image, so it needs only the bundle and can be approved while the images are still building. See also
+# deploy-services.yml.
+on:
+  workflow_call:
+    inputs:
+      environment:
+        description: The GitHub environment holding this target's DEPLOY_* secrets, e.g. dev-qa.
+        type: string
+        required: true
+      approval:
+        description: The GitHub environment whose reviewers approve this deploy.
+        type: string
+        required: true
+      target:
+        description: The bundle's suffix, naming its secrets/<target>/ directory, e.g. dev.
+        type: string
+        required: true
+      tag:
+        type: string
+        required: true
+      bundle_sha256:
+        description: The SHA-256 of this target's deploy bundle.
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  approve:
+    name: approve authentik (${{ inputs.environment }})
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.approval }}
+    steps:
+      - run: echo "Approved"
+
+  deploy:
+    name: deploy authentik (${{ inputs.environment }})
+    needs: approve
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    concurrency:
+      group: deploy-${{ inputs.environment }}-authentik-${{ inputs.tag }}
+      cancel-in-progress: false
+    env:
+      TAG: ${{ inputs.tag }}
+      SERVICE: authentik
+      DEPLOY_TARGET: ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}
+      BUNDLE_URL: ${{ github.server_url }}/${{ github.repository }}/releases/download/${{ inputs.tag }}/deploy-${{ inputs.tag }}-${{ inputs.target }}.tar.gz
+      BUNDLE_SHA256: ${{ inputs.bundle_sha256 }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up SSH
+        env:
+          ORACLE_SSH_TOKEN: ${{ secrets.ORACLE_SSH_TOKEN }}
+          DEPLOY_SSH_KNOWN_HOSTS: ${{ secrets.DEPLOY_SSH_KNOWN_HOSTS }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$ORACLE_SSH_TOKEN" > ~/.ssh/id_deploy
+          chmod 600 ~/.ssh/id_deploy
+          printf '%s\n' "$DEPLOY_SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
+
+      - name: Deploy authentik
+        run: ssh -i ~/.ssh/id_deploy "$DEPLOY_TARGET" bash -s -- "$SERVICE" "$TAG" "$BUNDLE_URL" "$BUNDLE_SHA256" < scripts/fetch-release.sh
+
+  # authentik's configuration, from this tag's terraform/, once authentik is
+  # up: a plan, applied after approval only if it changes anything. See
+  # terraform.yml.
+  terraform:
+    needs: deploy
+    permissions:
+      contents: read
+      # The plan job comments on pull requests, so its token asks for this even here.
+      pull-requests: write
+    uses: ./.github/workflows/terraform.yml
+    with:
+      apply: true
+      tag: ${{ inputs.tag }}
+    secrets: inherit

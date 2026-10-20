@@ -105,16 +105,18 @@ jobs:
             ${{ env.IMAGE }}:${{ needs.tag.outputs.value }}
             ${{ env.IMAGE }}:latest
 
-  # The deploy bundle is what the host deploys from: this release's
+  # The deploy bundles are what the hosts deploy from: this release's
   # docker-compose.yml, deploy.sh, Authentik's brand assets and SOPS-encrypted
-  # secrets, attached to the GitHub Release. It doesn't need the images, so it
-  # builds alongside them.
+  # secrets, attached to the GitHub Release. There is one per target, holding
+  # only that target's secrets/<target>/, so a host never gets (or could decrypt)
+  # another environment's. They don't need the images, so they build alongside them.
   package:
     needs: tag
     runs-on: ubuntu-latest
     permissions:
       contents: write
     outputs:
+      # {"<target>": "<the bundle's SHA-256>", ...}
       sha256: ${{ steps.bundle.outputs.sha256 }}
     env:
       TAG: ${{ needs.tag.outputs.value }}
@@ -123,112 +125,60 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - name: Build deploy bundle
+      - name: Build deploy bundles
         id: bundle
         run: |
-          mkdir -p "deploy-$TAG/secrets" "deploy-$TAG/authentik"
-          cp docker-compose.yml scripts/deploy.sh "deploy-$TAG/"
-          cp secrets/*.env "deploy-$TAG/secrets/"
-          mkdir -p "deploy-$TAG/authentik-assets"
-          cp authentik-assets/countdown-pill.svg "deploy-$TAG/authentik-assets/"
-          # Fixed order, times and owners, so a re-run builds the same bytes.
-          tar --sort=name --mtime=@0 --owner=0 --group=0 --numeric-owner -cf - "deploy-$TAG" \
-            | gzip -n > "deploy-$TAG.tar.gz"
-          echo "sha256=$(sha256sum "deploy-$TAG.tar.gz" | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+          shas='{}'
+          for target in dev; do
+            rm -rf "deploy-$TAG"
+            mkdir -p "deploy-$TAG/secrets" "deploy-$TAG/authentik"
+            cp docker-compose.yml scripts/deploy.sh "deploy-$TAG/"
+            cp "secrets/$target"/*.env "deploy-$TAG/secrets/"
+            mkdir -p "deploy-$TAG/authentik-assets"
+            cp authentik-assets/countdown-pill.svg "deploy-$TAG/authentik-assets/"
+            # Fixed order, times and owners, so a re-run builds the same bytes.
+            tar --sort=name --mtime=@0 --owner=0 --group=0 --numeric-owner -cf - "deploy-$TAG" \
+              | gzip -n > "deploy-$TAG-$target.tar.gz"
+            sha="$(sha256sum "deploy-$TAG-$target.tar.gz" | cut -d' ' -f1)"
+            shas="$(jq -c --arg target "$target" --arg sha "$sha" '. + {($target): $sha}' <<< "$shas")"
+          done
+          echo "sha256=$shas" >> "$GITHUB_OUTPUT"
 
-      - name: Attach bundle to the release
+      - name: Attach bundles to the release
         run: |
           gh release view "$TAG" > /dev/null 2>&1 || gh release create "$TAG" --verify-tag --title "$TAG"
-          gh release upload "$TAG" "deploy-$TAG.tar.gz" --clobber
+          gh release upload "$TAG" "deploy-$TAG"-*.tar.gz --clobber
 
-  # One approval for all of them: a job queued behind max-parallel would only
-  # reach its own environment's gate when a slot freed up, and ask again.
-  approve-infra:
+  # Each target deploys this repo's services and authentik, each after its own
+  # approval (deploy-services.yml, deploy-authentik.yml). The services wait for
+  # the images; authentik runs upstream's image, so it only needs the bundle and
+  # can be approved while the images are still building. A target's environment
+  # holds its host's secrets (DEPLOY_HOST and the rest); the approval is a
+  # separate environment's, so the services' jobs ask once between them.
+  deploy-services-dev:
+    name: services (dev-qa)
     needs: [tag, images, package]
-    runs-on: ubuntu-latest
-    environment: deploy-infra
-    steps:
-      - run: echo "Approved"
+    uses: ./.github/workflows/deploy-services.yml
+    with:
+      environment: dev-qa
+      approval: deploy-infra
+      target: dev
+      tag: ${{ needs.tag.outputs.value }}
+      bundle_sha256: ${{ fromJSON(needs.package.outputs.sha256).dev }}
+    secrets: inherit
 
-  # Each has the host fetch this release's bundle and run its deploy.sh for one
-  # service, once approve-infra is approved. They deploy this repo's images, so
-  # they wait for them.
-  deploy:
-    name: deploy ${{ matrix.service }}
-    needs: [tag, images, package, approve-infra]
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      # Two at a time, in this order, the next starting as one finishes. The
-      # services are independent, so a failure doesn't stop the rest.
-      max-parallel: 2
-      matrix:
-        include:
-          - service: caddy
-          - service: auth-broker
-          - service: fluent-bit
-          - service: victoria-logs
-          - service: victoria-metrics
-          # Recreated only when its service changes.
-          - service: redis
-    concurrency:
-      # Per service: a group the whole matrix shared would cancel all but one
-      # of its pending jobs.
-      group: deploy-${{ matrix.service }}-${{ needs.tag.outputs.value }}
-      cancel-in-progress: false
-    env: &deploy-env
-      TAG: ${{ needs.tag.outputs.value }}
-      SERVICE: ${{ matrix.service }}
-      DEPLOY_TARGET: ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}
-      BUNDLE_URL: ${{ github.server_url }}/${{ github.repository }}/releases/download/${{ needs.tag.outputs.value }}/deploy-${{ needs.tag.outputs.value }}.tar.gz
-      BUNDLE_SHA256: ${{ needs.package.outputs.sha256 }}
-    steps: &deploy-steps
-      - uses: actions/checkout@v7
-
-      - name: Set up SSH
-        env:
-          ORACLE_SSH_TOKEN: ${{ secrets.ORACLE_SSH_TOKEN }}
-          DEPLOY_SSH_KNOWN_HOSTS: ${{ secrets.DEPLOY_SSH_KNOWN_HOSTS }}
-        run: |
-          install -m 700 -d ~/.ssh
-          printf '%s\n' "$ORACLE_SSH_TOKEN" > ~/.ssh/id_deploy
-          chmod 600 ~/.ssh/id_deploy
-          printf '%s\n' "$DEPLOY_SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
-
-      - name: Deploy ${{ matrix.service }}
-        run: ssh -i ~/.ssh/id_deploy "$DEPLOY_TARGET" bash -s -- "$SERVICE" "$TAG" "$BUNDLE_URL" "$BUNDLE_SHA256" < scripts/fetch-release.sh
-
-  # authentik runs upstream's image, so this only needs the bundle and can be
-  # approved while the images are still building. Same steps as deploy.
-  deploy-authentik:
-    name: ${{ matrix.environment }}
+  deploy-authentik-dev:
+    name: authentik (dev-qa)
     needs: [tag, package]
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          # authentik's configuration is the terraform job's, below.
-          - environment: deploy-authentik
-            service: authentik
-    environment: ${{ matrix.environment }}
-    concurrency:
-      group: ${{ matrix.environment }}-${{ needs.tag.outputs.value }}
-      cancel-in-progress: false
-    env: *deploy-env
-    steps: *deploy-steps
-
-  # authentik's configuration, from this tag's terraform/, once authentik is
-  # up: a plan, applied after approval only if it changes anything. See
-  # terraform.yml.
-  terraform:
-    needs: [tag, deploy-authentik]
+    # The terraform job it calls comments on pull requests, so its token asks for this even here.
     permissions:
       contents: read
-      # The plan job comments on pull requests, so its token asks for this even here.
       pull-requests: write
-    uses: ./.github/workflows/terraform.yml
+    uses: ./.github/workflows/deploy-authentik.yml
     with:
-      apply: true
+      environment: dev-qa
+      approval: deploy-authentik
+      target: dev
       tag: ${{ needs.tag.outputs.value }}
+      bundle_sha256: ${{ fromJSON(needs.package.outputs.sha256).dev }}
     secrets: inherit

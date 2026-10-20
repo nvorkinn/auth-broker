@@ -89,7 +89,7 @@ jobs:
       - name: Check secrets are encrypted
         run: |
           status=0
-          for f in secrets/*.env; do
+          for f in secrets/*/*.env; do
             # SOPS's dotenv format: every value is ENC[...], plus its own sops_* metadata.
             if ! grep -q '^sops_mac=' "$f" || grep -vE '^(#|$|sops_)' "$f" | grep -qv '=ENC\['; then
               echo "::error file=$f::not fully SOPS-encrypted; encrypt it with sops before committing"

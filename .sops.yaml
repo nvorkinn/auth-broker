@@ -1,8 +1,14 @@
-# Who can decrypt secrets/*.env: Nikolai's laptop (to edit them) and the host
-# (/opt/auth-broker/age.key, at deploy time). After changing this list, run
-# `sops updatekeys secrets/*.env`.
+# Who can decrypt secrets/<environment>/*.env. Each environment's files are readable by Nikolai's laptop (to edit them)
+# and by that environment's host only (/opt/auth-broker/age.key, at deploy time), so the dev/QA host can never decrypt
+# production's secrets. After changing a list, run `sops updatekeys secrets/<environment>/*.env`.
 creation_rules:
-  - path_regex: ^secrets/[^/]+\.env$
+  - path_regex: ^secrets/dev/[^/]+\.env$
     age: >-
       age10ekvquu5g773glj5a24ht3uaegdm6atkv7el8nmql4jyvtr3fgeqyxvfuy,
       age1dwge8qknrx7sxee9yg6u5yn2fgpzd2hqrv3gna7x0d937s4a6qysvud3x0
+  # Production: the laptop's key plus the production host's (age-keygen -o /opt/auth-broker/age.key there),
+  # once it exists.
+  # - path_regex: ^secrets/prod/[^/]+\.env$
+  #   age: >-
+  #     <the laptop's public key, as in the dev rule>,
+  #     <the production host's public key>

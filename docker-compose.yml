@@ -29,7 +29,7 @@ x-authentik: &authentik
     AUTHENTIK_POSTGRESQL__NAME: authentik
     AUTHENTIK_POSTGRESQL__USER: authentik
     # Email (sign-up confirmation, password recovery) through Resend's SMTP. The API key is the password,
-    # AUTHENTIK_EMAIL__PASSWORD, in secrets/authentik.env.
+    # AUTHENTIK_EMAIL__PASSWORD, in secrets/<environment>/authentik.env.
     AUTHENTIK_EMAIL__HOST: smtp.resend.com
     AUTHENTIK_EMAIL__PORT: "587"
     AUTHENTIK_EMAIL__USERNAME: resend
@@ -58,7 +58,7 @@ services:
     command: ["gunicorn", "--bind", "127.0.0.1:5000", "wsgi:app"]
     volumes:
       - ./data:/app/data
-    # Decrypted from secrets/ by deploy.sh, as are the other services' env_files.
+    # Decrypted from secrets/<environment>/ by deploy.sh, as are the other services' env_files.
     env_file:
       - broker.env
       - redis.env
