@@ -67,11 +67,11 @@ makes it safe for the broker to trust them. The broker has no user table: the ui
 | **Pairing code** | `flask devices code` / `unpair` | `pairing_codes`, and `v1:pairing:<device id>` for the pool to draw | 6 characters, 10 minutes, one use. |
 | **Spotify tokens** | Spotify OAuth, `/auth/spotify/callback` | `spotify_tokens`, plaintext | Refreshed by the music provider. |
 | **Apple Music user token** | MusicKit JS on the settings page | `apple_music_tokens`, encrypted | Lasts about six months, can't be refreshed: cleared when Apple refuses it. |
-| **Glowmarkt password** | the owner, on the settings page | `glowmarkt_credentials`, encrypted | Only the glow provider decrypts it. |
+| **Glowmarkt password** | the owner, on the settings page | `glowmarkt_credentials`, encrypted | Never leaves the broker's image: the glow provider signs in with it. |
 | **GitHub token** | the owner, on the settings page | `github_tokens`, encrypted | A read-only fine-grained PAT, used only by the developer provider. |
 | **`CREDENTIAL_ENCRYPTION_KEY`** | operator | `secrets/broker.env` | The Fernet key for the encrypted columns. Changing it makes them unreadable. |
 | **App keys** | operator | `secrets/broker.env` | Spotify client id and secret, the MusicKit key (signs Apple developer tokens), `TFL_APP_KEY` (only for the settings page's stop search). |
-| **`FLASK_SECRET_KEY`** | operator | `secrets/broker.env` | Signs the session cookie, which holds only the Spotify OAuth state and the GitHub dashboard's CSRF token. |
+| **`FLASK_SECRET_KEY`** | operator | `secrets/broker.env` | Signs the session cookie, which holds only the Spotify OAuth state (and which screen it's for) and the GitHub dashboard's CSRF token. |
 | **`STATUS_TOKEN`** | operator | `secrets/broker.env` | Bearer for `GET /api/status/devices`. |
 | **`GITHUB_DASHBOARD_TOKEN`** | operator | `secrets/broker.env` | The `/github` dashboard's PAT. |
 | **`REDIS_PASSWORD`** | operator | `secrets/redis.env` | Used by everything that talks to Redis, including pi-dashboard. |
@@ -114,8 +114,8 @@ sequenceDiagram
 
 - The screen shows only frames from the broker; the pairing URL appears only on the phone.
 - The screen registers on every boot and after a 401, not on every poll.
-- Pairing by code is the fallback: `flask devices code` writes `v1:pairing:<device id>`, the pool draws the code on
-  the screen, and the owner types it at `/pair`.
+- Pairing by code is the fallback: `flask devices code` prints a code and writes `v1:pairing:<device id>`, which the
+  pool draws if the screen has been paired before (it only draws named screens). The owner types it at `/pair`.
 
 ## Steady state
 
@@ -166,7 +166,8 @@ sequenceDiagram
 ```
 
 The providers wake on `v1:sub:changed` and fetch anything new straight away. If Redis can't be written, the save
-still succeeds and the minute's rewrite catches up.
+still succeeds: the minute's rewrite catches up on the configs, and the subscriptions are written again on the next
+save, broker restart or `flask config publish`.
 
 ## Quiet screens and deletion
 

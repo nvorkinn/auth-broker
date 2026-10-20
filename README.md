@@ -73,15 +73,16 @@ Every browser page needs an authentik login. Caddy forward-auths the request and
   `POST /pair/token`, until the screen has registered (giving up after 90 seconds), then pairs it and opens its
   settings. Someone else's device is a `409`.
 - **By code (a fallback).** `flask devices code <device_id>` issues a 6-character code, valid 10 minutes, which the
-  render pool draws on the screen. The owner enters it at `/pair`. A code can also hand a device to a new owner. Wrong
-  codes are throttled per IP.
+  owner enters at `/pair`. The render pool draws it on the screen if the screen has been paired before (it only draws
+  named screens); for a new screen, read it from the command's output. A code can also hand a device to a new owner.
+  Wrong codes are throttled per IP.
 
 Pairing gives the screen its internal name (its slug, which is its device id), puts it on the render pool's list and
 queues its first render. Its owner can give it a friendly name on its settings page.
 
 Each screen's settings are at `/device/<id>` (and `/device` for the most recently paired one): departure stops (TfL and
 Entur), the weather place (an Open-Meteo search), a postcode for the notice board, Glowmarkt, Spotify and Apple Music,
-a GitHub token for the developer panel, language, style, clock format, orientation and name. `/device/<id>/screen` shows
+a GitHub token for the developer panel, language, style, clock format and name. `/device/<id>/screen` shows
 the screen's current frame. "Unlink screen" revokes the screen's secret; a replacement screen can't yet join an
 existing device, so it registers as a new one.
 
@@ -103,8 +104,9 @@ SQLite is the source of truth; Redis holds what pi-dashboard reads. The broker w
 - `v1:render:screens`: the screens the pool draws (device id to slug), leaving out any not seen for 24 hours;
 - render jobs on `v1:render:jobs`, for each screen whose config changed.
 
-These are rewritten from the database on every config save, when the broker starts, every minute, and by
-`flask config publish`, writing only what differs. A failed write is logged and the save still succeeds. The providers
+The subscriptions are rewritten in full on every config save, when the broker starts and by `flask config publish`.
+The configs and the screen list are rewritten then too, and also every minute, writing only what differs. A failed
+write is logged and the save still succeeds. The providers
 write their data with a TTL, and the broker reads each screen's frame (`v1:frame:<device id>`) and pace hints
 (`v1:pace:<source>:<id>`) from the pool and providers.
 
@@ -208,7 +210,7 @@ Run on the host with `docker exec auth-broker flask --app wsgi <command>`:
 | Command | Does |
 |---|---|
 | `devices list` | List every device. |
-| `devices code <device_id>` | Issue a pairing code, shown on the screen. |
+| `devices code <device_id>` | Issue a pairing code (drawn on the screen if it has been paired before). |
 | `devices owner <device_id> <user id>` | Pair a device with a user. |
 | `devices unpair <device_id> [--config]` | Clear its owner and show a new code; `--config` also resets its settings and linked accounts. |
 | `devices forget <device_id>` | Delete it; the screen registers again as a new device. |
@@ -217,7 +219,7 @@ Run on the host with `docker exec auth-broker flask --app wsgi <command>`:
 
 Each change to a device's pairing also updates its config in Redis and queues a render.
 
-## Releasing and deploying
+## Deploying
 
 Run the **Release** workflow from the Actions tab on `main`, picking `patch`, `minor` or `major` (or push a `v*` tag).
 It builds five images for amd64 and arm64, tagged with the release and `latest`:
@@ -250,8 +252,9 @@ host's copy.
 
 **One-time setup** in the repository's settings:
 
-- **Environments** `deploy-caddy`, `deploy-config` and `deploy-authentik`, each with yourself as a required reviewer
-  (that's what stops them running on their own).
+- **Environments** `deploy-caddy`, `deploy-config`, `deploy-authentik` and `terraform`, each with yourself as a
+  required reviewer (that's what stops them running on their own). `terraform` also needs a branch rule: see
+  [terraform/README.md](terraform/README.md#applying).
 - **Secrets:** `DEPLOY_HOST`, `DEPLOY_USER` (in the `docker` group, owning `/opt/auth-broker/`), `ORACLE_SSH_TOKEN` (a
   private key for that user) and `DEPLOY_SSH_KNOWN_HOSTS` (`ssh-keyscan <host>`), plus the Terraform ones in
   [terraform/README.md](terraform/README.md#secrets) and `CODECOV_TOKEN`.
@@ -274,37 +277,52 @@ key that can edit the secrets), `age-keygen -o /opt/auth-broker/age.key` on the 
 
 ## Operations
 
-**Backups.** `/opt/auth-broker/data/` (the SQLite database) and the `authentik_db` volume (every user and passkey) are
+### Backups
+
+`/opt/auth-broker/data/` (the SQLite database) and the `authentik_db` volume (every user and passkey) are
 the only state worth backing up. Caddy's certificates are in the `caddy_data` volume: never remove it
 (`docker compose down -v` would), or Caddy re-requests every certificate and hits Let's Encrypt's rate limits.
 
-**Logs.** Fluent Bit tails every container's log and ships it to VictoriaLogs, which keeps a week. The broker posts the
+### Logs
+
+Fluent Bit tails every container's log and ships it to VictoriaLogs, which keeps a week. The broker posts the
 screens' logs there itself (`service=countdown-esp32`, `host=<device id>`). Our own services write JSON lines with
 `level` and `_msg`; every record gets `service` (for containers, the container name) and `host`. Browse at
 `https://logs.nikolaivorkinn.com/select/vmui` (authentik admins only), e.g. `{service="auth-broker"}`.
 
-**Metrics.** VictoriaMetrics keeps a month of pushed metrics: the screens' (via the broker), and the render pool's OTLP
+### Metrics
+
+VictoriaMetrics keeps a month of pushed metrics: the screens' (via the broker), and the render pool's OTLP
 metrics and the host's (via Fluent Bit). Browse at `https://metrics.nikolaivorkinn.com/vmui/` (admins only). Its
 Dashboards tab shows `victoria-metrics/dashboards/` (one, **Screens**, per screen and for the render pool); try a query
 in vmui before changing one, as CI checks every query parses. The ingest paths on both hosts take
 `Authorization: Bearer <LOGS_INGEST_TOKEN>`.
 
-**Redis.** Capped at 128 MB, evicting only keys with a TTL. Everything in it comes back on its own after a restart:
-provider data within minutes, configs within a minute.
+### Redis
+
+Capped at 128 MB, evicting only keys with a TTL. After a restart, the configs and screen list come back within a
+minute and the broker's providers refetch on their own. pi-dashboard's providers need the subscriptions, which come back
+on the next settings save or broker restart; run `flask config publish` to restore them at once.
 
 ```bash
 docker exec -it redis sh -c 'REDISCLI_AUTH="$REDIS_PASSWORD" redis-cli'
 ```
 
-**Email.** authentik sends sign-up confirmations and password-recovery links through [Resend](https://resend.com)'s
+### Email
+
+authentik sends sign-up confirmations and password-recovery links through [Resend](https://resend.com)'s
 SMTP (settings in `docker-compose.yml`, the API key as `AUTHENTIK_EMAIL__PASSWORD` in `secrets/authentik.env`). The
 domain's SPF and DKIM records must be verified in Resend, or mail lands in spam.
 
-**authentik's configuration** (flows, sign-up, passkey login, Google, the proxy providers) is Terraform in
+### authentik
+
+authentik's configuration (flows, sign-up, passkey login, Google, the proxy providers) is Terraform in
 [`terraform/`](terraform/README.md). Users and their devices are managed in authentik's UI. New users can only sign up
 from a login that started at `/pair`, and must set up a passkey or authenticator app.
 
-**Request tracing.** Setting `LOG_REQUEST_HEADERS: "true"` in `docker-compose.yml` makes the broker and Caddy log every
+### Request tracing
+
+Setting `LOG_REQUEST_HEADERS: "true"` in `docker-compose.yml` makes the broker and Caddy log every
 request's headers (never `Authorization` or cookies), for debugging sign-in redirects. Off by default.
 
 ## Reusable PR workflows
