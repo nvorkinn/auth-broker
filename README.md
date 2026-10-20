@@ -132,6 +132,31 @@ The PAT needs repository access to your projects with **Actions: read**, **Check
 **Pull requests: read and write** (for auto-merge), **Deployments: read and write** (to approve) and **Contents: read
 and write** (for releases and merging). It's only used server-side.
 
+### Through the GitHub App (instead of the PAT)
+
+A private GitHub App can stand in for the PAT: the dashboard signs you in with it and then acts as you with tokens
+GitHub expires after 8 hours (renewed on their own for 6 months), and its webhook makes the page live. Create it under
+GitHub's Settings → Developer settings → GitHub Apps:
+
+- **Callback URL** `https://auth.nikolaivorkinn.com/github/callback`, with *Expire user authorization tokens* ticked.
+- **Webhook URL** `https://auth.nikolaivorkinn.com/api/github/webhook`, with a random secret, subscribed to *Pull
+  request*, *Pull request review*, *Check run*, *Check suite*, *Status*, *Workflow run*, *Workflow job*, *Deployment
+  status* and *Push*.
+- The same permissions as the PAT above, then install it on your repositories.
+
+Then add to `secrets/broker.env` and release:
+
+```dotenv
+GITHUB_APP_CLIENT_ID=<the App's client ID>
+GITHUB_APP_CLIENT_SECRET=<a client secret>
+GITHUB_APP_WEBHOOK_SECRET=<the webhook secret>
+```
+
+The page shows **Connect GitHub** until you've signed in; until then it keeps using `GITHUB_DASHBOARD_TOKEN` if one is
+set. The webhook is the one dashboard path outside the authentik login (GitHub can't sign in), so its signature is its
+only check. It doesn't call GitHub: it notes what changed in Redis (`v1:github:changes`), the page asks for those
+changes every 5 seconds and re-reads only them, and reads everything every 5 minutes in case a delivery was lost.
+
 **Auto-merge** needs *Allow auto-merge* turned on in each repository's settings. GitHub only waits when the base
 branch's protection requires checks; where nothing is required, the button merges at once if the PR's checks have all
 passed, and refuses while any are still running or failed.

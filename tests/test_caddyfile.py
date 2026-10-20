@@ -36,6 +36,15 @@ def test_dashboard_and_its_assets_are_behind_authentik(app):
     assert not any(fnmatchcase(route, pattern) for route in routes for pattern in paths)
 
 
+def test_only_the_signed_github_webhook_skips_the_login(app):
+    """GitHub can't sign in to Authentik, so the webhook checks its signature; nothing else of GitHub's is open."""
+    paths = _paths_without_login()
+    assert "/api/github/webhook" in paths
+    assert [rule.rule for rule in app.url_map.iter_rules() if rule.endpoint.startswith("github_webhook.")] == [
+        "/api/github/webhook"
+    ]
+
+
 def test_frame_answers_close_the_connection():
     """A 304 through Caddy has no Content-Length, and the ESP32 then reads until the connection closes.
 

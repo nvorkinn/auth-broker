@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="csrf-token" content="{{ csrf }}">
+    <meta name="github-webhooks" content="{{ 'on' if webhooks else 'off' }}">
     <title>GitHub dashboard</title>
     <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='github_dashboard.svg') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='github_dashboard.css') }}">
@@ -17,7 +18,14 @@
                 <p id="summary" role="status">Loading your repositories...</p>
             </div>
             <div class="header-controls">
+                {% if webhooks %}
+                <span class="muted refresh-hint">Live from GitHub&rsquo;s webhook &middot; everything: 5 min</span>
+                {% else %}
                 <span class="muted refresh-hint">Active items: 5s &middot; everything: 60s</span>
+                {% endif %}
+                {% if connect %}
+                <a class="connect" href="{{ url_for('github_dashboard.connect') }}" title="Sign in to the GitHub App, so the dashboard acts as you with short-lived tokens">Connect GitHub</a>
+                {% endif %}
                 <span class="identity">{{ username }}</span>
                 <button id="refresh" type="button">Refresh all</button>
             </div>

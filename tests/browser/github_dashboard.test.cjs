@@ -81,7 +81,7 @@ const active = {
 // Whole-project reads, leaving out quick polls of single runs and PRs.
 const fullCalls = (app, name = "alice/project") => app.calls.filter(call => new RegExp(`/${name}(\\?|$)`).test(call.url));
 
-async function harness(initial = active, repositories = [repo], storage = null) {
+async function harness(initial = active, repositories = [repo], storage = null, { webhooks = false } = {}) {
     let now = 100000;
     let data = initial;
     let failure = null;
@@ -91,7 +91,7 @@ async function harness(initial = active, repositories = [repo], storage = null) 
     const intervals = [];
     const document = {
         hidden: false,
-        querySelector: () => ({ content: "csrf-token" }),
+        querySelector: selector => ({ content: selector.includes("github-webhooks") ? (webhooks ? "on" : "off") : "csrf-token" }),
         getElementById: id => ids.get(id),
         createElement: tag => new Element(tag),
         createElementNS: (namespace, tag) => Object.assign(new Element(tag), { namespaceURI: namespace }),
@@ -827,4 +827,53 @@ test("a small matrix whose jobs were all skipped stays one card until expanded",
     assert.equal(toggle(app).textContent, "Expand matrix jobs");
     toggle(app).listeners.click();
     assert.equal(cards(app).length, 4);
+});
+
+test("with the webhook, the page re-reads only what changed and reads everything every five minutes", async () => {
+    let feed = { last: "1-0", changes: [], reset: false };
+    const pull = { ...active.pulls[0], sha: "a1" };
+    const release = { ...waitingRelease, id: 9 };
+    const app = await harness(url => url.startsWith("/github/changes") ? feed : { ...idle, active: true, pulls: [pull], workflows: [release] },
+        [repo], null, { webhooks: true });
+    const feedCalls = () => app.calls.filter(call => call.url.startsWith("/github/changes"));
+    await app.tick();
+    assert.equal(feedCalls()[0].url, "/github/changes", "the first read only marks where to start");
+    feed = { last: "2-0", reset: false, changes: [
+        { repo: "alice/project", kind: "pull", id: "4" }, { repo: "alice/project", kind: "pull", id: "4" },
+        { repo: "alice/project", kind: "run", id: "9" }, { repo: "someone/else", kind: "repo" },
+    ] };
+    app.advance(5000);
+    const before = fullCalls(app).length;
+    await app.tick();
+    await new Promise(setImmediate);
+    assert.equal(feedCalls().at(-1).url, "/github/changes?after=1-0");
+    assert.equal(quickCalls(app, "pulls/4").length, 1, "one read per changed item");
+    assert.equal(quickCalls(app, "runs/9").length, 1);
+    assert.equal(fullCalls(app).length, before);
+    feed = { last: "3-0", reset: false, changes: [{ repo: "alice/project", kind: "pull", id: "8" }] };
+    app.advance(5000);
+    await app.tick();
+    await app.tick();
+    assert.equal(fullCalls(app).at(-1).url, "/github/repositories/alice/project?section=pulls", "a new PR reads the PR list");
+    app.advance(60000);
+    const settled = fullCalls(app).length;
+    feed = { last: "3-0", reset: false, changes: [] };
+    await steps(app, 10);
+    assert.equal(fullCalls(app).length, settled, "no full read until five minutes have passed");
+    assert.equal(quickCalls(app, "pulls/4").length, 1, "nothing is quick-polled");
+    app.advance(300000);
+    await app.tick();
+    assert.equal(fullCalls(app).length, settled + 1);
+});
+
+test("a feed that lost changes reads everything again", async () => {
+    let feed = { last: "5-0", changes: [], reset: false };
+    const app = await harness(url => url.startsWith("/github/changes") ? feed : idle, [repo], null, { webhooks: true });
+    await app.tick();
+    const before = fullCalls(app).length;
+    feed = { last: "1-0", changes: [], reset: true };
+    app.advance(5000);
+    await app.tick();
+    await app.tick();
+    assert.equal(fullCalls(app).length, before + 1);
 });
