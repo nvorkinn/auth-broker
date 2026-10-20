@@ -13,6 +13,7 @@ import redis
 import responses
 from countdown_api import fixtures
 
+from broker import provider_loop
 from broker.clients import glowmarkt
 from broker.db import db
 from broker.models import Device, DeviceConfig, GlowmarktCredentials
@@ -179,8 +180,9 @@ def test_a_nudge_only_fetches_accounts_new_since_the_last_tick(app, provider, st
     add_device(app, DEVICE)
     provider.run_cycle()
     add_device(app, "new-device")
+    provider.nudged = True
 
-    assert provider.run_cycle(nudged=True) == 1
+    assert provider.run_cycle() == 1
 
     assert store.get("v1:energy:new-device") is not None
     assert len(glow_api.calls_to("/readings")) == 6
@@ -195,74 +197,52 @@ def test_an_unreachable_redis_is_logged_and_retried_next_tick(app, provider, sto
     assert "Couldn't write" in caplog.text
 
     provider.store = working
-    assert provider.run_cycle(nudged=True) == 1
+    provider.nudged = True
+    assert provider.run_cycle() == 1
     assert store.get(f"v1:energy:{DEVICE}") is not None
 
 
 # --- The loop ------------------------------------------------------------------------------
 
 
-class FakeClock:
-    def __init__(self, start):
-        self.t = start
+def test_a_tick_after_a_nudge_fetches_every_account_again(app, provider, glow_api):
+    add_device(app, DEVICE)
+    provider.run_cycle()
+    provider.nudged = True
+    assert provider.run_cycle() == 0
 
-    def __call__(self):
-        return self.t
+    provider.nudged = False
 
-
-def test_waits_for_the_next_epoch_aligned_tick(app, store, monkeypatch):
-    clock = FakeClock(1000 * glow.INTERVAL_S + 123.4)
-    provider = glow.GlowProvider(read_only_app(), store, clock=clock)
-    monkeypatch.setattr(provider, "run_cycle", lambda **_: 0)
-    deadlines = []
-
-    def wait(deadline):
-        deadlines.append(deadline)
-        provider.stop()
-        return False
-
-    monkeypatch.setattr(provider, "_wait", wait)
-    provider.serve()
-
-    assert deadlines == [1001 * glow.INTERVAL_S]
+    assert provider.run_cycle() == 1
 
 
-def test_a_nudge_on_sub_changed_ends_the_wait(app, store):
-    clock = FakeClock(0.0)
-    provider = glow.GlowProvider(read_only_app(), store, clock=clock)
-    provider._pubsub = store.pubsub(ignore_subscribe_messages=True)
-    provider._pubsub.subscribe(glow.SUB_CHANGED)
-    store.publish(glow.SUB_CHANGED, "")
-
-    assert provider._wait(glow.INTERVAL_S) is True
-
-
-def test_the_wait_ends_at_the_deadline_or_a_stop(app, store):
-    clock = FakeClock(100.0)
-    provider = glow.GlowProvider(read_only_app(), store, clock=clock)
-
-    assert provider._wait(50.0) is False
-    provider.stop()
-    assert provider._wait(10_000.0) is False
-
-
-def test_serve_runs_a_nudged_cycle_after_a_nudge_and_a_full_one_after_a_tick(app, store, monkeypatch):
+def test_the_loop_tells_the_cycle_after_a_nudge_it_was_nudged(app, store, monkeypatch):
+    """provider_loop runs it: a nudge only fetches what's new (above), a tick everything."""
     provider = glow.GlowProvider(read_only_app(), store)
     cycles = []
     waits = iter([True, False])
 
-    def wait(_deadline):
+    def wait():
         try:
             return next(waits)
         except StopIteration:
             provider.stop()
             return False
 
-    monkeypatch.setattr(provider, "run_cycle", lambda *, nudged: cycles.append(nudged))
-    monkeypatch.setattr(provider, "_wait", wait)
-    provider.serve()
+    monkeypatch.setattr(provider, "run_cycle", lambda: cycles.append(provider.nudged))
+    monkeypatch.setattr(provider, "_wait_for_next_cycle", wait)
+    provider.run()
 
     assert cycles == [False, True, False]
+
+
+def test_main_runs_the_provider_on_the_read_only_database(monkeypatch):
+    served = []
+    monkeypatch.setattr(provider_loop, "serve", lambda *args: served.append(args))
+
+    glow.main()
+
+    assert served == [(glow.GlowProvider,)]
 
 
 def test_the_provider_cant_write_to_the_database(app, provider):

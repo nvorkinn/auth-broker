@@ -45,7 +45,7 @@ def test_the_keys_are_the_contracts():
     url = "https://i.scdn.co/image/ab01300"
     assert album_art.art_key(url) == store_keys.album_art(url)
     assert device_keys.music(device_id) == [store_keys.spotify(device_id), store_keys.spotify_top(device_id)]
-    assert provider_loop.SUB_CHANGED == spotify_provider.SUB_CHANGED == glow.SUB_CHANGED == store_keys.SUB_CHANGED
+    assert provider_loop.SUB_CHANGED == store_keys.SUB_CHANGED
     assert scripts.ENQUEUE.source == render_jobs._ENQUEUE
 
 

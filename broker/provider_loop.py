@@ -5,7 +5,7 @@ cycles), or early on a `v1:sub:changed` message (a config was saved). SIGINT and
 failed cycle is logged and the next tick tries again; while Redis is unreachable the subscription is retried every
 RESUBSCRIBE_S, so a missed message only delays a change until the next tick.
 
-The developer provider runs in it; the music and glow providers have loops of their own.
+Every provider in the broker runs in it: the developer, music and glow providers.
 """
 
 import logging
@@ -43,7 +43,8 @@ def next_tick(now: float, interval_s: float) -> float:
 class ProviderLoop(ABC):
     """Runs cycles against `store` (made with decode_responses=True), in `app`'s context, until stop().
 
-    A provider says what a cycle does (run_cycle) and how far apart the ticks are (interval_s).
+    A provider says what a cycle does (run_cycle) and how far apart the ticks are (interval_s). A cycle can tell from
+    `nudged` whether a `v1:sub:changed` message started it early, rather than a tick.
     """
 
     # What the provider is called in its logs: "Developer".
@@ -54,6 +55,7 @@ class ProviderLoop(ABC):
         self.app = app
         self.store = store
         self.clock = clock
+        self.nudged = False
         self._stopping = threading.Event()
         self._pubsub: redis.client.PubSub | None = None
         # Set while Redis is unreachable: when to try subscribing again.
@@ -77,11 +79,11 @@ class ProviderLoop(ABC):
 
     def run(self) -> None:
         """Run cycles until stop() is called."""
-        self.logger.info("Starting the %s provider", self.label.lower())
+        self.logger.info("Starting the %s provider: every %ss", self.label.lower(), self.interval_s())
         try:
             while not self._stopping.is_set():
                 self._try_cycle()
-                self._wait_for_next_cycle()
+                self.nudged = self._wait_for_next_cycle()
         finally:
             self._close_pubsub()
         self.logger.info("Stopped the %s provider", self.label.lower())
@@ -97,13 +99,16 @@ class ProviderLoop(ABC):
             # The database, say.
             self.logger.exception("%s: the cycle failed; trying again next tick", self.label)
 
-    def _wait_for_next_cycle(self) -> None:
-        """Wait until the next tick, or until a `v1:sub:changed` message or stop() if sooner."""
+    def _wait_for_next_cycle(self) -> bool:
+        """Wait for the next tick, or a `v1:sub:changed` message or stop() if sooner; return whether a message came."""
         due = next_tick(self.clock(), self.interval_s())
         while not self._stopping.is_set():
             remaining = due - self.clock()
-            if remaining <= 0 or self._listen(min(remaining, LISTEN_S)):
-                return
+            if remaining <= 0:
+                return False
+            if self._listen(min(remaining, LISTEN_S)):
+                return True
+        return False
 
     def _listen(self, timeout: float) -> bool:
         """Wait up to `timeout` for a `v1:sub:changed` message; return whether one came.
@@ -180,10 +185,16 @@ def configure_logging() -> None:
     logging.basicConfig(level=os.environ.get("LOG_LEVEL", "INFO").upper(), handlers=[handler], force=True)
 
 
-def serve(make_provider: Callable[[Flask, redis.Redis], ProviderLoop]) -> None:
-    """Run the provider `make_provider` makes, in read_only_app(), until SIGINT or SIGTERM."""
+def serve(
+    make_provider: Callable[[Flask, redis.Redis], ProviderLoop],
+    make_app: Callable[[], Flask] = read_only_app,
+) -> None:
+    """Run the provider `make_provider` makes, in the app `make_app` makes, until SIGINT or SIGTERM.
+
+    The app is made once logging is set up, so its own start is logged too.
+    """
     configure_logging()
-    provider = make_provider(read_only_app(), connect())
+    provider = make_provider(make_app(), connect())
     # As a container's PID 1 nothing handles SIGTERM unless we do, and docker stop would have to kill us.
     for signum in (signal.SIGINT, signal.SIGTERM):
         signal.signal(signum, lambda *_: provider.stop())

@@ -6,8 +6,8 @@ It runs in the broker's full app (create_app), as it writes to the database: ref
 Music's new plays, which the top lists are counted from (apple_music.record_plays) and nothing else logs. The playing
 tracks' covers are stored too (broker/album_art.py). The keys are the countdown-api store contract's.
 
-Its loop works as provider_loop.ProviderLoop's, every INTERVAL_S. A device whose fetch fails is logged and skipped;
-its keys expire if it keeps failing.
+It runs on provider_loop's loop, every INTERVAL_S. A device whose fetch fails is logged and skipped; its keys expire
+if it keeps failing.
 
 While a device's Spotify is playing, its screen shows a progress bar, which needs the position every few seconds. So
 the loop then runs every BURST_INTERVAL_S, and a device that's playing is, in the cycles between its minutes:
@@ -23,37 +23,30 @@ deleted and the minute's tick draws the screen.
 """
 
 import json
-import logging
-import os
-import signal
-import sys
-import threading
 import time
-from contextlib import suppress
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from http import HTTPStatus
 from typing import TYPE_CHECKING
 
-import redis
 import requests
 from countdown_api import keys as store_keys
 from redis.exceptions import RedisError
 from sqlalchemy import or_, select
 
+from broker import create_app, provider_loop
 from broker.album_art import AlbumArt, art_urls
 from broker.clients import spotify
 from broker.db import db
 from broker.models import DeviceConfig, SpotifyToken
+from broker.provider_loop import ProviderLoop
 from broker.services import music, render_jobs
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
+    import redis
     from flask import Flask
-
-# By name, not __name__, which is "__main__" when run with -m.
-logger = logging.getLogger("broker.spotify_provider")
 
 # What's playing: fetched every minute, as often as the screens are rendered. The queue, Apple Music and the top lists
 # are fetched this often at most, however often the loop runs.
@@ -85,11 +78,6 @@ APPLE_MUSIC = "apple_music"
 # again until it says (Retry-After, in seconds), or until this long when it doesn't say.
 DEFAULT_BACKOFF_S = 60
 
-# As in provider_loop.
-SUB_CHANGED = store_keys.SUB_CHANGED
-LISTEN_S = 1.0
-RESUBSCRIBE_S = 5.0
-
 
 def player_key(device_id: str) -> str:
     """Return the key of what a device's music services are playing (the store contract's)."""
@@ -104,11 +92,6 @@ def pace_key(device_id: str) -> str:
 def top_key(device_id: str) -> str:
     """Return the key of a device's top tracks and artists (the store contract's)."""
     return store_keys.spotify_top(device_id)
-
-
-def next_tick(now: float, interval_s: float) -> float:
-    """Return the first multiple of `interval_s` after `now` (epoch seconds): when the next cycle is due."""
-    return (now // interval_s + 1) * interval_s
 
 
 @dataclass(frozen=True)
@@ -248,8 +231,10 @@ def retry_after(error: Exception) -> int | None:
     return max(int(header), 1) if str(header).isdigit() else DEFAULT_BACKOFF_S
 
 
-class MusicProvider:
-    """Runs the cycles against `store` (made with decode_responses=True), in `app`'s context, until stop()."""
+class MusicProvider(ProviderLoop):
+    """Fetches every wanted device's music each cycle, faster while one of them is playing Spotify."""
+
+    label = "Music"
 
     def __init__(
         self,
@@ -258,12 +243,9 @@ class MusicProvider:
         clock: Callable[[], float] = time.time,
         images: requests.Session | None = None,
     ) -> None:
-        """`clock` gives the time in epoch seconds (a parameter for the tests); `images` fetches the covers."""
-        self.app = app
-        self.store = store
-        self.clock = clock
+        """See ProviderLoop; `images` fetches the covers."""
+        super().__init__(app, store, clock)
         self.art = AlbumArt(store, images)
-        self._stopping = threading.Event()
         self._top_fetched: dict[str, TopFetched] = {}
         self._full: dict[str, FullCycle] = {}
         # The devices whose last cycle found Spotify playing. A device whose fetch fails stays as it was, so one
@@ -271,33 +253,10 @@ class MusicProvider:
         self._playing: set[str] = set()
         # Service -> when it may be called again, after it answered 429.
         self._backoff_until: dict[str, float] = {}
-        self._pubsub: redis.client.PubSub | None = None
-        # Set while Redis is unreachable: when to try subscribing again.
-        self._resubscribe_at: float | None = None
 
     def interval_s(self) -> float:
         """Return BURST_INTERVAL_S while any device's Spotify is playing, else INTERVAL_S."""
         return BURST_INTERVAL_S if self._playing else INTERVAL_S
-
-    def stop(self) -> None:
-        """Stop after the device being fetched (if any). Safe to call from a signal handler."""
-        self._stopping.set()
-
-    def run(self) -> None:
-        """Run cycles until stop() is called."""
-        logger.info(
-            "Starting the music provider: every %ss (%ss while playing), top lists every %ss",
-            INTERVAL_S,
-            BURST_INTERVAL_S,
-            TOP_INTERVAL_S,
-        )
-        try:
-            while not self._stopping.is_set():
-                self._try_cycle()
-                self._wait_for_next_cycle()
-        finally:
-            self._close_pubsub()
-        logger.info("Stopped the music provider")
 
     def run_cycle(self) -> int:
         """Fetch every wanted device and write what came back; return how many of their keys were written.
@@ -321,7 +280,9 @@ class MusicProvider:
                 if self._stopping.is_set():
                     break
                 written += self._fetch_device(want)
-        logger.debug("Music: wrote %d keys for %d devices, and %d new covers", written, len(wanted), self.art.fetched)
+        self.logger.debug(
+            "Music: wrote %d keys for %d devices, and %d new covers", written, len(wanted), self.art.fetched
+        )
         return written
 
     def _top_due(self, want: Wanted, now: float) -> bool:
@@ -439,14 +400,14 @@ class MusicProvider:
             raise
         except Exception:
             # Never worth the player key: the renderer draws the page without a cover.
-            logger.exception("Music: couldn't store device %s's covers", device_id)
+            self.logger.exception("Music: couldn't store device %s's covers", device_id)
 
     def _fetch(
         self, fetcher: Callable[[str], dict], device_id: str, service: str, part: str, now: float
     ) -> dict | None:
         """Return what `fetcher` gets for the device, or None (logged) if it raises or `service` is backing off."""
         if now < self._backoff_until.get(service, 0):
-            logger.debug("Music: skipping device %s's %s %s, rate-limited", device_id, service, part)
+            self.logger.debug("Music: skipping device %s's %s %s, rate-limited", device_id, service, part)
             return None
         try:
             return fetcher(device_id)
@@ -454,91 +415,15 @@ class MusicProvider:
             db.session.rollback()
             if (wait := retry_after(e)) is not None:
                 self._backoff_until[service] = now + wait
-                logger.warning("Music: %s is rate-limiting the app (429); calling it again in %ds", service, wait)
+                self.logger.warning("Music: %s is rate-limiting the app (429); calling it again in %ds", service, wait)
             else:
-                logger.exception("Music: couldn't fetch device %s's %s %s", device_id, service, part)
+                self.logger.exception("Music: couldn't fetch device %s's %s %s", device_id, service, part)
             return None
-
-    def _try_cycle(self) -> None:
-        """Run a cycle, logging rather than raising if it fails (the next tick tries again)."""
-        try:
-            self.run_cycle()
-        except RedisError as e:
-            logger.warning("Music: couldn't reach Redis (%s); trying again next tick", e)
-        except Exception:
-            # The database, say.
-            logger.exception("Music: the cycle failed; trying again next tick")
-
-    def _wait_for_next_cycle(self) -> None:
-        """Wait until the next tick, or until a `v1:sub:changed` message or stop() if sooner."""
-        due = next_tick(self.clock(), self.interval_s())
-        while not self._stopping.is_set():
-            remaining = due - self.clock()
-            if remaining <= 0 or self._listen(min(remaining, LISTEN_S)):
-                return
-
-    def _listen(self, timeout: float) -> bool:
-        """Wait up to `timeout` for a `v1:sub:changed` message; return whether one came."""
-        if self._pubsub is None and self._resubscribe_at is not None and self.clock() < self._resubscribe_at:
-            self._stopping.wait(timeout)
-            return False
-        try:
-            if self._pubsub is None:
-                pubsub = self.store.pubsub(ignore_subscribe_messages=True)
-                pubsub.subscribe(SUB_CHANGED)
-                self._pubsub = pubsub
-                if self._resubscribe_at is not None:
-                    logger.info("Music: listening on %s again", SUB_CHANGED)
-                    self._resubscribe_at = None
-            message = self._pubsub.get_message(timeout=timeout)
-        except RedisError as e:
-            if self._resubscribe_at is None:
-                logger.warning("Music: lost %s (%s); subscribing again every %ss", SUB_CHANGED, e, RESUBSCRIBE_S)
-            self._resubscribe_at = self.clock() + RESUBSCRIBE_S
-            self._close_pubsub()
-            self._stopping.wait(timeout)
-            return False
-        if message is None or message["type"] != "message":
-            return False
-        logger.debug("Music: subscriptions changed")
-        return True
-
-    def _close_pubsub(self) -> None:
-        if self._pubsub is not None:
-            with suppress(RedisError):
-                self._pubsub.close()
-            self._pubsub = None
-
-
-def connect() -> redis.Redis:
-    """Return a client for the store, from REDIS_URL and REDIS_PASSWORD."""
-    return redis.Redis.from_url(
-        os.environ.get("REDIS_URL", "redis://127.0.0.1:6379/0"),
-        password=os.environ.get("REDIS_PASSWORD") or None,
-        decode_responses=True,
-        socket_timeout=5,
-        socket_connect_timeout=5,
-    )
-
-
-def _configure_logging() -> None:
-    """Log JSON lines to stdout, as provider_loop.configure_logging does."""
-    from broker.log_format import JsonFormatter  # noqa: PLC0415 -- it imports gunicorn, which only this needs here
-
-    handler = logging.StreamHandler(sys.stdout)
-    handler.setFormatter(JsonFormatter())
-    logging.basicConfig(level=os.environ.get("LOG_LEVEL", "INFO").upper(), handlers=[handler], force=True)
 
 
 def main() -> None:
-    """Run the provider until SIGINT or SIGTERM."""
-    _configure_logging()
-    from broker import create_app  # noqa: PLC0415 -- after logging is set up, so the app's start is logged too
-
-    provider = MusicProvider(create_app(), connect())
-    for signum in (signal.SIGINT, signal.SIGTERM):
-        signal.signal(signum, lambda *_: provider.stop())
-    provider.run()
+    """Run the provider until SIGINT or SIGTERM, in the broker's full app: it writes to the database."""
+    provider_loop.serve(MusicProvider, create_app)
 
 
 if __name__ == "__main__":

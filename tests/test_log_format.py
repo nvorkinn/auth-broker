@@ -10,7 +10,7 @@ from types import SimpleNamespace
 import pytest
 from gunicorn.config import Config
 
-from broker import create_app, spotify_provider
+from broker import create_app, provider_loop
 from broker.log_format import GunicornLogger, JsonFormatter
 from broker.routes import frames
 
@@ -149,8 +149,8 @@ def _flask_command():
 
 @pytest.mark.parametrize(
     ("set_up", "stream"),
-    [(_gunicorn, "out"), (_flask_command, "err"), (spotify_provider._configure_logging, "out")],
-    ids=["gunicorn", "flask-command", "spotify-provider"],
+    [(_gunicorn, "out"), (_flask_command, "err"), (provider_loop.configure_logging, "out")],
+    ids=["gunicorn", "flask-command", "provider"],
 )
 def test_each_broker_record_is_written_once_as_json_at_info(app, capsys, monkeypatch, set_up, stream):
     # `app` only sets up the environment and database that this second create_app() reads.
