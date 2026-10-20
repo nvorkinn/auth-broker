@@ -2,6 +2,7 @@
 
 import threading
 from datetime import UTC, datetime, timedelta
+from unittest.mock import patch
 
 import pytest
 from sqlalchemy import select
@@ -9,7 +10,7 @@ from sqlalchemy import select
 from broker.auth import hash_secret
 from broker.db import db
 from broker.models import Device, DeviceConfig
-from broker.services import pace, registration
+from broker.services import pace, pairing, registration
 from broker.services.frame_record import FRAME_BYTES
 from broker.services.pair_throttle import MAX_REGISTRATION_LOCKOUT_SECONDS, REGISTRATIONS_PER_MINUTE, PairThrottle
 
@@ -235,3 +236,55 @@ def test_a_frame_says_to_poll_again_just_after_the_next_half_minute(app, client,
 
     assert (first.status_code, first.headers["Retry-After"]) == (200, "23")
     assert (unchanged.status_code, unchanged.headers["Retry-After"]) == (304, "23")
+
+
+def test_a_new_screen_gets_the_weather_location_its_ip_suggests(app, client):
+    with patch("broker.services.geoip.suggest_weather_location", return_value="London") as suggest:
+        response = client.post(
+            "/api/devices/register",
+            json={"secret": DISPLAY, "width": 480, "height": 800},
+            environ_base={"REMOTE_ADDR": "81.2.69.1"},
+        )
+    assert response.status_code == 201
+    suggest.assert_called_once_with("81.2.69.1")
+    with app.app_context():
+        config = db.session.get(DeviceConfig, response.get_json()["device_id"])
+        assert config.weather_location == "London"
+        assert config.weather_place_id is None
+
+
+def test_a_new_screen_whose_ip_cant_be_placed_has_no_weather_location(app, client):
+    with patch("broker.services.geoip.suggest_weather_location", return_value=None):
+        response = _register(client, DISPLAY)
+    with app.app_context():
+        assert db.session.get(DeviceConfig, response.get_json()["device_id"]).weather_location == ""
+
+
+def test_a_repeat_registration_leaves_the_weather_location_alone(app, client):
+    device_id = _register(client, DISPLAY).get_json()["device_id"]
+    with app.app_context():
+        db.session.get(DeviceConfig, device_id).weather_location = "Leeds"
+        db.session.commit()
+
+    with patch("broker.services.geoip.suggest_weather_location", return_value="London") as suggest:
+        assert _register(client, DISPLAY).status_code == 200
+    suggest.assert_not_called()
+    with app.app_context():
+        assert db.session.get(DeviceConfig, device_id).weather_location == "Leeds"
+
+
+@pytest.mark.parametrize("by_token", [False, True])
+def test_pairing_subscribes_to_the_weather_registration_gave(app, client, fake_redis, by_token):
+    with patch("broker.services.geoip.suggest_weather_location", return_value="London"):
+        device_id = _register(client, DISPLAY).get_json()["device_id"]
+
+    if by_token:
+        with app.app_context():
+            token = db.session.get(Device, device_id).pairing_token
+        assert client.post("/pair/token", json={"token": token}).status_code == 200
+    else:
+        with app.app_context():
+            code = pairing.issue_code(device_id)
+        assert client.post("/pair", data={"code": code}).status_code == 302
+
+    assert fake_redis.sets["v1:sub:weather"] == {"london"}

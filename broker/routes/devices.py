@@ -23,7 +23,7 @@ def register() -> ResponseReturnValue:
 
     {"secret": ..., "width": ..., "height": ...}, the secret the screen generated and keeps and its size in pixels,
     becomes a device at once (201 {device_id}); only the secret's hash is stored, and identifies the device. A repeat,
-    e.g. on every boot, is a 200.
+    e.g. on every boot, is a 200. A new device's weather location is guessed from the screen's IP.
 
     Throttled per IP, every call counting, as anyone can call it.
     """
@@ -47,11 +47,11 @@ def register() -> ResponseReturnValue:
 
     secret_hash = hash_secret(secret)
     try:
-        found = registration.register_screen(secret_hash, width, height)
+        found = registration.register_screen(secret_hash, width, height, ip=request.remote_addr)
     except IntegrityError:
         # The same secret registered by a simultaneous request that got in first: answer as for any repeat.
         db.session.rollback()
-        found = registration.register_screen(secret_hash, width, height)
+        found = registration.register_screen(secret_hash, width, height, ip=request.remote_addr)
 
     if found is None:
         return with_retry_after(jsonify(error="too many devices waiting"), 60), 503
