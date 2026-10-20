@@ -231,12 +231,11 @@ It builds five images for amd64 and arm64, tagged with the release and `latest`:
 - `ghcr.io/nvorkinn/auth-broker-victoria-metrics` (with the vmui dashboards)
 
 It also attaches a deploy bundle to the release (`docker-compose.yml`, `scripts/deploy.sh`, the encrypted secrets and
-authentik's brand assets), then waits for approval of three deploy jobs, each on its own:
+authentik's brand assets), then waits for approval of two sets of deploy jobs:
 
 | Environment | Deploys |
 |---|---|
-| `deploy-caddy` | Caddy |
-| `deploy-config` | the broker and its providers, Fluent Bit, VictoriaLogs, VictoriaMetrics, then Redis |
+| `deploy-infra` | Caddy, the broker and its providers, Fluent Bit, VictoriaLogs, VictoriaMetrics and Redis, a job each, two at a time |
 | `deploy-authentik` | authentik, on the `AUTHENTIK_VERSION` pinned in the host's `.env` |
 
 An approved job SSHes into the host and runs `scripts/fetch-release.sh`, which downloads the bundle into
@@ -252,7 +251,7 @@ host's copy.
 
 **One-time setup** in the repository's settings:
 
-- **Environments** `deploy-caddy`, `deploy-config`, `deploy-authentik` and `terraform`, each with yourself as a
+- **Environments** `deploy-infra`, `deploy-authentik` and `terraform`, each with yourself as a
   required reviewer (that's what stops them running on their own). `terraform` also needs a branch rule: see
   [terraform/README.md](terraform/README.md#applying).
 - **Secrets:** `DEPLOY_HOST`, `DEPLOY_USER` (in the `docker` group, owning `/opt/auth-broker/`), `ORACLE_SSH_TOKEN` (a
