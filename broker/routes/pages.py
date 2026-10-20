@@ -129,10 +129,13 @@ def pair() -> ResponseReturnValue:
 
     A device that has just finished Wi-Fi setup sends its owner's browser here with a pairing token (?t=, or the URL
     fragment): the page waits for the device to register, then goes to its settings. Without a token it asks for the
-    code the device shows.
+    code the device shows. A code in ?t= (or the fragment) is filled in and sent at once, through the same POST as a
+    typed one, so it's throttled the same.
     """
     if request.method == "GET":
-        return render_template("pair.html", error=None, token=request.args.get("t", ""))
+        token = request.args.get("t", "")
+        code = token.strip().upper() if pairing.looks_like_code(token) else ""
+        return _render_pair(error=None, token=token, code=code)
 
     # Codes are guessable given enough tries, so wrong ones are throttled per IP; a locked-out IP is
     # refused even with the right code, or the lockout wouldn't slow guessing down.
@@ -149,7 +152,7 @@ def pair() -> ResponseReturnValue:
         if lockout is not None:
             current_app.logger.warning("Too many wrong pairing codes from %s; locked out for %ss", ip, lockout)
             return _too_many_attempts(lockout)
-        return render_template("pair.html", error="That code is invalid or has expired.", token="")
+        return _render_pair(error="That code is invalid or has expired.")
 
     # Paired, and the code spent: its config goes back in the store, for the render pool to draw.
     config_store.publish(device_id)
@@ -160,7 +163,18 @@ def _too_many_attempts(retry_after: int) -> ResponseReturnValue:
     minutes = -(-retry_after // 60)
     wait = "a minute" if minutes == 1 else f"{minutes} minutes"
     error = f"Too many incorrect codes. Please wait {wait} and try again."
-    return render_template("pair.html", error=error, token=""), 429, {"Retry-After": str(retry_after)}
+    return _render_pair(error=error), 429, {"Retry-After": str(retry_after)}
+
+
+def _render_pair(error: str | None, token: str = "", code: str = "") -> str:
+    return render_template(
+        "pair.html",
+        error=error,
+        token=token,
+        code=code,
+        code_alphabet=pairing.CODE_ALPHABET,
+        code_length=pairing.CODE_LENGTH,
+    )
 
 
 @bp.post("/pair/token")

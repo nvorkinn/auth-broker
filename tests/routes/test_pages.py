@@ -87,6 +87,52 @@ def test_pair_accepts_lowercase_code(app, client, register_device):
     assert response.status_code == 302
 
 
+def _prefilled_code(response):
+    return re.search(rb'name="code"[^>]*value="([^"]*)"', response.data, re.DOTALL).group(1).decode()
+
+
+def test_pair_fills_in_a_code_given_in_the_link(client):
+    response = client.get("/pair?t=abc234")
+    assert response.status_code == 200
+    assert _prefilled_code(response) == "ABC234"
+
+
+@pytest.mark.parametrize("t", ["", "a" * 64, "ABC12", "ABC2345", "ABCD0O", "<b>12"])
+def test_pair_fills_in_nothing_that_isnt_a_code(client, t):
+    assert _prefilled_code(client.get("/pair", query_string={"t": t})) == ""
+
+
+def test_pair_sends_the_code_to_pair_itself_so_a_wrong_one_isnt_sent_again(client):
+    response = client.get("/pair?t=ABC234")
+    assert b'action="/pair"' in response.data
+
+
+def test_a_code_from_the_link_pairs_like_a_typed_one(app, client, register_device):
+    device_id, _secret = register_device()
+    code = _issue(app, device_id)
+
+    page = client.get(f"/pair?t={code.lower()}")
+    response = client.post("/pair", data={"code": _prefilled_code(page)})
+
+    assert response.status_code == 302
+    with app.app_context():
+        assert db.session.get(Device, device_id).owner == "user-1"
+
+
+def test_wrong_codes_lock_out_the_ip_even_for_the_right_code(app, client, register_device):
+    device_id, _secret = register_device()
+    code = _issue(app, device_id)
+
+    responses = [client.post("/pair", data={"code": "NOPE22"}) for _ in range(10)]
+    locked = client.post("/pair", data={"code": code})
+
+    assert [r.status_code for r in responses] == [200] * 9 + [429]
+    assert locked.status_code == 429
+    assert locked.headers["Retry-After"] == "60"
+    with app.app_context():
+        assert db.session.get(Device, device_id).owner is None
+
+
 def test_device_config_requires_pairing(client):
     response = client.get("/device")
     assert response.status_code == 302
