@@ -75,5 +75,6 @@ def create_app() -> Flask:
     app.cli.add_command(cli.devices)
     app.cli.add_command(cli.weather)
     app.cli.add_command(cli.config)
+    app.cli.add_command(cli.store)
 
     return app

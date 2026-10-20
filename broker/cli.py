@@ -1,4 +1,4 @@
-"""Admin commands for the broker's devices, screens' weather places and the configs in the store.
+"""Admin commands for the broker's devices, screens' weather places, the configs in the store and Redis itself.
 
 Run them inside the container:
 
@@ -9,15 +9,21 @@ docker exec auth-broker flask --app wsgi devices unpair <device_id> [--config]
 docker exec auth-broker flask --app wsgi devices forget <device_id>
 docker exec auth-broker flask --app wsgi weather backfill
 docker exec auth-broker flask --app wsgi config publish
+docker exec auth-broker flask --app wsgi redis subs [source]
+docker exec auth-broker flask --app wsgi redis keys [pattern] [--limit N]
 
 Like any `flask` command it loads the app, so it needs the app's env vars (the container has them).
 """
 
 import json
 from datetime import UTC, datetime
+from itertools import islice
 
 import click
+from countdown_api import keys as store_keys
+from flask import current_app
 from flask.cli import AppGroup
+from redis import RedisError
 from sqlalchemy import select
 
 from .clients import weather as weather_client
@@ -29,6 +35,7 @@ from .services import assignments, config_store, device_keys, frame_record, pair
 devices = AppGroup("devices", help="Manual device admin for development.")
 weather = AppGroup("weather", help="The screens' weather places.")
 config = AppGroup("config", help="The screens' configs in the store.")
+store = AppGroup("redis", help="Look at what the broker keeps in Redis.")
 
 
 def publish_store() -> None:
@@ -207,3 +214,47 @@ def publish() -> None:
     """
     publish_store()
     click.echo("Wrote the configs and the subscriptions to the store (the log warns if Redis couldn't be reached).")
+
+
+@store.command("subs")
+@click.argument("source", required=False, type=click.Choice(store_keys.SOURCES))
+def subs(source: str | None) -> None:
+    """Show how many ids each subscription set holds, or, given a source, the ids in its set.
+
+    A source's set is what its provider fetches for. The postcodes are only counted, never shown: they are never logged.
+    """
+    redis = current_app.extensions["redis"]
+    try:
+        if source is None:
+            for name in store_keys.SOURCES:
+                click.echo(f"{name}: {redis.scard(store_keys.subscription(name))}")
+        elif source == store_keys.POSTCODE:
+            click.echo(f"{source}: {redis.scard(store_keys.subscription(source))} (not shown)")
+        else:
+            members = sorted(redis.smembers(store_keys.subscription(source)))
+            click.echo(f"{source}: {len(members)}")
+            for member in members:
+                click.echo(f"  {member}")
+    except RedisError as error:
+        msg = f"Couldn't ask Redis ({type(error).__name__})."
+        raise click.ClickException(msg) from None
+
+
+@store.command("keys")
+@click.argument("pattern", default=f"{store_keys.PREFIX}:*")
+@click.option("--limit", default=200, show_default=True, help="Stop after this many keys.")
+def keys(pattern: str, limit: int) -> None:
+    """List the keys matching PATTERN with their type and time to live, never their values.
+
+    Some values are secrets, or a pairing code that is live. A pattern is Redis's glob, e.g. 'v1:sub:*'.
+    """
+    redis = current_app.extensions["redis"]
+    try:
+        found = list(islice(redis.scan_iter(match=pattern, count=1000), limit + 1))
+        for name in sorted(found[:limit]):
+            ttl = redis.ttl(name)
+            click.echo(f"{name}  {redis.type(name)}  {'no TTL' if ttl < 0 else f'{ttl}s'}")
+    except RedisError as error:
+        msg = f"Couldn't ask Redis ({type(error).__name__})."
+        raise click.ClickException(msg) from None
+    click.echo(f"{min(len(found), limit)} keys" + (f" (stopped at --limit {limit})" if len(found) > limit else ""))
