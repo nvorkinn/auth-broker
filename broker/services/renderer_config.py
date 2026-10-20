@@ -2,8 +2,7 @@
 
 The store keeps it per screen (services/config_store.py, `v1:config:<device id>`, without a pairing code), and with
 the screen's live code while it has one (services/pairing_key.py, `v1:pairing:<device id>`). Both are made here, the
-same way. The contract (vendor/countdown-api) is the shape pi-dashboard's renderer reads them with; the broker no
-longer serves it over HTTP (GET /api/config went with the per-screen renderers).
+same way. The contract (vendor/countdown-api) is the shape pi-dashboard's renderer reads them with.
 """
 
 from countdown_api.models import (
@@ -42,8 +41,8 @@ def build(config: DeviceConfig, *, pairing_code: str | None) -> ConfigResponse:
     stop_ids = config.tfl_stop_ids
     return ConfigResponse(
         device_id=device_id,
-        # How often today's renderers draw (and they draw faster while a provider asks). The screen's polls aren't
-        # paced by it: the broker's answers are (services/pace.py).
+        # How often the render pool draws (faster while a provider asks). The screen's polls aren't paced by it: the
+        # broker's answers are (services/pace.py).
         interval=pace.RENDER_INTERVAL_S,
         clock_format=config.clock_format,
         language=config.language,

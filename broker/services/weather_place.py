@@ -46,7 +46,7 @@ def weather_key(config: DeviceConfig) -> str | None:
     The country is always there (NO_COUNTRY if Open-Meteo gave none), as a number after a two-letter country is how
     the weather provider tells a place's key from the slug of text that ends in a number ("oslo-0150").
 
-    A config saved before places were picked has only its free text, which gives the slug of that text instead
+    A config with no picked place has only its free text, which gives the slug of that text instead
     ("london", or the text itself, case and spaces folded, if it has nothing to slug), so it still has a key and its
     screen still has weather (the provider geocodes it by name) until `flask weather backfill` gives it a place.
 

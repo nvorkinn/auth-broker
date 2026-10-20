@@ -1,8 +1,8 @@
 """A screen's stable name: its slug, given when it's paired (auto_name), and never changed.
 
-The assignment is all that's left of the renderer the orchestrator used to start for a screen. A screen gets one the
-moment it's paired, whose slug is its own device id; screens named before that keep the `<username>-<choice>` slug
-their owner picked. The render pool draws every named screen it has something to draw for, under its slug
+The assignment is a screen's stable name in the render pool. It's made the moment the screen is paired, with its own
+device id as the slug; older screens keep the `<username>-<choice>` slug their owner picked. The render pool draws
+every named screen it has something to draw for, under its slug
 (services/render_screens.py); the slug is also the `device` label of the pool's metrics, so it never changes. What
 the owner calls the screen is its friendly name (devices.device_name, clean_name), set on its settings page. A screen
 unseen for SUSPEND_AFTER is left out of the pool until it's back (is_quiet). The assignment goes with its device.
@@ -15,8 +15,8 @@ from datetime import UTC, datetime, timedelta
 from broker.db import db
 from broker.models import Device, RendererAssignment
 
-# What a slug is made of (a device id, or one an owner chose before screens were named automatically). It names the
-# screen in the pool's list and metrics, so it never changes.
+# What a slug is made of (a device id, or an owner's older `<username>-<choice>` one). It names the screen in the
+# pool's list and metrics, so it never changes.
 SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{1,31}$")
 
 # How long a screen may go unseen before the render pool stops drawing it (and, on its return, draws it again).
