@@ -35,6 +35,18 @@ MOST_CHECKED = 20
 PAGE_SIZE = 100
 # What a finished run ends in when it didn't pass.
 FAILED = {"failure", "timed_out", "startup_failure"}
+# Check states that stop a direct merge, as the dashboard's PR list counts them.
+FAILED_CHECKS = {"failure", "timed_out", "cancelled", "error", "startup_failure", "action_required", "stale"}
+ENABLE_AUTO_MERGE = """
+mutation($id: ID!, $method: PullRequestMergeMethod!) {
+  enablePullRequestAutoMerge(input: {pullRequestId: $id, mergeMethod: $method}) { clientMutationId }
+}
+"""
+DISABLE_AUTO_MERGE = """
+mutation($id: ID!) {
+  disablePullRequestAutoMerge(input: {pullRequestId: $id}) { clientMutationId }
+}
+"""
 # A workflow is a release if its name says so.
 RELEASE = re.compile(r"release|deploy", re.IGNORECASE)
 # PRs opened by a Claude Code session end their description with a link to it.
@@ -49,6 +61,8 @@ DEFAULT_BACKOFF_S = 60
 # Most GitHub calls one dashboard request makes at once; the session's connection pool is sized to match.
 MAX_PARALLEL = 8
 POOL_SIZE = 16
+# A PR's changed files shown on the dashboard; the rest are left to GitHub's own Files tab.
+MAX_FILES = 300
 
 
 def summary(token: str) -> dict:
@@ -240,6 +254,18 @@ def _claude_session(body: str | None) -> str | None:
     """Return the ID of the Claude Code session a PR description links to last, if any."""
     sessions = CLAUDE_SESSION.findall(body or "")
     return sessions[-1] if sessions else None
+
+
+def _merge_method(repo: dict) -> str:
+    """Pick the first merge method the repository allows, preferring merge commits."""
+    for method, setting in (
+        ("MERGE", "allow_merge_commit"),
+        ("SQUASH", "allow_squash_merge"),
+        ("REBASE", "allow_rebase_merge"),
+    ):
+        if repo.get(setting, True):
+            return method
+    return "MERGE"
 
 
 def _is_release(run: dict) -> bool:
@@ -485,8 +511,39 @@ class Dashboard:
             "merge_state": pr["mergeable_state"],
             "created_at": pr["created_at"],
             "session": _claude_session(pr.get("body")),
+            "sha": sha,
+            "auto_merge": pr.get("auto_merge") is not None,
             "checks": checks,
             "refresh": pr["mergeable"] is None or any(check["pending"] for check in checks),
+        }
+
+    def pull_files(self, path: str, number: int) -> dict:
+        """List an open PR's changed files with their patches; GitHub leaves out the patch of a very large file."""
+        files = []
+        page = 1
+        while True:
+            batch = json.loads(self.read(f"{path}/pulls/{number}/files", per_page=PAGE_SIZE, page=page))
+            if not isinstance(batch, list):
+                msg = "GitHub returned an unexpected list response."
+                raise DashboardError(msg)
+            files.extend(batch)
+            if len(batch) < PAGE_SIZE or len(files) > MAX_FILES:
+                break
+            page += 1
+        return {
+            "files": [
+                {
+                    "filename": file["filename"],
+                    "previous_filename": file.get("previous_filename"),
+                    "status": file["status"],
+                    "additions": file["additions"],
+                    "deletions": file["deletions"],
+                    "patch": file.get("patch"),
+                    "url": file.get("blob_url"),
+                }
+                for file in files[:MAX_FILES]
+            ],
+            "truncated": len(files) > MAX_FILES,
         }
 
     def workflow(self, repo: dict, run: dict) -> dict:
@@ -594,6 +651,47 @@ class Dashboard:
                 "prerelease": False,
             },
         ).json()
+
+    def set_auto_merge(self, repo: dict, number: int, *, enabled: bool) -> dict:
+        """Turn auto-merge on or off; with nothing required on the base branch, merge at once once checks are done."""
+        path = f"/repos/{repo['full_name']}"
+        pr = self.get(f"{path}/pulls/{number}")
+        if pr["state"] != "open":
+            msg = "This pull request is no longer open."
+            raise DashboardError(msg)
+        if enabled and pr["draft"]:
+            msg = "Mark the pull request ready for review before turning on auto-merge."
+            raise DashboardError(msg)
+        if enabled and repo.get("allow_auto_merge") is False:
+            msg = "Auto-merge is off for this repository. Turn on Allow auto-merge in its settings."
+            raise DashboardError(msg)
+        if (pr.get("auto_merge") is not None) == enabled:
+            return {"auto_merge": enabled, "merged": False}
+        method = _merge_method(repo)
+        mutation = ENABLE_AUTO_MERGE if enabled else DISABLE_AUTO_MERGE
+        variables = {"id": pr["node_id"], "method": method} if enabled else {"id": pr["node_id"]}
+        errors = self.post("/graphql", {"query": mutation, "variables": variables}).json().get("errors")
+        if not errors:
+            return {"auto_merge": enabled, "merged": False}
+        message = str(errors[0].get("message", ""))
+        # GitHub won't wait when the base branch requires nothing, so a PR whose checks are done is merged now.
+        if not enabled or "clean status" not in message.lower():
+            msg = f"GitHub refused: {message}"
+            raise DashboardError(msg)
+        checks = (self.pull(path, number) or {}).get("checks", [])
+        if any(check["pending"] or check["state"] in FAILED_CHECKS for check in checks):
+            msg = (
+                f"{pr['base']['ref']} requires no checks, so GitHub can't wait for them. "
+                "Try again once this PR's checks pass."
+            )
+            raise DashboardError(msg)
+        response = self.session.put(
+            f"{API_URL}{path}/pulls/{number}/merge",
+            json={"merge_method": method.lower(), "sha": pr["head"]["sha"]},
+            timeout=TIMEOUT,
+        )
+        response.raise_for_status()
+        return {"auto_merge": False, "merged": True}
 
     def post(self, path: str, payload: dict) -> requests.Response:
         """Send a GitHub write, never retrying a potentially completed action."""

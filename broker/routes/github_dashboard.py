@@ -148,6 +148,39 @@ def pull(owner: str, name: str, number: str) -> ResponseReturnValue:
     return jsonify(pull=found)
 
 
+@bp.get("/repositories/<owner>/<name>/pulls/<number>/files")
+@dashboard_view
+def pull_files(owner: str, name: str, number: str) -> ResponseReturnValue:
+    """List a PR's changed files and patches, read when its Files changed list is opened."""
+    if not number.isascii() or not number.isdecimal() or int(number) <= 0:
+        return jsonify(error="Invalid pull request number."), 400
+    api = github.Dashboard(current_app.config["GITHUB_DASHBOARD_TOKEN"], current_app.extensions["redis"])
+    try:
+        repo = api.owned_repository(owner, name)
+        return jsonify(api.pull_files(f"/repos/{repo['full_name']}", int(number)))
+    finally:
+        api.close()
+
+
+@bp.post("/repositories/<owner>/<name>/pulls/<number>/auto-merge")
+@dashboard_view
+def auto_merge(owner: str, name: str, number: str) -> ResponseReturnValue:
+    """Turn a PR's auto-merge on or off, for a request carrying the session's CSRF token."""
+    if not _valid_csrf():
+        return jsonify(error="Invalid action CSRF token. Reload the dashboard."), 403
+    payload = request.get_json(silent=True)
+    enabled = payload.get("enabled") if isinstance(payload, dict) else None
+    if not number.isascii() or not number.isdecimal() or int(number) <= 0:
+        return jsonify(error="Invalid pull request number."), 400
+    if type(enabled) is not bool:
+        return jsonify(error="enabled must be true or false."), 400
+    api = github.Dashboard(current_app.config["GITHUB_DASHBOARD_TOKEN"], current_app.extensions["redis"])
+    try:
+        return jsonify(api.set_auto_merge(api.owned_repository(owner, name), int(number), enabled=enabled))
+    finally:
+        api.close()
+
+
 @bp.post("/repositories/<owner>/<name>/release")
 @dashboard_view
 def release(owner: str, name: str) -> ResponseReturnValue:

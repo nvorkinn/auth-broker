@@ -225,3 +225,42 @@ def test_a_closed_pull_request_is_not_found(client, dashboard):
 def test_reading_a_pull_request_validates_its_number(client, dashboard, number):
     assert client.get(f"/github/repositories/alice/project/pulls/{number}").status_code == 400
     dashboard.pull.assert_not_called()
+
+
+def test_a_pull_requests_files_are_read_when_asked_for(client, dashboard):
+    dashboard.owned_repository.return_value = {"full_name": "alice/project"}
+    dashboard.pull_files.return_value = {"files": [], "truncated": False}
+    assert client.get("/github/repositories/alice/project/pulls/7/files").json == {"files": [], "truncated": False}
+    dashboard.pull_files.assert_called_once_with("/repos/alice/project", 7)
+    dashboard.close.assert_called()
+
+
+@pytest.mark.parametrize("number", ["0", "-1", "abc"])
+def test_reading_a_pull_requests_files_validates_its_number(client, dashboard, number):
+    assert client.get(f"/github/repositories/alice/project/pulls/{number}/files").status_code == 400
+    dashboard.pull_files.assert_not_called()
+
+
+def test_auto_merge_requires_csrf(client, dashboard):
+    path = "/github/repositories/alice/project/pulls/7/auto-merge"
+    assert client.post(path, json={"enabled": True}).status_code == 403
+    dashboard.set_auto_merge.assert_not_called()
+
+
+@pytest.mark.parametrize("payload", [None, {}, {"enabled": 1}, {"enabled": "true"}])
+def test_auto_merge_validates_enabled(client, dashboard, payload):
+    path = "/github/repositories/alice/project/pulls/7/auto-merge"
+    assert client.post(path, json=payload, headers=csrf(client)).status_code == 400
+    dashboard.set_auto_merge.assert_not_called()
+
+
+def test_auto_merge_rechecks_ownership_and_calls_github(client, dashboard):
+    repo = {"full_name": "alice/project"}
+    dashboard.owned_repository.return_value = repo
+    dashboard.set_auto_merge.return_value = {"auto_merge": True, "merged": False}
+    response = client.post(
+        "/github/repositories/alice/project/pulls/7/auto-merge", json={"enabled": True}, headers=csrf(client)
+    )
+    assert response.json == {"auto_merge": True, "merged": False}
+    dashboard.set_auto_merge.assert_called_once_with(repo, 7, enabled=True)
+    dashboard.close.assert_called_once()
