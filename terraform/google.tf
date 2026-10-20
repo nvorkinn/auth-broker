@@ -2,9 +2,9 @@
 # (broker-enrollment-mfa), before the user is logged in. Without it a Google login is the whole login, and skips the
 # passkey or authenticator app. A user with neither has to set one up first.
 #
-# The two flows, their stage bindings and policy bindings are new to Authentik (the blueprint change that added them was
-# never applied there), so the first apply creates them and points the Google source at them. Each is imported only when
-# it already exists, so a run after an interrupted apply adopts what that apply made instead of failing on a duplicate.
+# The two flows, their stage bindings and policy bindings are new to Authentik, so the first apply creates them and
+# points the Google source at them. Each is imported only when it already exists, so a run after an interrupted apply
+# adopts what that apply made instead of failing on a duplicate.
 resource "authentik_flow" "source_authentication" {
   name               = "Broker Google login"
   slug               = "broker-source-authentication"

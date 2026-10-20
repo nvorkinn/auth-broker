@@ -73,10 +73,9 @@ import {
 }
 
 # Brands: point both at the login and recovery flows; nikolaivorkinn.com carries the branding. A brand naming no
-# authentication flow falls back to the first flow with that designation whose policies pass, by slug. That used
-# to land here: google.tf's broker-source-authentication sorts earlier but is gated by a policy. passwordless.tf
-# added broker-passwordless, which sorts earlier still and is gated by nothing, so it won the fallback and became
-# the login screen. Both brands name the flow outright so the fallback never decides this again.
+# authentication flow falls back to the first flow with that designation whose policies pass, by slug, so a flow that
+# sorts first and has no policies (broker-passwordless, in passwordless.tf) would become the login screen. Naming the
+# flow here keeps that from happening.
 resource "authentik_brand" "default" {
   domain              = "authentik-default"
   flow_authentication = authentik_flow.authentication.uuid
