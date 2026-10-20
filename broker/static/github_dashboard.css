@@ -54,6 +54,7 @@ button:focus-visible, a:focus-visible, summary:focus-visible { outline: 2px soli
 .auto-merge { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin-top: 4px; }
 .auto-merge-button { font-size: 10px; padding: 3px 6px; }
 .auto-merge .error { flex-basis: 100%; font-size: 11px; }
+.connect { color: var(--text); background: #2a4a7a; border: 1px solid #8abaff; border-radius: 5px; padding: 4px 10px; text-decoration: none; }
 .session-links { margin-top: 4px; font-size: 11px; color: var(--muted); }
 .session-app { display: inline-block; color: var(--text); background: #223047; border: 1px solid #405475; border-radius: 5px; padding: 1px 7px; text-decoration: none; }
 .session-app:hover { border-color: #8abaff; }

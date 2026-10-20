@@ -270,7 +270,12 @@ def _merge_method(repo: dict) -> str:
 
 def _is_release(run: dict) -> bool:
     """Tell whether a workflow, or a run of one, is a release the dashboard draws."""
-    return "release" in (run["name"] or "").casefold()
+    return is_release_name(run["name"])
+
+
+def is_release_name(name: str | None) -> bool:
+    """Tell whether a workflow's name makes it a release the dashboard draws."""
+    return "release" in (name or "").casefold()
 
 
 def _title(run: dict, repo: dict) -> str:

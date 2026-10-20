@@ -12,9 +12,12 @@ const workflowsList = document.getElementById("workflows");
 const FAILED_CHECKS = new Set(["failure", "timed_out", "cancelled", "error", "startup_failure", "action_required", "stale"]);
 let discovering = false;
 let pausedUntil = 0;
-// Projects are read in full once a minute. Their running releases and busy PRs join a quick-poll pool, read one by
-// one every few seconds until they finish or stop changing; a full read that finds them changed brings them back.
-const FULL_POLL_MS = 60000;
+// With the GitHub App's webhook, the broker notes what changed and the page asks it every few seconds, re-reading only
+// those items; a full read every five minutes covers a lost delivery. Without it, projects are read in full once a
+// minute, and their running releases and busy PRs join a quick-poll pool, read one by one every few seconds until
+// they finish or stop changing; a full read that finds them changed brings them back.
+const WEBHOOKS = document.querySelector('meta[name="github-webhooks"]')?.content === "on";
+const FULL_POLL_MS = WEBHOOKS ? 300000 : 60000;
 const QUICK_POLL_MS = 5000;
 const QUICK_STRIKES = 10;
 const QUICK_IN_FLIGHT = 4;
@@ -810,25 +813,77 @@ async function tick() {
         .sort((a, b) => Number(a.background) - Number(b.background) || a.nextRefresh - b.nextRefresh)
         .slice(0, Math.max(0, available));
     // A full read covers its project's pooled items, so they wait for the next tick.
-    const quick = [...projects.values()].filter(project => !project.loading && !due.includes(project))
+    const quick = WEBHOOKS ? [] : [...projects.values()].filter(project => !project.loading && !due.includes(project))
         .flatMap(project => [...project.pool.values()].filter(entry => !entry.busy && entry.next <= Date.now())
             .map(entry => ({ project, entry })))
         .sort((a, b) => a.entry.next - b.entry.next).slice(0, Math.max(0, QUICK_IN_FLIGHT - quickInFlight));
-    await Promise.all([...due.map(refreshProject), ...quick.map(({ project, entry }) => quickPoll(project, entry))]);
+    await Promise.all([...due.map(refreshProject), ...quick.map(({ project, entry }) => quickPoll(project, entry)),
+        followChanges()]);
+}
+
+let changesAfter = null;
+let changesAt = 0;
+let readingChanges = false;
+
+// Asks the broker what the webhook saw change; the first answer only marks where to start.
+async function followChanges() {
+    if (!WEBHOOKS || readingChanges || Date.now() < changesAt) return;
+    readingChanges = true;
+    try {
+        const query = changesAfter === null ? "" : `?after=${encodeURIComponent(changesAfter)}`;
+        const feed = await api(`/github/changes${query}`);
+        const first = changesAfter === null;
+        changesAfter = feed.last;
+        if (feed.reset) {
+            requestRefresh("all");
+            discover();
+        } else if (!first) {
+            applyChanges(feed.changes);
+        }
+    } catch {
+        // The five-minute full reads carry on; the next tick asks again.
+    } finally {
+        readingChanges = false;
+        changesAt = Date.now() + QUICK_POLL_MS;
+    }
+}
+
+// Re-reads each changed PR or release run once, or the section when it's new to the page.
+function applyChanges(changes) {
+    const unique = new Map();
+    for (const change of changes) {
+        if (change.kind === "repositories") {
+            discover();
+            continue;
+        }
+        const project = projects.get(change.repo);
+        if (project) unique.set(`${change.repo} ${change.kind} ${change.id || ""}`, { project, change });
+    }
+    for (const { project, change } of unique.values()) {
+        const id = Number(change.id);
+        if (change.kind === "pull" && project.data?.pulls?.some(pr => pr.number === id)) {
+            pollItem(project, "pull", id).catch(() => {});
+        } else if (change.kind === "run" && project.data?.workflows?.some(run => run.id === id)) {
+            pollItem(project, "run", id).catch(() => {});
+        } else {
+            refreshSoon(project, ({ pull: "pulls", run: "workflows" })[change.kind] || "all");
+        }
+    }
 }
 
 // Brings one section forward alone, remembering when the full refresh was due, so the other never waits on it.
 function requestRefresh(section) {
-    for (const project of projects.values()) {
-        if (project.background) continue;
-        if (section === "all" || project.nextRefresh <= Date.now() || !project.data
-            || (project.partial && project.partial.section !== section)) {
-            project.partial = null;
-        } else if (!project.partial) {
-            project.partial = { section, resume: project.nextRefresh };
-        }
-        project.nextRefresh = 0;
+    for (const project of projects.values()) if (!project.background) refreshSoon(project, section);
+}
+
+function refreshSoon(project, section) {
+    if (section === "all" || project.nextRefresh <= Date.now() || !project.data
+        || (project.partial && project.partial.section !== section)) {
+        project.partial = null;
+    } else if (!project.partial) {
+        project.partial = { section, resume: project.nextRefresh };
     }
+    project.nextRefresh = 0;
 }
 
 document.getElementById("refresh").addEventListener("click", async () => {

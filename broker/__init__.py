@@ -14,6 +14,7 @@ from .routes import (
     devices,
     frames,
     github_dashboard,
+    github_webhook,
     pages,
     place_search,
     spotify_oauth,
@@ -67,6 +68,7 @@ def create_app() -> Flask:
     app.register_blueprint(apple_music_link.bp)
     app.register_blueprint(pages.bp)
     app.register_blueprint(github_dashboard.bp)
+    app.register_blueprint(github_webhook.bp)
     app.register_blueprint(stop_search.bp)
     app.register_blueprint(place_search.bp)
     app.register_blueprint(frames.bp)

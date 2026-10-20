@@ -42,6 +42,11 @@ def load(app: Flask) -> None:
     # The personal GitHub dashboard is off until both are set.
     app.config["GITHUB_DASHBOARD_TOKEN"] = os.environ.get("GITHUB_DASHBOARD_TOKEN", "")
     app.config["GITHUB_DASHBOARD_USER_ID"] = os.environ.get("GITHUB_DASHBOARD_USER_ID", "")
+    # The dashboard's GitHub App (services/github_app.py): signing in as the user replaces the PAT once connected, and
+    # the webhook secret turns on /api/github/webhook. Unset (the default) keeps the PAT and polling.
+    app.config["GITHUB_APP_CLIENT_ID"] = os.environ.get("GITHUB_APP_CLIENT_ID", "")
+    app.config["GITHUB_APP_CLIENT_SECRET"] = os.environ.get("GITHUB_APP_CLIENT_SECRET", "")
+    app.config["GITHUB_APP_WEBHOOK_SECRET"] = os.environ.get("GITHUB_APP_WEBHOOK_SECRET", "")
 
     # For debugging sign-in redirects only (request_log.py).
     app.config["LOG_REQUEST_HEADERS"] = os.environ.get("LOG_REQUEST_HEADERS", "").lower() in ("1", "true")
