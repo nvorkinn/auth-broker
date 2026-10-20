@@ -4,7 +4,7 @@ The script is the store contract's (countdown_api.scripts.ENQUEUE), which pi-das
 contract's render_queue.json pins its SHA1, keys and TTL, and pi-dashboard's tests check their side against that file.
 It runs on fakeredis's Lua and, where marked, on a redis-server of the tests' own when one is installed (CI installs
 it). Who queues: here a config save, a code issued and a code spent; the developer provider in
-tests/test_developer_provider.py.
+tests/providers/test_developer_provider.py.
 """
 
 import hashlib

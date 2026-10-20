@@ -102,7 +102,7 @@ def _cycle_s(now: datetime, hints: Sequence[Hint]) -> int:
 def key(source: str, item_id: str) -> str:
     """Return the key where `source` asks for a faster refresh while `item_id` is bursty (the store contract's).
 
-    For example `v1:pace:developer:<device id>`, which developer_provider.pace_key writes.
+    For example `v1:pace:developer:<device id>`, which providers/developer.pace_key writes.
     """
     return store_keys.pace(source, item_id)
 

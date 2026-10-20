@@ -1,6 +1,6 @@
 """The music provider: what each screen's Spotify and Apple Music are playing, written to the shared Redis store.
 
-    python -m broker.spotify_provider
+    python -m broker.providers.music
 
 It runs in the broker's full app (create_app), as it writes to the database: refreshed Spotify tokens, and Apple
 Music's new plays, which the top lists are counted from (apple_music.record_plays) and nothing else logs. The playing

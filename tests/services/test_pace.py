@@ -12,9 +12,9 @@ import fakeredis
 import pytest
 import redis
 
-from broker import developer_provider, spotify_provider
 from broker.db import db
 from broker.models import DeviceConfig
+from broker.providers import developer, music
 from broker.services import pace
 from broker.services.pace import (
     HINT_FLOOR_S,
@@ -291,7 +291,7 @@ def test_the_developer_panel_has_the_key_the_developer_provider_writes(app, scre
     with app.app_context():
         keys = pace.hint_keys(db.session.get(DeviceConfig, device_id))
 
-    assert keys == [developer_provider.pace_key(device_id)] == [f"v1:pace:developer:{device_id}"]
+    assert keys == [developer.pace_key(device_id)] == [f"v1:pace:developer:{device_id}"]
 
 
 def test_the_music_area_has_the_key_the_music_provider_writes(app, screen):
@@ -300,7 +300,7 @@ def test_the_music_area_has_the_key_the_music_provider_writes(app, screen):
     with app.app_context():
         keys = pace.hint_keys(db.session.get(DeviceConfig, device_id))
 
-    assert keys == [spotify_provider.pace_key(device_id)] == [f"v1:pace:spotify:{device_id}"]
+    assert keys == [music.pace_key(device_id)] == [f"v1:pace:spotify:{device_id}"]
 
 
 def test_both_panels_have_both_keys(app, screen):

@@ -1,7 +1,7 @@
 """The music area's Apple Music data (broker/services/music.py), which the music provider writes to the store.
 
 How the plays are told apart is in tests/clients/test_apple_music.py; that the provider logs them is in
-tests/test_spotify_provider.py.
+tests/providers/test_music_provider.py.
 """
 
 from datetime import UTC, datetime

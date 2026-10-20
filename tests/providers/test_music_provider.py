@@ -1,4 +1,4 @@
-"""The music provider (broker/spotify_provider.py): what it writes to the store, and how it copes with failures.
+"""The music provider (broker/providers/music.py): what it writes to the store, and how it copes with failures.
 
 The store contract's music_player.json and music_top.json (countdown_api.fixtures) are the stored values: pi-dashboard's
 renderer tests read the same two files, so a change to either side that breaks the other shows up in both. So is
@@ -18,14 +18,13 @@ import responses
 from countdown_api import fixtures
 from sqlalchemy import select
 
-from broker import create_app, provider_loop, spotify_provider
+from broker import create_app, provider_loop
 from broker.album_art import ART_TTL_S
 from broker.clients import spotify as spotify_client
 from broker.db import db
 from broker.models import AppleMusicPlay, AppleMusicToken, DeviceConfig, SpotifyToken
-from broker.services import render_jobs
-from broker.services.render_jobs import JOBS, SCREENS, queued_key
-from broker.spotify_provider import (
+from broker.providers import music
+from broker.providers.music import (
     BURST_INTERVAL_S,
     INTERVAL_S,
     PACE_S,
@@ -38,6 +37,8 @@ from broker.spotify_provider import (
     player_key,
     top_key,
 )
+from broker.services import render_jobs
+from broker.services.render_jobs import JOBS, SCREENS, queued_key
 from tests.conftest import apple_song
 
 PLAYER = fixtures.load("music_player.json")
@@ -543,12 +544,12 @@ def test_main_runs_the_provider_in_the_brokers_own_app(monkeypatch):
     served = []
     monkeypatch.setattr(provider_loop, "serve", lambda *args: served.append(args))
 
-    spotify_provider.main()
+    music.main()
 
     assert served == [(MusicProvider, create_app)]
 
 
-@pytest.mark.parametrize(("headers", "wait"), [({"Retry-After": "120"}, 120), ({}, spotify_provider.DEFAULT_BACKOFF_S)])
+@pytest.mark.parametrize(("headers", "wait"), [({"Retry-After": "120"}, 120), ({}, music.DEFAULT_BACKOFF_S)])
 def test_a_429_stops_all_spotify_calls_until_retry_after(app, store, device, headers, wait):
     """Spotify's limit is the app's: once it says 429, no device's Spotify is asked again until it said to."""
     device()
@@ -576,11 +577,11 @@ def test_a_429_stops_all_spotify_calls_until_retry_after(app, store, device, hea
 
 
 def test_other_errors_are_not_treated_as_rate_limits():
-    retry_after = spotify_provider.retry_after
+    retry_after = music.retry_after
     assert retry_after(requests.HTTPError("500", response=_response(None, 500))) is None
     assert retry_after(ValueError("boom")) is None
     unreadable = requests.HTTPError("429", response=_response(None, 429, {"Retry-After": "soon"}))
-    assert retry_after(unreadable) == spotify_provider.DEFAULT_BACKOFF_S
+    assert retry_after(unreadable) == music.DEFAULT_BACKOFF_S
 
 
 # --- while Spotify plays: the position, every BURST_INTERVAL_S ---------------------------------------------------

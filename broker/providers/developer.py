@@ -1,6 +1,6 @@
 """The developer provider: each screen's developer panel, written to the shared Redis store.
 
-    python -m broker.developer_provider
+    python -m broker.providers.developer
 
 It runs on provider_loop's loop, in read_only_app(): GitHub's tokens aren't refreshed, so there is nothing to write
 back. For every device with the developer panel on it polls the owner's GitHub and AI plans and writes them to
