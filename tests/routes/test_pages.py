@@ -358,8 +358,13 @@ def test_device_config_shows_resolved_stop_names(paired_client):
     with patch("broker.clients.tfl.requests.Session.get", return_value=_mock_get(stop_detail)):
         response = client.get("/device")
 
-    assert b"Euston" in response.data
-    assert b"940GZZLUEUS" in response.data
+    html = response.get_data(as_text=True)
+    assert "Euston" in html
+    assert "Victoria" in html
+    # The card keeps the id to save the order with, but doesn't show London's ids.
+    assert 'data-id="940GZZLUEUS"' in html
+    assert "NaPTAN" not in html
+    assert "<code>940GZZLUEUS</code>" not in html
 
 
 def test_disconnect_removes_stored_token(app, paired_client):
