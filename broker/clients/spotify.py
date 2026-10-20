@@ -3,6 +3,7 @@
 import urllib.parse
 from datetime import UTC, datetime
 from http import HTTPStatus
+from typing import Any
 
 import requests
 from flask import current_app
@@ -91,14 +92,14 @@ def _get_access_token(device_id: str) -> str | None:
     return token.access_token
 
 
-def get_queue(device_id: str) -> list[dict[str, object]]:
+def get_queue(device_id: str) -> dict[str, Any]:
     """Return Spotify's /me/player/queue for the device: what's playing and what's up next.
 
-    [] when Spotify isn't linked or nothing is playing (204).
+    The object has `currently_playing` and `queue`. {} when Spotify isn't linked or nothing is playing (204).
     """
     access_token = _get_access_token(device_id)
     if access_token is None:
-        return []
+        return {}
 
     response = requests.get(
         "https://api.spotify.com/v1/me/player/queue",
@@ -106,12 +107,12 @@ def get_queue(device_id: str) -> list[dict[str, object]]:
         timeout=10,
     )
     if response.status_code == HTTPStatus.NO_CONTENT or not response.content:
-        return []
+        return {}
     response.raise_for_status()
     return response.json()
 
 
-def get_currently_playing(device_id: str) -> dict[str, object]:
+def get_currently_playing(device_id: str) -> dict[str, Any]:
     """Return Spotify's /me/player/currently-playing for the device: the track, `progress_ms` and `is_playing`.
 
     {} when Spotify isn't linked or nothing is playing (204). Much cheaper than the queue, so the music provider asks
@@ -132,8 +133,11 @@ def get_currently_playing(device_id: str) -> dict[str, object]:
     return response.json()
 
 
-def get_users_top_items(device_id: str, type_: str, params: dict[str, str]) -> list[dict[str, object]] | None:
-    """Spotify's top artists or tracks (`type_`) for the device's user; None when Spotify isn't linked."""
+def get_users_top_items(device_id: str, type_: str, params: dict[str, str]) -> dict[str, Any] | None:
+    """Spotify's top artists or tracks (`type_`) for the device's user, as its paging object (`items`, `total`, ...).
+
+    None when Spotify isn't linked, {} for a 204.
+    """
     access_token = _get_access_token(device_id)
     if access_token is None:
         return None
@@ -144,6 +148,6 @@ def get_users_top_items(device_id: str, type_: str, params: dict[str, str]) -> l
         params=params,
     )
     if response.status_code == HTTPStatus.NO_CONTENT or not response.content:
-        return []
+        return {}
     response.raise_for_status()
     return response.json()
