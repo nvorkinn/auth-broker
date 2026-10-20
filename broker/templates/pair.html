@@ -134,9 +134,10 @@
         <div class="error-banner">{{ error }}</div>
     {% endif %}
 
-    <form method="POST">
+    {#- To /pair itself, without ?code=, so a code sent from a link isn't sent again from the answer. #}
+    <form method="POST" action="{{ url_for('pages.pair') }}" id="code-form">
         <input type="text" name="code" class="pairing-input" maxlength="6" autocomplete="off"
-               autocapitalize="characters" placeholder="ABC123" required autofocus>
+               autocapitalize="characters" placeholder="ABC123" value="{{ code }}" required autofocus>
         <button type="submit" class="btn-save">Connect</button>
     </form>
 </div>
@@ -144,10 +145,14 @@
 <script>
     // A device that has just finished WiFi setup sends its owner here with a pairing token, normally
     // in the fragment, which browsers never send to a server. The device may not have registered yet,
-    // so keep asking until it has; if it doesn't, the code below still works.
+    // so keep asking until it has; if it doesn't, the code below still works. A link may carry the
+    // code the device shows instead (?code=, filled in above), which is sent as if typed.
     var token = location.hash.slice(1) || {{ token|tojson }};
     var GIVE_UP_AFTER_MS = 90000;
-    if (/^[0-9a-f]{64}$/.test(token)) {
+    var code = {{ code|tojson }};
+    if (code && !/^[0-9a-f]{64}$/.test(token)) {
+        document.getElementById("code-form").submit();
+    } else if (/^[0-9a-f]{64}$/.test(token)) {
         var waiting = document.getElementById("waiting");
         var codeCard = document.getElementById("code-card");
         var note = document.getElementById("waiting-note");
