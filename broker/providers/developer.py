@@ -1,8 +1,8 @@
 """The developer provider: each screen's developer panel, written to the shared Redis store.
 
-    python -m broker.developer_provider
+    python -m broker.providers.developer
 
-It runs on provider_loop's loop, in read_only_app(): GitHub's tokens aren't refreshed, so there is nothing to write
+It runs on providers/loop.py's loop, in read_only_app(): GitHub's tokens aren't refreshed, so there is nothing to write
 back. For every device with the developer panel on it polls the owner's GitHub and AI plans and writes them to
 `v1:developer:<device id>`.
 
@@ -26,11 +26,11 @@ import requests
 from countdown_api import keys as store_keys
 from sqlalchemy import select
 
-from broker import provider_loop
 from broker.clients import github
 from broker.db import db
 from broker.models import DeviceConfig, GitHubToken
-from broker.provider_loop import ProviderLoop
+from broker.providers import loop
+from broker.providers.loop import ProviderLoop
 from broker.services import developer, render_jobs
 
 if TYPE_CHECKING:
@@ -178,7 +178,7 @@ class DeveloperProvider(ProviderLoop):
 
 def main() -> None:
     """Run the provider until SIGINT or SIGTERM."""
-    provider_loop.serve(DeveloperProvider)
+    loop.serve(DeveloperProvider)
 
 
 if __name__ == "__main__":

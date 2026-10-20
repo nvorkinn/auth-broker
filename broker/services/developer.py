@@ -1,6 +1,6 @@
 """The developer panel's data: the owner's GitHub at a glance and their AI plans.
 
-The developer provider (broker/developer_provider.py) polls it and writes it to the store, where the renderers read it.
+The developer provider (broker/providers/developer.py) polls it and writes it to the store, where the renderers read it.
 """
 
 from typing import TYPE_CHECKING

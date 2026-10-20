@@ -1,4 +1,4 @@
-"""The developer provider (broker/developer_provider.py): what it writes to the store and the pace it asks for.
+"""The developer provider (broker/providers/developer.py): what it writes to the store and the pace it asks for.
 
 The store contract's developer.json (countdown_api.fixtures) is the stored value: pi-dashboard's renderer tests read the
 same file, so a change to either side that breaks the other shows up in both.
@@ -20,9 +20,10 @@ from cryptography.fernet import Fernet
 from sqlalchemy import text
 from sqlalchemy.exc import OperationalError
 
-from broker import developer_provider, provider_loop
 from broker.db import _db_path, db
-from broker.developer_provider import (
+from broker.models import DeviceConfig, GitHubToken
+from broker.providers import developer, loop
+from broker.providers.developer import (
     BURST_INTERVAL_S,
     IDLE_INTERVAL_S,
     PACE_S,
@@ -32,8 +33,7 @@ from broker.developer_provider import (
     pace_key,
     stored_key,
 )
-from broker.models import DeviceConfig, GitHubToken
-from broker.provider_loop import SUB_CHANGED, next_tick, read_only_app
+from broker.providers.loop import SUB_CHANGED, next_tick, read_only_app
 from broker.services import render_jobs
 from broker.services.render_jobs import JOBS, SCREENS, queued_key
 
@@ -379,17 +379,17 @@ def test_main_runs_the_provider_on_the_read_only_database(tmp_path, migrated_db,
     def run(self):  # a method, so not list.append itself, which wouldn't be handed the provider
         ran.append(self)
 
-    monkeypatch.setattr(provider_loop, "configure_logging", lambda: None)
-    monkeypatch.setattr(provider_loop, "connect", lambda: fakeredis.FakeRedis(decode_responses=True))
-    monkeypatch.setattr(provider_loop.signal, "signal", lambda *_: None)
+    monkeypatch.setattr(loop, "configure_logging", lambda: None)
+    monkeypatch.setattr(loop, "connect", lambda: fakeredis.FakeRedis(decode_responses=True))
+    monkeypatch.setattr(loop.signal, "signal", lambda *_: None)
     monkeypatch.setattr(DeveloperProvider, "run", run)
 
-    developer_provider.main()
+    developer.main()
 
     (provider,) = ran
     with provider.app.app_context():
         try:
-            assert developer_provider.wanted_devices() == []
+            assert developer.wanted_devices() == []
             with pytest.raises(OperationalError, match="readonly"):
                 db.session.execute(text("DELETE FROM device_config"))
         finally:
@@ -438,7 +438,7 @@ def test_stop_ends_the_wait(app, store):
 
 
 def test_the_wait_says_when_a_message_ended_it(app, store):
-    """So the next cycle knows it was nudged (provider_loop.ProviderLoop.nudged)."""
+    """So the next cycle knows it was nudged (loop.ProviderLoop.nudged)."""
     provider = DeveloperProvider(app, store, clock=lambda: FETCHED_AT + 1)
     provider._listen(0.01)  # subscribes
     store.publish(SUB_CHANGED, "")
@@ -448,7 +448,7 @@ def test_the_wait_says_when_a_message_ended_it(app, store):
 
 def test_ticks_are_epoch_aligned_at_the_current_interval(app, store):
     assert next_tick(FETCHED_AT + 1, BURST_INTERVAL_S) % BURST_INTERVAL_S == 0
-    assert developer_provider.IDLE_INTERVAL_S > developer_provider.BURST_INTERVAL_S
+    assert developer.IDLE_INTERVAL_S > developer.BURST_INTERVAL_S
     assert datetime.fromtimestamp(next_tick(FETCHED_AT + 1, 60), UTC).second == 0
 
 

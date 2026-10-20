@@ -10,8 +10,9 @@ from types import SimpleNamespace
 import pytest
 from gunicorn.config import Config
 
-from broker import create_app, provider_loop
+from broker import create_app
 from broker.log_format import GunicornLogger, JsonFormatter
+from broker.providers import loop
 from broker.routes import frames
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -149,7 +150,7 @@ def _flask_command():
 
 @pytest.mark.parametrize(
     ("set_up", "stream"),
-    [(_gunicorn, "out"), (_flask_command, "err"), (provider_loop.configure_logging, "out")],
+    [(_gunicorn, "out"), (_flask_command, "err"), (loop.configure_logging, "out")],
     ids=["gunicorn", "flask-command", "provider"],
 )
 def test_each_broker_record_is_written_once_as_json_at_info(app, capsys, monkeypatch, set_up, stream):

@@ -39,7 +39,7 @@ STARTED = {
 }
 
 # Stand-ins for what deploy.sh decrypts into each env_file on the host: the secrets broker.create_app() and
-# provider_loop.read_only_app() can't start without. Leaving out the optional ones keeps what they turn on off.
+# loop.read_only_app() can't start without. Leaving out the optional ones keeps what they turn on off.
 ENV_FILES = {
     "broker.env": {
         "FLASK_SECRET_KEY": "ci",

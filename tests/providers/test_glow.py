@@ -13,12 +13,11 @@ import redis
 import responses
 from countdown_api import fixtures
 
-from broker import provider_loop
 from broker.clients import glowmarkt
 from broker.db import db
 from broker.models import Device, DeviceConfig, GlowmarktCredentials
-from broker.provider_loop import read_only_app
-from broker.providers import glow
+from broker.providers import glow, loop
+from broker.providers.loop import read_only_app
 
 FIXTURE = fixtures.load("glow_energy.json")
 DEVICE = FIXTURE["device_id"]
@@ -217,7 +216,7 @@ def test_a_tick_after_a_nudge_fetches_every_account_again(app, provider, glow_ap
 
 
 def test_the_loop_tells_the_cycle_after_a_nudge_it_was_nudged(app, store, monkeypatch):
-    """provider_loop runs it: a nudge only fetches what's new (above), a tick everything."""
+    """Loop runs it: a nudge only fetches what's new (above), a tick everything."""
     provider = glow.GlowProvider(read_only_app(), store)
     cycles = []
     waits = iter([True, False])
@@ -238,7 +237,7 @@ def test_the_loop_tells_the_cycle_after_a_nudge_it_was_nudged(app, store, monkey
 
 def test_main_runs_the_provider_on_the_read_only_database(monkeypatch):
     served = []
-    monkeypatch.setattr(provider_loop, "serve", lambda *args: served.append(args))
+    monkeypatch.setattr(loop, "serve", lambda *args: served.append(args))
 
     glow.main()
 

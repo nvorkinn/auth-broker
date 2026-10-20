@@ -68,7 +68,7 @@ services:
       SESSION_COOKIE_SAMESITE: Lax
       SPOTIFY_REDIRECT_URI: https://auth.nikolaivorkinn.com/auth/spotify/callback
 
-  # The music provider (broker/spotify_provider.py): what each screen's Spotify and Apple Music are playing, into
+  # The music provider (broker/providers/music.py): what each screen's Spotify and Apple Music are playing, into
   # Redis. It starts the broker's app and writes refreshed Spotify tokens back, so ./data is writable here.
   spotify-provider:
     <<: *release-image
@@ -77,7 +77,7 @@ services:
     logging: *logging
     # Host networking, to reach Redis on 127.0.0.1:6379.
     network_mode: host
-    command: ["python", "-m", "broker.spotify_provider"]
+    command: ["python", "-m", "broker.providers.music"]
     volumes:
       - ./data:/app/data
     env_file:
@@ -87,8 +87,8 @@ services:
       SPOTIFY_REDIRECT_URI: https://auth.nikolaivorkinn.com/auth/spotify/callback
     stop_grace_period: 30s
 
-  # The developer provider (broker/developer_provider.py): each screen's developer panel (GitHub and AI plans) into
-  # Redis, and a pace hint while a release runs. It opens the database read-only (provider_loop.read_only_app), so
+  # The developer provider (broker/providers/developer.py): each screen's developer panel (GitHub and AI plans) into
+  # Redis, and a pace hint while a release runs. It opens the database read-only (loop.read_only_app), so
   # ./data is mounted :ro.
   developer-provider:
     <<: *release-image
@@ -97,7 +97,7 @@ services:
     logging: *logging
     # Host networking, to reach Redis on 127.0.0.1:6379.
     network_mode: host
-    command: ["python", "-m", "broker.developer_provider"]
+    command: ["python", "-m", "broker.providers.developer"]
     volumes:
       - ./data:/app/data:ro
     # broker.env for the key that decrypts the GitHub tokens.

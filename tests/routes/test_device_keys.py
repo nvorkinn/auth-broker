@@ -9,10 +9,10 @@ from unittest.mock import patch
 import fakeredis
 import pytest
 
-from broker import spotify_provider
 from broker.db import db
-from broker.developer_provider import pace_key, stored_key
 from broker.models import Device, GitHubToken, SpotifyToken
+from broker.providers import music
+from broker.providers.developer import pace_key, stored_key
 from broker.providers.glow import energy_key
 from broker.services import config_store, device_keys, frame_record
 
@@ -32,8 +32,8 @@ def _keys(device_id: str) -> dict[str, str]:
     """Return every key the providers write for the device, by what it holds, as the providers name them."""
     return {
         "energy": energy_key(device_id),
-        "player": spotify_provider.player_key(device_id),
-        "top": spotify_provider.top_key(device_id),
+        "player": music.player_key(device_id),
+        "top": music.top_key(device_id),
         "developer": stored_key(device_id),
         "pace": pace_key(device_id),
     }
@@ -55,7 +55,7 @@ EVERYTHING = {"energy", "player", "top", "developer", "pace"}
 
 def test_the_keys_are_the_ones_the_providers_write():
     assert device_keys.energy("d") == [energy_key("d")]
-    assert device_keys.music("d") == [spotify_provider.player_key("d"), spotify_provider.top_key("d")]
+    assert device_keys.music("d") == [music.player_key("d"), music.top_key("d")]
     assert device_keys.developer("d") == [stored_key("d"), pace_key("d")]
 
 

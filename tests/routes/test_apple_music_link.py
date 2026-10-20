@@ -1,6 +1,7 @@
 """The config site's Apple Music: connecting a device (broker/routes/apple_music_link.py) and switching it on.
 
-What the music provider fetches with the token is in tests/services/test_music.py and tests/test_spotify_provider.py.
+What the music provider fetches with the token is in tests/services/test_music.py and
+tests/providers/test_music_provider.py.
 """
 
 from broker.db import db
