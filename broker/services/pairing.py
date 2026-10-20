@@ -99,7 +99,7 @@ def issue_code(device_id: str) -> str:
     expires_at = now + CODE_TTL
     db.session.add(PairingCode(code=code, device_id=device_id, expires_at=expires_at))
     db.session.commit()
-    # For a screen the pool draws, which reads only the store; over the key of any code this one replaces.
+    # The pool reads only the store, so this code goes there too, over the key of any code it replaces.
     pairing_key.write(device_id, code, expires_at)
     # A screen waiting to be paired is in the pool's list only while it has a code (this one, now), and is drawn
     # at once if that just listed it.

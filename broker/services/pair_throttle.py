@@ -62,9 +62,9 @@ class PairThrottle:
             return max(1, round(remaining)) if remaining > 0 else None
 
     def record_failure(self, ip: str) -> int | None:
-        """Count a wrong code from this IP.
+        """Count one event from this IP: a wrong code on /pair, or any call on /register.
 
-        Returns the lockout in seconds if this failure triggered one, otherwise None.
+        Returns the lockout in seconds if this event triggered one, otherwise None.
         """
         with self._lock:
             now = self._clock()

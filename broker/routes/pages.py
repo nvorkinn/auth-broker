@@ -359,7 +359,7 @@ def name_screen() -> ResponseReturnValue:
 @bp.get("/device/<device_id>/screen")
 @require_paired_user
 def screen_view() -> ResponseReturnValue:
-    """Show what a screen shows, as its latest frame, and keep it current as the screen does."""
+    """Show the screen's latest frame, and say how often the page checks for a new one (the screen's own poll rate)."""
     config = db.session.get(DeviceConfig, g.device_id)
     shown = frame_record.head(g.device_id)
     upright = config.orientation != "horizontal"
@@ -466,7 +466,7 @@ def github_disconnect() -> ResponseReturnValue:
     if token is not None:
         db.session.delete(token)
         db.session.commit()
-        # Its GitHub summary: the developer provider writes the panel again, without it, within a cycle.
+        # The developer provider rewrites the panel without the GitHub summary within a cycle.
         device_keys.delete(device_keys.developer(g.device_id))
     return redirect(url_for("pages.device_config", device_id=g.device_id))
 
