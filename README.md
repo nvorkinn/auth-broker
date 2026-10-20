@@ -223,7 +223,7 @@ The app runs pending migrations on startup, so deploying is all a migration need
 **Code layout:** `broker/routes/` (Flask blueprints), `broker/services/` (the broker's own logic), `broker/clients/`
 (outside APIs), `broker/models.py` and `broker/migrations/` (the schema), `broker/cli.py` (admin commands), and the
 providers in `broker/providers/glow.py`, `broker/providers/music.py` and `broker/providers/developer.py`, which all
-run on the loop in `broker/provider_loop.py`. `tests/` mirrors it.
+run on the loop in `broker/providers/loop.py`. `tests/` mirrors it.
 
 ## Admin commands
 

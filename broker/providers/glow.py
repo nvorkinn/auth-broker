@@ -2,8 +2,8 @@
 
     python -m broker.providers.glow
 
-It runs on provider_loop's loop, in read_only_app(), and decrypts the Glowmarkt passwords itself, so they never leave
-the broker. Each device's readings go to `v1:energy:<device id>`: Glowmarkt's own answers in a thin wrapper
+It runs on providers/loop.py's loop, in read_only_app(), and decrypts the Glowmarkt passwords itself, so they
+never leave the broker. Each device's readings go to `v1:energy:<device id>`: Glowmarkt's own answers in a thin wrapper
 (countdown-api's StoredEnergy).
 
 A cycle runs every INTERVAL_S; one started early by `v1:sub:changed` only fetches the accounts new or changed since the
@@ -23,12 +23,12 @@ from countdown_api import keys as store_keys
 from cryptography.fernet import InvalidToken
 from sqlalchemy import select
 
-from broker import provider_loop
 from broker.clients.glowmarkt import DAILY, HOURLY, MONTHLY, PERIODS, GlowmarktAccount, local_now, utc_offset_param
 from broker.clients.glowmarkt import window_start as page_window_start
 from broker.db import db
 from broker.models import DeviceConfig, GlowmarktCredentials
-from broker.provider_loop import ProviderLoop
+from broker.providers import loop
+from broker.providers.loop import ProviderLoop
 from broker.services.postcodes import postcode_country
 from broker.services.renderer_config import timezone
 
@@ -201,7 +201,7 @@ class GlowProvider(ProviderLoop):
 
 def main() -> None:
     """Run the glow-provider until SIGTERM or SIGINT."""
-    provider_loop.serve(GlowProvider)
+    loop.serve(GlowProvider)
 
 
 if __name__ == "__main__":

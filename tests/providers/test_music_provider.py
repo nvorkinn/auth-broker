@@ -18,12 +18,12 @@ import responses
 from countdown_api import fixtures
 from sqlalchemy import select
 
-from broker import create_app, provider_loop
+from broker import create_app
 from broker.album_art import ART_TTL_S
 from broker.clients import spotify as spotify_client
 from broker.db import db
 from broker.models import AppleMusicPlay, AppleMusicToken, DeviceConfig, SpotifyToken
-from broker.providers import music
+from broker.providers import loop, music
 from broker.providers.music import (
     BURST_INTERVAL_S,
     INTERVAL_S,
@@ -540,9 +540,9 @@ def test_redis_down_is_logged_and_tried_next_tick(app, store, device, caplog):
 
 
 def test_main_runs_the_provider_in_the_brokers_own_app(monkeypatch):
-    """Not provider_loop's read-only one: it writes refreshed tokens and Apple Music's plays to the database."""
+    """Not loop's read-only one: it writes refreshed tokens and Apple Music's plays to the database."""
     served = []
-    monkeypatch.setattr(provider_loop, "serve", lambda *args: served.append(args))
+    monkeypatch.setattr(loop, "serve", lambda *args: served.append(args))
 
     music.main()
 

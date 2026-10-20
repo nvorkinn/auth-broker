@@ -11,7 +11,7 @@ afresh from the server's clock, and nothing else computes a poll or refresh time
 - A provider whose data is bursty asks for faster with a hint: a `v1:pace:<source>:<id>` key holding seconds, whose TTL
   is the hint's expiry. The shortest live hint, never under HINT_FLOOR_S nor over RENDER_INTERVAL_S, takes the place
   of the render interval, and the screen polls at half of it, aligned to its multiples (the providers' cycles are
-  epoch-aligned too, see provider_loop.next_tick).
+  epoch-aligned too, see loop.next_tick).
 - A slot under MIN_SLEEP_S away is skipped for the one after, so the screen never wakes straight back up, and network
   delay never adds up: the next answer starts from the clock again.
 

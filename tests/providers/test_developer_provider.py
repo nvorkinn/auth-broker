@@ -20,11 +20,9 @@ from cryptography.fernet import Fernet
 from sqlalchemy import text
 from sqlalchemy.exc import OperationalError
 
-from broker import provider_loop
 from broker.db import _db_path, db
 from broker.models import DeviceConfig, GitHubToken
-from broker.provider_loop import SUB_CHANGED, next_tick, read_only_app
-from broker.providers import developer
+from broker.providers import developer, loop
 from broker.providers.developer import (
     BURST_INTERVAL_S,
     IDLE_INTERVAL_S,
@@ -35,6 +33,7 @@ from broker.providers.developer import (
     pace_key,
     stored_key,
 )
+from broker.providers.loop import SUB_CHANGED, next_tick, read_only_app
 from broker.services import render_jobs
 from broker.services.render_jobs import JOBS, SCREENS, queued_key
 
@@ -380,9 +379,9 @@ def test_main_runs_the_provider_on_the_read_only_database(tmp_path, migrated_db,
     def run(self):  # a method, so not list.append itself, which wouldn't be handed the provider
         ran.append(self)
 
-    monkeypatch.setattr(provider_loop, "configure_logging", lambda: None)
-    monkeypatch.setattr(provider_loop, "connect", lambda: fakeredis.FakeRedis(decode_responses=True))
-    monkeypatch.setattr(provider_loop.signal, "signal", lambda *_: None)
+    monkeypatch.setattr(loop, "configure_logging", lambda: None)
+    monkeypatch.setattr(loop, "connect", lambda: fakeredis.FakeRedis(decode_responses=True))
+    monkeypatch.setattr(loop.signal, "signal", lambda *_: None)
     monkeypatch.setattr(DeveloperProvider, "run", run)
 
     developer.main()
@@ -439,7 +438,7 @@ def test_stop_ends_the_wait(app, store):
 
 
 def test_the_wait_says_when_a_message_ended_it(app, store):
-    """So the next cycle knows it was nudged (provider_loop.ProviderLoop.nudged)."""
+    """So the next cycle knows it was nudged (loop.ProviderLoop.nudged)."""
     provider = DeveloperProvider(app, store, clock=lambda: FETCHED_AT + 1)
     provider._listen(0.01)  # subscribes
     store.publish(SUB_CHANGED, "")

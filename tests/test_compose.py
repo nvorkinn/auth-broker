@@ -8,8 +8,8 @@ ROOT = Path(__file__).parent.parent
 COMPOSE = yaml.safe_load((ROOT / "docker-compose.yml").read_text())
 # What broker.create_app() cannot start without: config.load() reads each of these with os.environ[...].
 REQUIRED = re.findall(r'os\.environ\["(\w+)"\]', (ROOT / "broker" / "config.py").read_text())
-# And what provider_loop.read_only_app() can't (CREDENTIAL_ENCRYPTION_KEY).
-REQUIRED_READ_ONLY = re.findall(r'os\.environ\["(\w+)"\]', (ROOT / "broker" / "provider_loop.py").read_text())
+# And what loop.read_only_app() can't (CREDENTIAL_ENCRYPTION_KEY).
+REQUIRED_READ_ONLY = re.findall(r'os\.environ\["(\w+)"\]', (ROOT / "broker" / "providers" / "loop.py").read_text())
 
 
 def _env_file_names(service: dict) -> set[str]:
@@ -41,11 +41,11 @@ def _broker_apps() -> dict[str, dict]:
 
 
 def _read_only_apps() -> dict[str, dict]:
-    """Return the providers that read the database in provider_loop.read_only_app().
+    """Return the providers that read the database in loop.read_only_app().
 
-    The ones run in provider_loop.serve(), which uses it unless given broker.create_app (the music provider).
+    The ones run in loop.serve(), which uses it unless given broker.create_app (the music provider).
     """
-    return {name: s for name, s in _providers("provider_loop.serve").items() if name not in _broker_apps()}
+    return {name: s for name, s in _providers("loop.serve").items() if name not in _broker_apps()}
 
 
 def test_the_services_that_start_an_app_are_found():

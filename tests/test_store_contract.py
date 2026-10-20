@@ -13,10 +13,10 @@ import fakeredis
 from countdown_api import fixtures, scripts
 from countdown_api import keys as store_keys
 
-from broker import album_art, provider_loop
+from broker import album_art
 from broker.db import db
 from broker.models import Device, DeviceConfig, GlowmarktCredentials
-from broker.providers import developer, glow, music
+from broker.providers import developer, glow, loop, music
 from broker.routes import pages
 from broker.services import config_store, device_keys, frame_record, pace, pairing, pairing_key, render_jobs
 
@@ -41,7 +41,7 @@ def test_the_keys_are_the_contracts():
     url = "https://i.scdn.co/image/ab01300"
     assert album_art.art_key(url) == store_keys.album_art(url)
     assert device_keys.music(device_id) == [store_keys.spotify(device_id), store_keys.spotify_top(device_id)]
-    assert provider_loop.SUB_CHANGED == store_keys.SUB_CHANGED
+    assert loop.SUB_CHANGED == store_keys.SUB_CHANGED
     assert scripts.ENQUEUE.source == render_jobs._ENQUEUE
 
 

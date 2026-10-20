@@ -88,7 +88,7 @@ services:
     stop_grace_period: 30s
 
   # The developer provider (broker/providers/developer.py): each screen's developer panel (GitHub and AI plans) into
-  # Redis, and a pace hint while a release runs. It opens the database read-only (provider_loop.read_only_app), so
+  # Redis, and a pace hint while a release runs. It opens the database read-only (loop.read_only_app), so
   # ./data is mounted :ro.
   developer-provider:
     <<: *release-image

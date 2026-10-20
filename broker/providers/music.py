@@ -6,7 +6,7 @@ It runs in the broker's full app (create_app), as it writes to the database: ref
 Music's new plays, which the top lists are counted from (apple_music.record_plays) and nothing else logs. The playing
 tracks' covers are stored too (broker/album_art.py). The keys are the countdown-api store contract's.
 
-It runs on provider_loop's loop, every INTERVAL_S. A device whose fetch fails is logged and skipped; its keys expire
+It runs on providers/loop.py's loop, every INTERVAL_S. A device whose fetch fails is logged and skipped; its keys expire
 if it keeps failing.
 
 While a device's Spotify is playing, its screen shows a progress bar, which needs the position every few seconds. So
@@ -34,12 +34,13 @@ from countdown_api import keys as store_keys
 from redis.exceptions import RedisError
 from sqlalchemy import or_, select
 
-from broker import create_app, provider_loop
+from broker import create_app
 from broker.album_art import AlbumArt, art_urls
 from broker.clients import spotify
 from broker.db import db
 from broker.models import DeviceConfig, SpotifyToken
-from broker.provider_loop import ProviderLoop
+from broker.providers import loop
+from broker.providers.loop import ProviderLoop
 from broker.services import music, render_jobs
 
 if TYPE_CHECKING:
@@ -423,7 +424,7 @@ class MusicProvider(ProviderLoop):
 
 def main() -> None:
     """Run the provider until SIGINT or SIGTERM, in the broker's full app: it writes to the database."""
-    provider_loop.serve(MusicProvider, create_app)
+    loop.serve(MusicProvider, create_app)
 
 
 if __name__ == "__main__":
