@@ -120,6 +120,43 @@ def test_a_pr_links_its_claude_session_only_from_a_claude_ai_url(body, session):
     assert github._claude_session(body) == session
 
 
+def test_pull_files_keep_patches_and_stop_after_the_last_page(api):
+    page = [
+        {"filename": f"f{index}", "status": "modified", "additions": 1, "deletions": 0, "patch": "@@"}
+        for index in range(100)
+    ]
+    large = {
+        "filename": "big.json",
+        "status": "added",
+        "additions": 9000,
+        "deletions": 0,
+        "blob_url": "https://github.com/b",
+    }
+    api.read = Mock(side_effect=[json.dumps(page), json.dumps([large])])
+    found = api.pull_files("/repos/alice/project", 7)
+    assert len(found["files"]) == 101
+    assert found["truncated"] is False
+    assert found["files"][-1] == {
+        "filename": "big.json",
+        "previous_filename": None,
+        "status": "added",
+        "additions": 9000,
+        "deletions": 0,
+        "patch": None,
+        "url": "https://github.com/b",
+    }
+    assert api.read.call_count == 2
+
+
+def test_pull_files_are_cut_at_the_shown_maximum(api):
+    page = [{"filename": "f", "status": "modified", "additions": 1, "deletions": 0} for _ in range(100)]
+    api.read = Mock(return_value=json.dumps(page))
+    found = api.pull_files("/repos/alice/project", 7)
+    assert len(found["files"]) == github.MAX_FILES
+    assert found["truncated"] is True
+    assert api.read.call_count == 4
+
+
 def test_a_closed_pull_request_reads_as_none_and_is_left_out(api):
     api.get = Mock(return_value={"state": "closed"})
     assert api.pull("/repos/alice/project", 7) is None
@@ -161,6 +198,7 @@ def test_pull_checks_include_paginated_checks_and_latest_legacy_statuses(api):
     assert pr["mergeable"] is False
     assert pr["created_at"] == "2026-10-19T08:00:00Z"
     assert pr["session"] == "session_01Fwmw2krp"
+    assert pr["sha"] == "abc"
     assert len(pr["checks"]) == 103
     assert pr["refresh"] is True
     assert [check["state"] for check in pr["checks"][-2:]] == ["success", "pending"]
@@ -491,3 +529,89 @@ def test_note_generation_failure_never_publishes(api):
     with pytest.raises(requests.HTTPError):
         api.publish_release(REPO)
     assert len(responses.calls) == 3
+
+
+MERGE_REPO = {"full_name": "alice/project"}
+OPEN_PR = {
+    "state": "open",
+    "draft": False,
+    "auto_merge": None,
+    "node_id": "PR_1",
+    "head": {"sha": "abc"},
+    "base": {"ref": "main"},
+}
+
+
+def graphql_reply(errors=None):
+    response = Mock()
+    response.json.return_value = {"errors": errors} if errors else {"data": {}}
+    return response
+
+
+def test_auto_merge_is_turned_on_with_the_repositorys_merge_method(api):
+    api.get = Mock(return_value=OPEN_PR)
+    api.post = Mock(return_value=graphql_reply())
+    assert api.set_auto_merge(MERGE_REPO | {"allow_merge_commit": False}, 7, enabled=True) == {
+        "auto_merge": True,
+        "merged": False,
+    }
+    path, payload = api.post.call_args.args
+    assert path == "/graphql"
+    assert "enablePullRequestAutoMerge" in payload["query"]
+    assert payload["variables"] == {"id": "PR_1", "method": "SQUASH"}
+
+
+def test_auto_merge_is_turned_off(api):
+    api.get = Mock(return_value=OPEN_PR | {"auto_merge": {"merge_method": "merge"}})
+    api.post = Mock(return_value=graphql_reply())
+    assert api.set_auto_merge(MERGE_REPO, 7, enabled=False) == {"auto_merge": False, "merged": False}
+    assert "disablePullRequestAutoMerge" in api.post.call_args.args[1]["query"]
+
+
+def test_auto_merge_already_in_the_asked_state_writes_nothing(api):
+    api.get = Mock(return_value=OPEN_PR)
+    api.post = Mock()
+    assert api.set_auto_merge(MERGE_REPO, 7, enabled=False) == {"auto_merge": False, "merged": False}
+    api.post.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    ("repo", "pr", "message"),
+    [
+        (MERGE_REPO, OPEN_PR | {"state": "closed"}, "no longer open"),
+        (MERGE_REPO, OPEN_PR | {"draft": True}, "ready for review"),
+        (MERGE_REPO | {"allow_auto_merge": False}, OPEN_PR, "Allow auto-merge"),
+    ],
+)
+def test_auto_merge_is_refused_before_writing(api, repo, pr, message):
+    api.get = Mock(return_value=pr)
+    api.post = Mock()
+    with pytest.raises(github.DashboardError, match=message):
+        api.set_auto_merge(repo, 7, enabled=True)
+    api.post.assert_not_called()
+
+
+def test_a_github_refusal_is_reported(api):
+    api.get = Mock(return_value=OPEN_PR)
+    api.post = Mock(return_value=graphql_reply([{"message": "Resource not accessible by personal access token"}]))
+    with pytest.raises(github.DashboardError, match="not accessible"):
+        api.set_auto_merge(MERGE_REPO, 7, enabled=True)
+
+
+@responses.activate
+def test_a_clean_pr_with_finished_checks_is_merged_at_its_checked_head(api):
+    api.get = Mock(return_value=OPEN_PR)
+    api.post = Mock(return_value=graphql_reply([{"message": "Pull request is in clean status"}]))
+    api.pull = Mock(return_value={"checks": [{"pending": False, "state": "success"}]})
+    merge = responses.put(f"{ROOT}/repos/alice/project/pulls/7/merge", json={"merged": True})
+    assert api.set_auto_merge(MERGE_REPO, 7, enabled=True) == {"auto_merge": False, "merged": True}
+    assert json.loads(merge.calls[0].request.body) == {"merge_method": "merge", "sha": "abc"}
+
+
+@pytest.mark.parametrize("check", [{"pending": True, "state": "in_progress"}, {"pending": False, "state": "failure"}])
+def test_a_clean_pr_with_unfinished_or_failed_checks_is_not_merged(api, check):
+    api.get = Mock(return_value=OPEN_PR)
+    api.post = Mock(return_value=graphql_reply([{"message": "Pull request is in clean status"}]))
+    api.pull = Mock(return_value={"checks": [check]})
+    with pytest.raises(github.DashboardError, match="main requires no checks"):
+        api.set_auto_merge(MERGE_REPO, 7, enabled=True)

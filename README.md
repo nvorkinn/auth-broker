@@ -129,8 +129,12 @@ GITHUB_DASHBOARD_TOKEN=<a fine-grained GitHub PAT>
 ```
 
 The PAT needs repository access to your projects with **Actions: read**, **Checks: read**, **Commit statuses: read**,
-**Pull requests: read**, **Deployments: read and write** (to approve) and **Contents: read and write** (for releases).
-It's only used server-side.
+**Pull requests: read and write** (for auto-merge), **Deployments: read and write** (to approve) and **Contents: read
+and write** (for releases and merging). It's only used server-side.
+
+**Auto-merge** needs *Allow auto-merge* turned on in each repository's settings. GitHub only waits when the base
+branch's protection requires checks; where nothing is required, the button merges at once if the PR's checks have all
+passed, and refuses while any are still running or failed.
 
 **New Release publishes immediately**, with no confirmation: it bumps the minor version of the highest semver release
 (`1.19.0` becomes `1.20.0`, keeping any `v` prefix; `1.0.0` if there are none), generates notes from the previous tag

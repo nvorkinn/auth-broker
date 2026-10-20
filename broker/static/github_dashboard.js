@@ -155,6 +155,7 @@ function renderPull(pr, project) {
             : badge("Checking conflicts", "pending"));
     if (pr.merge_state === "blocked") readiness.append(badge("Merge blocked", "pending"));
     if (project.errorText) readiness.append(badge("Stale data", "failed"));
+    if (!pr.draft) readiness.append(autoMergeControl(pr, project));
     const remaining = pr.checks.filter(check => check.pending);
     const failed = pr.checks.filter(check => FAILED_CHECKS.has(check.state));
     const completed = pr.checks.filter(check => !check.pending && !FAILED_CHECKS.has(check.state));
@@ -176,8 +177,104 @@ function renderPull(pr, project) {
     row.dataset.created = pr.created_at;
     row.dataset.priority = pr.mergeable === false || failed.length ? "0"
         : remaining.length || pr.mergeable === null ? "1" : pr.draft ? "3" : "2";
-    row.append(identity, readiness, checks);
+    row.append(identity, readiness, checks, filesChanged(pr, project, row.dataset.key));
     return row;
+}
+
+// Auto-merge on or off; GitHub merges at once instead when the base branch requires nothing and the checks are done.
+function autoMergeControl(pr, project) {
+    const box = element("div", undefined, "auto-merge");
+    const state = project.merges.get(pr.number);
+    const on = state?.on ?? pr.auto_merge;
+    if (state?.merged) {
+        box.append(badge("Merged", "done"));
+        return box;
+    }
+    if (on) box.append(badge("Auto-merge on", "done"));
+    const button = element("button", state?.busy ? "Working..." : on ? "Cancel auto-merge" : "Auto-merge", "auto-merge-button");
+    button.type = "button";
+    button.disabled = !!state?.busy;
+    button.title = on ? "Stop GitHub merging this PR when it's ready"
+        : "Merge when the required checks pass, or now if nothing is required and the checks are done";
+    button.addEventListener("click", () => setAutoMerge(project, pr, !on));
+    box.append(button);
+    if (state?.message) {
+        const message = element("p", state.message, "error");
+        message.setAttribute("role", "alert");
+        box.append(message);
+    }
+    return box;
+}
+
+async function setAutoMerge(project, pr, enabled) {
+    if (project.merges.get(pr.number)?.busy) return;
+    project.merges.set(pr.number, { busy: true, on: !enabled });
+    renderProject(project);
+    try {
+        const result = await api(`${projectPath(project.repo.full_name)}/pulls/${pr.number}/auto-merge`, {
+            method: "POST", body: JSON.stringify({ enabled }),
+        });
+        project.merges.set(pr.number, { on: result.auto_merge, merged: result.merged });
+    } catch (error) {
+        project.merges.set(pr.number, { on: !enabled, message: error.message });
+    } finally {
+        project.nextRefresh = 0;
+        renderProject(project);
+    }
+}
+
+// Files changed, read when first opened and again after a new push; the details stay open across refreshes.
+function filesChanged(pr, project, key) {
+    const details = element("details", undefined, "pull-files");
+    details.dataset.detailKey = `files:${key}`;
+    const cacheKey = `${pr.number}@${pr.sha}`;
+    const loaded = project.files.get(cacheKey);
+    const counts = loaded?.files ? ` (${loaded.files.length}${loaded.truncated ? "+" : ""})` : "";
+    details.append(element("summary", `Files changed${counts}`));
+    if (loaded?.files) {
+        details.append(...loaded.files.map((file, index) => fileDiff(file, `${details.dataset.detailKey}:${index}`)));
+        if (loaded.truncated) details.append(link("More files on GitHub", `${pr.url}/files`));
+    } else {
+        details.append(element("p", loaded?.error || "Loading files...", loaded?.error ? "error" : "empty"));
+    }
+    details.addEventListener("toggle", () => details.open && (!loaded || loaded.error) ? loadFiles(project, pr, cacheKey) : null);
+    return details;
+}
+
+async function loadFiles(project, pr, cacheKey) {
+    if (project.files.get(cacheKey)?.busy) return;
+    project.files.set(cacheKey, { busy: true });
+    try {
+        const data = await api(`${projectPath(project.repo.full_name)}/pulls/${pr.number}/files`);
+        project.files.set(cacheKey, data);
+    } catch (error) {
+        project.files.set(cacheKey, { error: `${error.message} Close and open again to retry.` });
+    }
+    renderProject(project);
+}
+
+function fileDiff(file, key) {
+    const details = element("details", undefined, "file-diff");
+    details.dataset.detailKey = key;
+    const summaryLine = element("summary");
+    const name = file.previous_filename ? `${file.previous_filename} → ${file.filename}` : file.filename;
+    summaryLine.append(element("span", name, "file-name"), element("span", `+${file.additions}`, "diff-add-count"),
+        element("span", `−${file.deletions}`, "diff-del-count"));
+    details.append(summaryLine);
+    if (file.patch) {
+        const patch = element("pre", undefined, "patch");
+        for (const line of file.patch.split("\n")) {
+            const kind = line.startsWith("@@") ? "diff-hunk" : line.startsWith("+") ? "diff-add"
+                : line.startsWith("-") ? "diff-del" : "diff-same";
+            patch.append(element("span", `${line}\n`, kind));
+        }
+        details.append(patch);
+    } else {
+        const note = element("p", file.status === "renamed" ? "Renamed without changes. " : "No diff shown here. ", "empty");
+        if (file.url) note.append(link("View on GitHub", file.url));
+        details.append(note);
+    }
+    return details;
 }
 
 const MATRIX_EXPANDED_MAX = 6;
@@ -480,6 +577,8 @@ async function refreshProject(project) {
         project.error.hidden = true;
         track(project, [...(sections.pulls || []).map(pullItem), ...(sections.workflows || []).map(runItem)]);
         if (sections.pulls) forgetMissing(project, "pull", sections.pulls.map(pr => pr.number));
+        // Fresh PR data says whether auto-merge is on; only a change still being sent overrides it.
+        if (sections.pulls) for (const state of project.merges.values()) if (!state.busy) delete state.on;
         if (sections.workflows) forgetMissing(project, "run", sections.workflows.map(run => run.id));
         if (project.publishedTag) {
             const run = data.workflows.find(run => run.branch === project.publishedTag);
@@ -660,7 +759,8 @@ function addProject(repo) {
     const project = { repo, card, error, result, data: null, pullRows: [], workflowRows: [],
         errorText: "", loading: false, nextRefresh: 0, approvals: new Map(), publishing: false,
         background: !checkbox.checked, partial: null, matrixMode: new Map(), runRefresh: new Map(),
-        finishedMode: new Map(), redrawAt: Infinity, pool: new Map(), prints: new Map(), watchUntil: 0 };
+        finishedMode: new Map(), redrawAt: Infinity, pool: new Map(), prints: new Map(), watchUntil: 0,
+        files: new Map(), merges: new Map() };
     button.addEventListener("click", () => publish(project, button));
     checkbox.addEventListener("change", () => {
         project.background = !checkbox.checked;

@@ -37,6 +37,23 @@ button:focus-visible, a:focus-visible, summary:focus-visible { outline: 2px soli
 .pull { display: grid; grid-template-columns: minmax(0, 1fr) 116px minmax(0, .9fr); gap: 10px; padding: 10px 12px; border-bottom: 1px solid var(--border); align-items: start; }
 .pull:last-child { border-bottom: 0; }
 .pull-identity, .pull-checks { min-width: 0; }
+.pull-files { grid-column: 1 / -1; margin-top: 0; min-width: 0; }
+.pull-files > summary { font-size: 11px; }
+.file-diff { margin: 4px 0 0 12px; }
+.file-diff > summary { display: flex; gap: 8px; align-items: baseline; color: var(--text); }
+.file-diff > summary::before { content: "\25B8"; color: var(--muted); }
+.file-diff[open] > summary::before { content: "\25BE"; }
+.file-name { min-width: 0; overflow-wrap: anywhere; }
+.diff-add-count { color: var(--green); }
+.diff-del-count { color: var(--red); }
+.patch { margin: 4px 0 0; padding: 6px 0; overflow-x: auto; background: #0e1520; border: 1px solid var(--border); border-radius: 5px; font: 11px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; }
+.patch span { display: block; padding: 0 8px; white-space: pre; min-width: max-content; }
+.diff-add { background: rgb(119 223 173 / 12%); color: #bdf0d6; }
+.diff-del { background: rgb(255 128 128 / 12%); color: #ffc6c6; }
+.diff-hunk { color: var(--blue); }
+.auto-merge { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin-top: 4px; }
+.auto-merge-button { font-size: 10px; padding: 3px 6px; }
+.auto-merge .error { flex-basis: 100%; font-size: 11px; }
 .session-links { margin-top: 4px; font-size: 11px; color: var(--muted); }
 .session-app { display: inline-block; color: var(--text); background: #223047; border: 1px solid #405475; border-radius: 5px; padding: 1px 7px; text-decoration: none; }
 .session-app:hover { border-color: #8abaff; }

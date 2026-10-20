@@ -223,6 +223,59 @@ test("a PR opened by a Claude session links to it in the app and on the web; oth
     assert.equal(web.target, "_blank");
 });
 
+test("a PR's files are read when first opened, drawn as patches, and read again after a push", async () => {
+    const files = { files: [
+        { filename: "app.py", status: "modified", additions: 1, deletions: 1, patch: "@@ -1 +1 @@\n-old\n+new\n same" },
+        { filename: "big.json", status: "added", additions: 9000, deletions: 0, patch: null, url: "https://github.com/b" },
+    ], truncated: true };
+    const pull = { ...active.pulls[0], sha: "a1" };
+    const app = await harness(url => url.endsWith("/pulls/4/files") ? files : { ...idle, pulls: [pull] });
+    const section = () => app.ids.get("pulls").children[0].querySelectorAll(".pull-files")[0];
+    assert.equal(app.calls.filter(call => call.url.endsWith("/files")).length, 0, "nothing is read until opened");
+    section().open = true;
+    await section().listeners.toggle();
+    assert.equal(app.calls.filter(call => call.url.endsWith("/alice/project/pulls/4/files")).length, 1);
+    assert.equal(section().open, true, "stays open once drawn");
+    assert.equal(section().children[0].textContent, "Files changed (2+)");
+    const [patchFile, bigFile] = section().querySelectorAll(".file-diff");
+    assert.deepEqual(patchFile.querySelectorAll("span").filter(span => span.className.startsWith("diff-") && !span.className.endsWith("count"))
+        .map(span => span.className), ["diff-hunk", "diff-del", "diff-add", "diff-same"]);
+    assert.match(text(bigFile), /View on GitHub/);
+    assert.match(text(section()), /More files on GitHub/);
+    await section().listeners.toggle();
+    assert.equal(app.calls.filter(call => call.url.endsWith("/files")).length, 1, "cached for the same head");
+    app.setData(url => url.endsWith("/pulls/4/files") ? files : { ...idle, pulls: [{ ...pull, sha: "b2" }] });
+    await app.evaluate("refreshProject(projects.get('alice/project'))");
+    assert.equal(section().children[0].textContent, "Files changed");
+    await section().listeners.toggle();
+    assert.equal(app.calls.filter(call => call.url.endsWith("/files")).length, 2);
+});
+
+test("auto-merge is a CSRF-protected toggle that shows its state and GitHub's refusals", async () => {
+    let reply = { auto_merge: true, merged: false };
+    const pull = { ...active.pulls[0], auto_merge: false };
+    const app = await harness(url => url.endsWith("/auto-merge") ? reply : { ...idle, pulls: [pull, { ...pull, number: 5, draft: true }] });
+    const control = number => app.ids.get("pulls").children.find(row => row.dataset.key.endsWith(`#${number}`))
+        .querySelectorAll(".auto-merge")[0];
+    assert.equal(control(5), undefined, "drafts have no auto-merge");
+    assert.equal(control(4).querySelectorAll("button")[0].textContent, "Auto-merge");
+    await control(4).querySelectorAll("button")[0].listeners.click();
+    const write = app.calls.find(call => call.options.method === "POST");
+    assert.equal(write.url, "/github/repositories/alice/project/pulls/4/auto-merge");
+    assert.equal(write.options.headers["X-CSRF-Token"], "csrf-token");
+    assert.deepEqual(JSON.parse(write.options.body), { enabled: true });
+    assert.match(text(control(4)), /Auto-merge on/);
+    assert.equal(control(4).querySelectorAll("button")[0].textContent, "Cancel auto-merge");
+    app.setFailure({ status: 409, message: "Auto-merge is off for this repository." });
+    await control(4).querySelectorAll("button")[0].listeners.click();
+    assert.match(text(control(4)), /Auto-merge is off for this repository/);
+    assert.equal(control(4).querySelectorAll("button")[0].textContent, "Cancel auto-merge");
+    app.setFailure(null);
+    reply = { auto_merge: false, merged: true };
+    await control(4).querySelectorAll("button")[0].listeners.click();
+    assert.match(text(control(4)), /Merged/);
+});
+
 test("completed check details stay inline and open across refreshes; completed-only rows are compact", async () => {
     const checks = [{ name: "Tests", state: "success", pending: false, url: "https://github.com/check/1" }];
     const app = await harness({ ...idle, pulls: [{ ...active.pulls[0], mergeable: true, checks }] });
