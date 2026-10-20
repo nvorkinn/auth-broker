@@ -75,6 +75,7 @@ const active = {
         number: 4, title: "A change", url: "https://github.com/alice/project/pull/4",
         author: "alice", head: "feature", base: "main", mergeable: false,
         checks: [{ name: "Build", state: "in_progress", pending: true }], refresh: true,
+        created_at: "2026-10-18T08:00:00Z",
     }],
 };
 // Whole-project reads, leaving out quick polls of single runs and PRs.
@@ -188,18 +189,19 @@ function text(node) {
     return [node.textContent || "", ...(node.children || []).map(text)].join(" ");
 }
 
-test("PRs from all repositories share one list with repository labels and attention first", async () => {
+test("PRs from all repositories share one list with repository labels, newest first", async () => {
     const other = { ...repo, full_name: "alice/another" };
+    // The newer PR is ready and the older one has conflicts: opening time decides, not what needs attention.
     const app = await harness(url => url.endsWith("/another")
-        ? { ...idle, pulls: [{ ...active.pulls[0], number: 2, title: "Ready", mergeable: true, checks: [] }] }
+        ? { ...idle, pulls: [{ ...active.pulls[0], number: 2, title: "Ready", mergeable: true, checks: [], created_at: "2026-10-19T08:00:00Z" }] }
         : active, [other, repo]);
     const rows = app.ids.get("pulls").children;
     assert.equal(rows.length, 2);
-    assert.equal(rows[0].dataset.key, "alice/project#4");
-    assert.equal(rows[1].dataset.key, "alice/another#2");
-    assert.match(text(rows[0]), /alice\/project/);
-    assert.match(text(rows[1]), /alice\/another/);
-    assert.match(text(rows[0]), /Build: Running/);
+    assert.equal(rows[0].dataset.key, "alice/another#2");
+    assert.equal(rows[1].dataset.key, "alice/project#4");
+    assert.match(text(rows[0]), /alice\/another/);
+    assert.match(text(rows[1]), /alice\/project/);
+    assert.match(text(rows[1]), /Build: Running/);
     assert.equal(app.ids.get("pull-count").textContent, "2");
     assert.equal(app.ids.get("projects").querySelectorAll(".pull").length, 0);
     assert.equal(app.ids.get("projects").querySelectorAll("button").length, 4);

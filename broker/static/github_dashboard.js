@@ -149,8 +149,7 @@ function renderPull(pr, project) {
         details.append(element("summary", `${completed.length} completed checks`), checkList(completed));
         checks.append(details);
     }
-    row.dataset.priority = pr.mergeable === false || failed.length ? "0"
-        : remaining.length || pr.mergeable === null ? "1" : pr.draft ? "3" : "2";
+    row.dataset.created = pr.created_at;
     row.append(identity, readiness, checks);
     return row;
 }
@@ -354,7 +353,8 @@ function reconcile(container, nodes) {
 function renderOverview() {
     const all = [...projects.values()];
     const pulls = all.flatMap(project => project.pullRows).sort((a, b) =>
-        Number(a.dataset.priority) - Number(b.dataset.priority) || a.dataset.key.localeCompare(b.dataset.key, undefined, { numeric: true }));
+        // Newest first; ISO timestamps sort as text.
+        b.dataset.created.localeCompare(a.dataset.created) || a.dataset.key.localeCompare(b.dataset.key, undefined, { numeric: true }));
     const workflows = all.flatMap(project => project.workflowRows);
     const ongoing = all.flatMap(project => shownRuns(project).filter(run => !finished(run))).length;
     const unloaded = all.filter(project => !project.data).length;
