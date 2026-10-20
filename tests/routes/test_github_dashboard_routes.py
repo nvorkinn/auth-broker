@@ -35,6 +35,7 @@ def test_dashboard_never_exposes_the_pat(client, dashboard):
     assert b"test-pat" not in response.data
     assert response.headers["Cache-Control"] == "no-store"
     assert b"csrf-token" in response.data
+    assert b'rel="icon" type="image/svg+xml" href="/static/github_dashboard.svg"' in response.data
 
 
 def test_repositories_and_project(client, dashboard):
