@@ -23,6 +23,13 @@
 	log_skip @request_logging_off
 }
 
+# The bare domain has nothing of its own: send it to the settings site, keeping the path (so
+# nikolaivorkinn.com/about works). A temporary redirect, so browsers don't remember it if the apex
+# ever gets a page. Needs A records for both names pointing at this host, or Caddy can't get a cert.
+nikolaivorkinn.com, www.nikolaivorkinn.com {
+	redir https://auth.nikolaivorkinn.com{uri}
+}
+
 # Caddy uses host networking, so 127.0.0.1 is the host throughout.
 auth.nikolaivorkinn.com {
 	import access_log
