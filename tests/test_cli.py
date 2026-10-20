@@ -1,5 +1,7 @@
 from unittest.mock import patch
 
+import fakeredis
+from redis import RedisError
 from sqlalchemy import func, select
 
 from broker.clients import weather
@@ -290,3 +292,97 @@ def test_weather_backfill_skips_and_reports_what_open_meteo_couldnt_be_asked_abo
     assert "run it again later" in result.output
     with app.app_context():
         assert db.session.get(DeviceConfig, device_id).weather_place_id is None
+
+
+# --- flask redis ----------------------------------------------------------------------------------------------------
+
+
+def _redis(app):
+    store = fakeredis.FakeRedis(decode_responses=True)
+    app.extensions["redis"] = store
+    return store
+
+
+def _run(app, *args):
+    return app.test_cli_runner().invoke(args=["redis", *args])
+
+
+def test_redis_subs_counts_each_source(app):
+    store = _redis(app)
+    store.sadd("v1:sub:tfl", "940GZZLUEUS", "490000077E")
+    store.sadd("v1:sub:glow", "a1b2c3d4e5f6")
+
+    result = _run(app, "subs")
+
+    assert result.exit_code == 0, result.output
+    assert result.output.splitlines() == [
+        "tfl: 2",
+        "entur: 0",
+        "weather: 0",
+        "glow: 1",
+        "spotify: 0",
+        "developer: 0",
+        "postcode: 0",
+    ]
+
+
+def test_redis_subs_with_a_source_lists_its_ids(app):
+    _redis(app).sadd("v1:sub:tfl", "940GZZLUEUS", "490000077E")
+
+    result = _run(app, "subs", "tfl")
+
+    assert result.output.splitlines() == ["tfl: 2", "  490000077E", "  940GZZLUEUS"]
+
+
+def test_redis_subs_never_shows_the_postcodes(app):
+    _redis(app).sadd("v1:sub:postcode", "SW1A 1AA")
+
+    result = _run(app, "subs", "postcode")
+
+    assert result.output.strip() == "postcode: 1 (not shown)"
+
+
+def test_redis_subs_rejects_an_unknown_source(app):
+    _redis(app)
+
+    assert _run(app, "subs", "nope").exit_code == 2
+
+
+def test_redis_keys_lists_name_type_and_ttl_but_no_values(app):
+    store = _redis(app)
+    store.sadd("v1:sub:tfl", "940GZZLUEUS")
+    store.set("v1:pairing:a1b2c3d4e5f6", "SECRET-CODE", ex=600)
+    store.set("other", "x")
+
+    result = _run(app, "keys")
+
+    lines = result.output.splitlines()
+    assert lines[0].startswith("v1:pairing:a1b2c3d4e5f6  string  ")
+    assert lines[0].endswith("s")
+    assert lines[1] == "v1:sub:tfl  set  no TTL"
+    assert lines[2] == "2 keys"
+    assert "SECRET-CODE" not in result.output
+    assert "other" not in result.output
+
+
+def test_redis_keys_takes_a_pattern_and_a_limit(app):
+    store = _redis(app)
+    for source in ("tfl", "entur", "glow"):
+        store.sadd(f"v1:sub:{source}", "x")
+    store.set("v1:weather:london", "{}")
+
+    only_subs = _run(app, "keys", "v1:sub:*")
+    limited = _run(app, "keys", "v1:sub:*", "--limit", "2")
+
+    assert only_subs.output.splitlines()[-1] == "3 keys"
+    assert limited.output.splitlines()[-1] == "2 keys (stopped at --limit 2)"
+
+
+def test_redis_down_is_an_error_by_type_only(app):
+    store = _redis(app)
+    with patch.object(store, "scard", side_effect=RedisError("v1:sub:postcode SW1A 1AA")):
+        result = _run(app, "subs")
+
+    assert result.exit_code == 1
+    assert "Couldn't ask Redis (RedisError)." in result.stderr
+    assert "SW1A" not in result.output + result.stderr
