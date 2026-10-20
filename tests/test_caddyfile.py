@@ -43,3 +43,9 @@ def test_frame_answers_close_the_connection():
     """
     site = CADDYFILE.read_text().split("auth.nikolaivorkinn.com {", 1)[1].split("\n}\n", 1)[0]
     assert re.search(r"^\theader /api/frame Connection close$", site, re.MULTILINE)
+
+
+def test_bare_domain_redirects_to_the_settings_site():
+    """nikolaivorkinn.com and www. have nothing of their own; they send visitors on, keeping the path."""
+    site = CADDYFILE.read_text().split("nikolaivorkinn.com, www.nikolaivorkinn.com {", 1)[1].split("\n}\n", 1)[0]
+    assert site.strip() == "redir https://auth.nikolaivorkinn.com{uri}"
