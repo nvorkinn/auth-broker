@@ -165,10 +165,11 @@ function renderPull(pr, project) {
     return row;
 }
 
-const MATRIX_EXPANDED_MAX = 5;
+const MATRIX_EXPANDED_MAX = 6;
 
+// Small matrices are drawn a card per job, unless every job was skipped; the toggle overrides either way.
 function matrixExpanded(node, mode) {
-    return !!node.jobs && (mode ? mode === "expanded" : node.total <= MATRIX_EXPANDED_MAX);
+    return !!node.jobs && (mode ? mode === "expanded" : node.total <= MATRIX_EXPANDED_MAX && node.state !== "skipped");
 }
 
 function explode(nodes, mode) {
