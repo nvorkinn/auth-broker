@@ -20,33 +20,46 @@ it; [the database](database.md) has the tables.
 
 ## Who talks to whom
 
+Arrows point the way the data goes. The blue path is a frame on its way to the screen: the render pool writes it to
+Redis, the broker reads it from there, and serves it through Caddy to the ESP32 when the screen polls.
+
 ```mermaid
-flowchart LR
-    ESP["Screen"]
+flowchart TB
     PH["Phone / browser"]
+    ESP["ESP32 screen"]
     CD["Caddy"]
     AK["authentik"]
-    BR["auth-broker"]
-    DB[("SQLite")]
+    subgraph broker["auth-broker"]
+        BR["Flask app"]
+        DB[("SQLite")]
+        BP["Providers: glow,<br/>spotify, developer"]
+    end
     RD[("Redis")]
-    BP["Broker's providers"]
-    PP["pi-dashboard's providers"]
-    RP["Render pool"]
-    API["Spotify, Apple Music, Glowmarkt,<br/>GitHub, TfL, Entur, Open-Meteo"]
+    subgraph pid["pi-dashboard"]
+        PP["Providers: TfL, Entur,<br/>weather, notices"]
+        RP["Render pool"]
+    end
+    API["Third-party APIs"]
 
-    ESP -- "register, poll for frames" --> CD
-    PH -- "settings pages" --> CD
-    PH -. "sign-in" .-> AK
-    CD -- "forward auth" --> AK
-    CD --> BR
-    BR --> DB
-    BP -- "credentials" --> DB
+    PH -- "settings" --> CD
+    CD -. "sign-in" .-> AK
+    ESP -- "poll" --> CD
+    CD -- "frame" --> ESP
+    CD -- "settings, polls" --> BR
+    BR -- "frame" --> CD
+    BR -- "settings" --> DB
+    DB -- "linked accounts" --> BP
     BR -- "configs, subscriptions, render jobs" --> RD
+    RD -- "frame" --> BR
     BP -- "energy, music, developer" --> RD
+    RD -- "subscriptions" --> PP
     PP -- "departures, weather, notices" --> RD
-    RP -- "reads configs and data, writes frames" --> RD
-    BP --> API
-    PP --> API
+    RD -- "configs, panel data, jobs" --> RP
+    RP -- "frame" --> RD
+    API --> BP
+    API --> PP
+
+    linkStyle 3,5,9,14 stroke:#2f81f7,stroke-width:3px
 ```
 
 Everything runs on one host, with host networking, so services reach each other on `127.0.0.1` (authentik is the
@@ -82,40 +95,68 @@ the data they fetched. The pairing code is the exception, in `v1:pairing:<device
 
 ## Setting up a screen
 
+Once the owner has given the screen their Wi-Fi details, two things happen at the same time: the screen registers
+with the broker, and the phone is sent to the pairing page, signing in with authentik on the way if it has to.
+
+### Usually: the screen has registered by the time the phone gets there
+
 ```mermaid
 sequenceDiagram
     autonumber
-    participant S as Screen
+    participant S as ESP32 screen
     participant P as Phone
-    participant B as auth-broker
     participant A as authentik
+    participant B as auth-broker
     participant R as Redis and render pool
 
-    Note over S: No Wi-Fi saved, so it opens a setup access point
-    P->>S: joins it and enters the Wi-Fi details
+    P->>S: joins its setup access point, enters the Wi-Fi details
     Note over S: Makes its secret if it has none, joins the Wi-Fi
     S-->>P: redirects to /pair?t=TOKEN
-    P->>A: signs in or signs up (via Caddy)
-    P->>B: GET /pair?t=TOKEN
+    par The screen registers
+        S->>B: POST /api/devices/register
+        B-->>S: 201 device_id
+        S->>B: POST /api/frame
+        B-->>S: 404, try again in 10 s
+    and The phone signs in
+        P->>A: no session yet, so Caddy sends it to sign in or sign up
+        A-->>P: back to /pair?t=TOKEN
+    end
     P->>B: POST /pair/token
-    B-->>P: 202 waiting, the screen hasn't registered yet
-    S->>B: POST /api/devices/register
-    B-->>S: 201 device_id
-    S->>B: POST /api/frame
-    B-->>S: 404, Retry-After 10
-    P->>B: POST /pair/token (polled every 2 s)
-    Note over B: Sets owner and paired_at, names it (slug = device id)
-    B->>R: SET v1:config:ID, list it in v1:render:screens, queue a render
-    B-->>P: 200 paired, then the settings page
-    R->>R: a worker draws the frame into v1:frame:ID
+    Note over B: Sets the owner and names the screen (slug = device id)
+    B->>R: writes its config, lists it, queues a render
+    B-->>P: 200 paired, so the page opens the settings
+    R->>R: a worker draws the first frame
     S->>B: POST /api/frame
     B-->>S: 200 the frame
 ```
 
-- The screen shows only frames from the broker; the pairing URL appears only on the phone.
-- The screen registers on every boot and after a 401, not on every poll.
-- Pairing by code is the fallback: `flask devices code` prints a code and writes `v1:pairing:<device id>`, which the
-  pool draws if the screen has been paired before (it only draws named screens). The owner types it at `/pair`.
+### Rarely: the phone gets there first
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant S as ESP32 screen
+    participant P as Phone
+    participant B as auth-broker
+
+    P->>B: POST /pair/token
+    B-->>P: 202 waiting
+    Note over P: Shows a loading screen, asks again every 2 s
+    S->>B: POST /api/devices/register
+    B-->>S: 201 device_id
+    P->>B: POST /pair/token
+    B-->>P: 200 paired, so the page opens the settings
+```
+
+From there it goes on as above. If the screen hasn't registered after 90 seconds, the page stops waiting and asks for
+the pairing code instead.
+
+### The owner walks away before pairing
+
+> **To do:** how a pairing code reaches the screen when the owner doesn't finish pairing.
+
+The screen registers on every boot and after a 401, not on every poll. It shows only frames from the broker: the
+pairing URL appears only on the phone.
 
 ## Steady state
 
