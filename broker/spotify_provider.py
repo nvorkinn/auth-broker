@@ -129,14 +129,14 @@ def wanted_devices() -> list[Wanted]:
 
 def spotify_queue(device_id: str) -> dict[str, object]:
     """Return the device's Spotify queue, as Spotify's /me/player/queue answers it; nothing playing (204) as such."""
-    # get_queue's [] for a 204 isn't a queue the screen can read.
+    # get_queue's empty response for a 204 isn't a queue the screen can read.
     return spotify.get_queue(device_id) or music.nothing_playing()
 
 
 def spotify_top(device_id: str) -> dict[str, dict[str, object]]:
     """Return the device's Spotify top tracks and artists over each of TIME_RANGES, as Spotify's /me/top answers them.
 
-    Empty lists for a 204, rather than its [].
+    Empty lists for a 204, rather than its empty response.
     """
     return {
         time_range: {
