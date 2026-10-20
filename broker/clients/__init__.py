@@ -1,1 +1,1 @@
-"""Clients for the outside services the broker talks to: Spotify, TfL, Entur and Open-Meteo."""
+"""Clients for the outside services the broker and its providers call, and the data they build from them."""

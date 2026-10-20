@@ -5,7 +5,7 @@ repos:
       - id: ruff-check
         args: [--fix]
       - id: ruff-format
-  # Only run on commits that touch .tf files; they need terraform and tflint installed.
+  # These run only on commits that touch .tf files, and need terraform and tflint installed.
   - repo: https://github.com/antonbabenko/pre-commit-terraform
     rev: v1.109.2
     hooks:

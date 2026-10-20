@@ -31,11 +31,7 @@ def store(app):
 
 @pytest.fixture
 def nudges(store):
-    """Return a function giving the device ids queued for a render since it was last called (and taking the jobs).
-
-    A change to a screen's config queues a render of it, for the render pool (services/render_jobs.py), if the pool
-    draws it (services/render_screens.py).
-    """
+    """Return a function that takes the render jobs queued since its last call and returns their device ids."""
 
     def queued() -> list[str]:
         found = list(reversed(store.lrange(render_jobs.JOBS, 0, -1)))

@@ -1,9 +1,8 @@
 """The screen served from the render pool's frame record in Redis (services/frame_record.py), through the real app.
 
-Every test runs create_app()'s app with its test client: the record is written as pi-dashboard's render pool does (the
-shape the store contract's frame_record.json pins, shared with pi-dashboard's tests), and the screen polls GET and POST
-/api/frame with If-None-Match, as the ESP32 firmware does (countdown-esp32's frame_client.cpp: it keeps the ETag header
-as sent, quotes and all, and draws only a 200).
+The record is written as pi-dashboard's render pool does (the shape the store contract's frame_record.json pins, which
+pi-dashboard's tests read too), and the screen polls POST /api/frame with If-None-Match as the ESP32 does
+(countdown-esp32's frame_client.cpp keeps the ETag header as sent, quotes and all, and draws only a 200).
 """
 
 from datetime import UTC, datetime, timedelta
@@ -391,7 +390,7 @@ def test_forgetting_a_device_while_redis_is_down_still_forgets_it(app, register_
     assert logged.warning.call_args.args == ("Couldn't delete a screen's frame from Redis (%s)", "ConnectionError")
 
 
-# --- choosing, on its own --------------------------------------------------------------------------------------------
+# --- frame_record.head on its own ------------------------------------------------------------------------------------
 
 
 def test_a_time_in_another_zone_is_read_as_utc(app, frames_redis):

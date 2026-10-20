@@ -335,7 +335,7 @@ def test_post_before_any_frame_is_404_with_retry_after_but_still_ships(client, r
     response = _post(client, {"metrics": LINES, "logs": ["boot"]})
 
     assert response.status_code == 404
-    assert response.headers["Retry-After"] == "10"  # soon: the pool's first render lands within the minute
+    assert response.headers["Retry-After"] == "10"  # at most NO_FRAME_RETRY_S
     assert len(shipped) == 2
 
 
@@ -627,7 +627,7 @@ def test_post_does_not_wait_for_a_slow_destination(client, register_device, monk
         release.set()
 
 
-# --- POST /api/frame: the same report on the route a screen uses without knowing its device_id ------
+# --- POST /api/frame: the secret says which screen --------------------------------------------------
 
 
 def test_post_on_the_id_less_route_returns_the_frame_and_ships_the_report(client, register_device, shipped):
@@ -706,7 +706,7 @@ def _retry_after(client, secret=SECRET):
 
 
 def _answers(client, device_id):
-    """Return (status, Retry-After) of each way a screen polls: GET and POST, plain and with the current ETag."""
+    """Return (status, Retry-After) for each way a screen polls: bare or with a report, with or without the ETag."""
     plain_get = _bare_poll(client, device_id, SECRET)
     etag = plain_get.headers.get("ETag", '"none"')
     answers = [plain_get, _bare_poll(client, device_id, SECRET, **{"If-None-Match": etag})]

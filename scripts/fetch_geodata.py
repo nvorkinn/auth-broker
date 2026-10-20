@@ -1,8 +1,7 @@
-"""Download the data the config page uses to suggest a weather location from the visitor's IP.
+"""Download the data the settings page uses to suggest a weather place from the visitor's IP.
 
 The files land in the given directory and are read by broker/services/geoip.py. Run when the image
-is built, so it's as fresh as the release; stdlib only, as it runs before the app's requirements are
-installed.
+is built; standard library only, as it runs before the app's dependencies are installed.
 
 - dbip-city-lite.mmdb: DB-IP's IP to City Lite database, published monthly (https://db-ip.com, CC BY 4.0).
 - places.tsv: GeoNames' towns and cities of over 15,000 people, as name, latitude, longitude and

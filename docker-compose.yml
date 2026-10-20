@@ -4,8 +4,8 @@ x-release-image: &release-image
   pull_policy: always
   restart: unless-stopped
 
-# Shared by every service. Fluent Bit reads the log files directly and uses the tag (the container
-# name, which is the service name here) as the `service` field: it appears as attrs.tag in each record.
+# Shared by every service. Fluent Bit reads the log files directly, and the tag (the container name,
+# which is the service name here) becomes each record's `service`.
 x-logging: &logging
   driver: json-file
   options:
@@ -14,8 +14,8 @@ x-logging: &logging
     max-file: "3"
 
 # QA tracing of every request's headers, by the broker (broker/request_log.py) and by Caddy (the
-# access_log snippet in caddy/Caddyfile). "true" turns both on, anything else leaves both off.
-# Read at start, so it takes a restart of the two containers (`docker compose up -d`).
+# access_log snippet in caddy/Caddyfile). "true" turns both on. Read at start, so it takes
+# `docker compose up -d`.
 x-request-logging: &request-logging
   LOG_REQUEST_HEADERS: "false"
 
@@ -28,8 +28,8 @@ x-authentik: &authentik
     AUTHENTIK_POSTGRESQL__HOST: authentik-postgresql
     AUTHENTIK_POSTGRESQL__NAME: authentik
     AUTHENTIK_POSTGRESQL__USER: authentik
-    # Outgoing email (the sign-up's confirmation link, password recovery) through Resend's SMTP. The API
-    # key is the password, AUTHENTIK_EMAIL__PASSWORD, in secrets/authentik.env.
+    # Email (sign-up confirmation, password recovery) through Resend's SMTP. The API key is the password,
+    # AUTHENTIK_EMAIL__PASSWORD, in secrets/authentik.env.
     AUTHENTIK_EMAIL__HOST: smtp.resend.com
     AUTHENTIK_EMAIL__PORT: "587"
     AUTHENTIK_EMAIL__USERNAME: resend
@@ -52,15 +52,13 @@ services:
     image: ghcr.io/nvorkinn/auth-broker:${AUTH_BROKER_VERSION:-latest}
     container_name: auth-broker
     logging: *logging
-    # Host networking, so it can reach VictoriaLogs (127.0.0.1:9428, logs) and VictoriaMetrics
-    # (127.0.0.1:8428, metrics), like Caddy reaches it. That makes the image's 0.0.0.0 bind public,
-    # so bind loopback.
+    # Host networking, to reach Redis, VictoriaLogs and VictoriaMetrics on loopback, as Caddy reaches
+    # it. That would make the image's 0.0.0.0 bind public, so bind loopback.
     network_mode: host
     command: ["gunicorn", "--bind", "127.0.0.1:5000", "wsgi:app"]
     volumes:
       - ./data:/app/data
-    # Secrets, decrypted from secrets/broker.env by deploy.sh; and Redis's password (REDIS_PASSWORD, from
-    # secrets/redis.env), for writing the subscriptions to Redis.
+    # Decrypted from secrets/ by deploy.sh, as are the other services' env_files.
     env_file:
       - broker.env
       - redis.env
@@ -70,22 +68,18 @@ services:
       SESSION_COOKIE_SAMESITE: Lax
       SPOTIFY_REDIRECT_URI: https://auth.nikolaivorkinn.com/auth/spotify/callback
 
-  # The music provider: what each screen's Spotify and Apple Music are playing, written to Redis for the renderers
-  # (the keys are in the countdown-api store contract). The broker's image and settings, as it uses the broker's
-  # database and Spotify code (and writes refreshed tokens back to it). Deployed with the broker (deploy.sh's
-  # auth-broker), on the same AUTH_BROKER_VERSION.
+  # The music provider (broker/spotify_provider.py): what each screen's Spotify and Apple Music are playing, into
+  # Redis. It starts the broker's app and writes refreshed Spotify tokens back, so ./data is writable here.
   spotify-provider:
     <<: *release-image
     image: ghcr.io/nvorkinn/auth-broker:${AUTH_BROKER_VERSION:-latest}
     container_name: spotify-provider
     logging: *logging
-    # Host networking, to reach Redis on 127.0.0.1:6379 (and VictoriaLogs, like the broker).
+    # Host networking, to reach Redis on 127.0.0.1:6379.
     network_mode: host
     command: ["python", "-m", "broker.spotify_provider"]
     volumes:
       - ./data:/app/data
-    # The broker's secrets, decrypted from secrets/broker.env by deploy.sh; and Redis's password (REDIS_PASSWORD,
-    # from secrets/redis.env), for writing to Redis.
     env_file:
       - broker.env
       - redis.env
@@ -93,21 +87,20 @@ services:
       SPOTIFY_REDIRECT_URI: https://auth.nikolaivorkinn.com/auth/spotify/callback
     stop_grace_period: 30s
 
-  # The developer provider: each screen's developer panel (GitHub and AI plans), polled for as long as the panel is on
-  # and written to Redis for the renderers, which it also asks to refresh faster while a release runs (the pace key).
-  # The broker's image, on the same AUTH_BROKER_VERSION. Like the glow-provider it opens the database read-only
-  # (provider_loop.read_only_app: no migrations, SQLite's mode=ro), so ./data is mounted :ro.
+  # The developer provider (broker/developer_provider.py): each screen's developer panel (GitHub and AI plans) into
+  # Redis, and a pace hint while a release runs. It opens the database read-only (provider_loop.read_only_app), so
+  # ./data is mounted :ro.
   developer-provider:
     <<: *release-image
     image: ghcr.io/nvorkinn/auth-broker:${AUTH_BROKER_VERSION:-latest}
     container_name: developer-provider
     logging: *logging
-    # Host networking, to reach Redis on 127.0.0.1:6379 (and VictoriaLogs, like the broker).
+    # Host networking, to reach Redis on 127.0.0.1:6379.
     network_mode: host
     command: ["python", "-m", "broker.developer_provider"]
     volumes:
       - ./data:/app/data:ro
-    # The broker's secrets (the GitHub tokens are decrypted with its key), and Redis's password.
+    # broker.env for the key that decrypts the GitHub tokens.
     env_file:
       - broker.env
       - redis.env
@@ -118,14 +111,12 @@ services:
     image: ghcr.io/nvorkinn/auth-broker-caddy:${CADDY_VERSION:-latest}
     container_name: caddy
     logging: *logging
-    # Caddy's own secrets, decrypted from secrets/caddy.env by deploy.sh.
     env_file: caddy.env
     environment:
       <<: *request-logging
-    # Host networking, so 127.0.0.1 in the Caddyfile is the host: the broker is
-    # published on 127.0.0.1:5000, and VictoriaLogs and VictoriaMetrics listen
-    # on 127.0.0.1:9428 and 127.0.0.1:8428. Caddy binds 80/443 (and UDP 443) on
-    # the host directly.
+    # Host networking, so 127.0.0.1 in the Caddyfile is the host (the broker on
+    # :5000, authentik on :9000, VictoriaLogs on :9428, VictoriaMetrics on :8428),
+    # and Caddy binds 80/443 (and UDP 443) directly.
     network_mode: host
     volumes:
       # Certificates and ACME account. Losing this makes Caddy re-request every
@@ -133,9 +124,9 @@ services:
       - caddy_data:/data
       - caddy_config:/config
 
-  # Ships every container's logs to VictoriaLogs (127.0.0.1:9428).
+  # Fluent Bit, with fluent-bit/ baked in: container and OTLP logs to VictoriaLogs, host and OTLP metrics to
+  # VictoriaMetrics.
   fluent-bit:
-    # Fluent Bit with this repo's fluent-bit/ config baked in.
     <<: *release-image
     image: ghcr.io/nvorkinn/auth-broker-fluent-bit:${FLUENT_BIT_VERSION:-latest}
     container_name: fluent-bit
@@ -145,8 +136,7 @@ services:
       - /var/lib/docker/containers:/var/lib/docker/containers:ro
       - fluent-bit-state:/state
 
-  # Logs. Upstream's single-node VictoriaLogs. It listens on 127.0.0.1:9428
-  # (host networking, like Fluent Bit and Caddy) and Caddy serves it at
+  # Logs: single-node VictoriaLogs on 127.0.0.1:9428, which Caddy serves at
   # logs.nikolaivorkinn.com: ingest with the ingest token, the UI to admins.
   victoria-logs:
     <<: *release-image
@@ -159,10 +149,8 @@ services:
     volumes:
       - victoria_logs_data:/victoria-logs-data
 
-  # Metrics. Upstream's single-node VictoriaMetrics; it scrapes nothing, metrics
-  # are pushed to it. It listens on 127.0.0.1:8428 (host networking, like
-  # Fluent Bit and Caddy) and Caddy serves it at metrics.nikolaivorkinn.com:
-  # ingest with the ingest token, the UI to admins.
+  # Metrics: single-node VictoriaMetrics on 127.0.0.1:8428, which Caddy serves at
+  # metrics.nikolaivorkinn.com: ingest with the ingest token, the UI to admins.
   victoria-metrics:
     <<: *release-image
     image: ghcr.io/nvorkinn/auth-broker-victoria-metrics:${VICTORIA_METRICS_VERSION:-latest}
@@ -175,11 +163,9 @@ services:
     volumes:
       - victoria_metrics_data:/victoria-metrics-data
 
-  # The shared store between the API providers (they write the latest data per stop, location, ...) and the
-  # renderers (they read it), with the broker writing what to fetch. A cache only: everything in it is either
-  # refetched within minutes or rebuilt from the broker's database, so it keeps nothing on disk. Upstream's
-  # image, pinned here and bumped by hand. It listens on 127.0.0.1:6379 (host networking, like the Victoria
-  # services, so the broker and the renderers reach it on loopback) and wants REDIS_PASSWORD, from redis.env.
+  # The store shared with pi-dashboard (every key is in countdown-api). A cache only: everything in it is refetched
+  # within minutes or rebuilt from the broker's database, so it keeps nothing on disk. Upstream's image, pinned
+  # here. On 127.0.0.1:6379 with host networking, so the broker, its providers and pi-dashboard reach it on loopback.
   redis:
     image: docker.io/library/redis:8.10-alpine
     container_name: redis
@@ -215,11 +201,9 @@ services:
       retries: 3
       start_period: 5s
 
-  # The glow-provider (broker/providers/glow.py): every Glow device's energy readings, from Glowmarkt into Redis as
-  # v1:energy:<device id>. The broker's own image with another command, so it decrypts the Glowmarkt passwords with
-  # the broker's key (broker.env) and they never leave the broker; it opens the database read-only. Host networking
-  # for Redis on 127.0.0.1:6379, with REDIS_PASSWORD from redis.env. Deployed with the broker (deploy.sh's auth-broker),
-  # on the same AUTH_BROKER_VERSION.
+  # The glow provider (broker/providers/glow.py): each screen's Glowmarkt readings into Redis. It decrypts the
+  # Glowmarkt passwords with the broker's key (broker.env), so they never leave the broker, and opens the database
+  # read-only. Host networking for Redis on 127.0.0.1:6379.
   glow-provider:
     <<: *release-image
     image: ghcr.io/nvorkinn/auth-broker:${AUTH_BROKER_VERSION:-latest}
@@ -236,10 +220,8 @@ services:
       redis:
         condition: service_healthy
 
-  # Authentik (SSO with passkeys). All three read their secrets from
-  # authentik.env, decrypted from secrets/authentik.env by deploy.sh.
-  # AUTHENTIK_VERSION in .env pins the upstream release; bump it by hand,
-  # one minor version at a time.
+  # authentik: upstream's release, pinned by AUTHENTIK_VERSION in .env and
+  # bumped by hand, one minor version at a time.
   authentik-postgresql:
     image: docker.io/library/postgres:18-alpine
     container_name: authentik-postgresql

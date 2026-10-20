@@ -1,8 +1,8 @@
 """The broker's logs as one JSON object per line.
 
 The field names are the ones VictoriaLogs reads: `level` (debug, info, warn, error, fatal) and `_msg`. Fluent
-Bit ships the line as it is (see the README's Logs section), so what is written here is what the dashboards see.
-Used by gunicorn.conf.py, the providers, and create_app() for a `flask` command (configure_logging).
+Bit ships the line as it is (see the README's Logs section). Used by gunicorn.conf.py, the providers, and
+create_app() for a `flask` command (configure_logging).
 """
 
 import json
@@ -43,10 +43,9 @@ class JsonFormatter(logging.Formatter):
 def configure_logging() -> None:
     """Give the root logger a JSON handler on stderr, at LOG_LEVEL (INFO by default), unless it has one already.
 
-    Under gunicorn it has (gunicorn.conf.py's, on stdout), and in a provider (the provider's own, set up before it
-    builds an app); this is for the rest, a `flask` command, whose stdout is its output. The broker's own loggers
-    (app.logger is "broker", its modules' are "broker.*") have no handlers of their own: each record propagates to the
-    root's one handler, and is written once.
+    Under gunicorn and in a provider it has one, on stdout; this is for a `flask` command, whose stdout is its output.
+    The broker's own loggers ("broker" and "broker.*") have no handlers of their own, so each record is written once,
+    by the root's.
     """
     if logging.getLogger().handlers:
         return

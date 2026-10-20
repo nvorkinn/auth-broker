@@ -1,8 +1,8 @@
 """Glowmarkt (Glow's smart-meter API): signing in to a device's account and fetching its electricity readings.
 
-The minimum of the renderer's GlowClient (pi-dashboard, countdown_core/glow/glow_client.py) the glow-provider needs:
-the same sign-in, the same "electricity consumption" resource and the same readings requests, so what it stores is
-what that renderer would have fetched itself. Answers are kept as Glowmarkt sent them: the renderer parses them.
+What the glow-provider needs: the sign-in, the meter's "electricity consumption" resource and its readings, for the
+windows pi-dashboard's GlowClient cuts its pages from. Answers are kept as Glowmarkt sent them: the renderer parses
+them.
 """
 
 from datetime import datetime, timedelta, timezone, tzinfo
@@ -12,7 +12,7 @@ from typing import Any
 import requests
 
 BASE_URL = "https://api.glowmarkt.com/api/v0-1"
-# The Glow app's application id, as the renderer sends it.
+# The Glow app's application id, which Glowmarkt's API asks for.
 APPLICATION_ID = "b0f1b774-a586-4f72-9edd-27ead8aa7a8d"
 TIMEOUT = 10
 
@@ -27,10 +27,10 @@ class GlowmarktError(Exception):
 
 
 def local_now(zone: tzinfo, now: datetime) -> datetime:
-    """Return `now` in `zone` with a fixed offset, as the renderer's `datetime.now().astimezone()` gives it.
+    """Return `now` in `zone` with today's fixed offset, not the zone itself.
 
-    A fixed offset, not the zone: every window start (1st January too) then carries today's offset, as the renderer's
-    do, so the readings are asked for, and labelled, at the offset Glowmarkt aggregates them by.
+    So every window start (1st January too) carries today's offset, and the readings are asked for, and labelled, at
+    the offset Glowmarkt aggregates them by. The renderer reads them back at that offset (StoredEnergy.zone).
     """
     local = now.astimezone(zone)
     offset = local.utcoffset() or timedelta()
@@ -108,8 +108,7 @@ class GlowmarktAccount:
     def readings(self, period: str, start: datetime, end: datetime) -> dict[str, Any]:
         """Return Glowmarkt's answer, as it is, for the kWh used per `period` from `start` to `end` (both local).
 
-        The same request as the renderer's GlowClient._get_readings: local wall-clock times, and the offset of
-        `start`, so Glowmarkt buckets by local hours, days and months.
+        Asked in local wall-clock times with `start`'s offset, so Glowmarkt buckets by local hours, days and months.
         """
         answer = self._get(
             f"/resource/{self.electricity_resource_id()}/readings",

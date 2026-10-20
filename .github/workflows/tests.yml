@@ -11,9 +11,8 @@ permissions:
   contents: read
 
 jobs:
-  # The tests in 3 jobs side by side: pytest-shard gives each a third of them (split by test ID, so every test runs in
-  # exactly one shard), and Codecov merges the 3 coverage reports (codecov.yml waits for all of them). With
-  # --num-shards below, keep the shard list 0 to N-1.
+  # The tests in 3 shards side by side (pytest-shard, split by test ID), and Codecov merges their coverage reports
+  # (codecov.yml waits for all of them). Keep the shard list 0 to N-1 for --num-shards below.
   test:
     name: test (shard ${{ matrix.shard }})
     runs-on: ubuntu-latest
@@ -23,14 +22,13 @@ jobs:
       matrix:
         shard: [0, 1, 2]
     steps:
-      # vendor/countdown-api is a submodule: the store contract and the code generated from it.
+      # vendor/countdown-api, the store contract, is a submodule.
       - uses: actions/checkout@v7
         with:
           submodules: true
 
-      # uv installs the Python .python-version names (3.14) itself. setup-uv also caches uv's downloads and built
-      # wheels in the GitHub Actions cache, keyed on (among others) pyproject.toml and uv.lock, so a new cache is saved
-      # whenever the dependencies change.
+      # uv installs the Python .python-version names itself. setup-uv caches uv's downloads, keyed on (among others)
+      # uv.lock.
       - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
 
       - name: Install redis-server
@@ -61,7 +59,7 @@ jobs:
           files: coverage.xml
           disable_search: true
 
-  # Ruff, beside the tests: lint and formatting, with the Ruff uv.lock pins.
+  # Lint and formatting, with the Ruff uv.lock pins.
   ruff:
     runs-on: ubuntu-latest
     steps:
@@ -100,8 +98,8 @@ jobs:
           done
           exit $status
 
-  # Builds each container image and checks the config baked into it. Every
-  # image has its program as the entrypoint, so `check` is just its args.
+  # Builds the images and checks the config baked into each. The infra images
+  # have their program as the entrypoint, so `check` is just its args.
   image:
     name: test image
     runs-on: ubuntu-latest
@@ -131,9 +129,9 @@ jobs:
       - name: Check config
         run: docker run --rm auth-broker-${{ matrix.image }} ${{ matrix.check }}
 
-      # The broker's image as docker-compose.yml runs it: the broker (gunicorn, reading gunicorn.conf.py) and each
-      # provider on it, with stand-in secrets and no Redis, must start and then stop cleanly. Importing the code (above)
-      # isn't starting it: v1.34.0's gunicorn refused gunicorn.conf.py, and this is what would have said so.
+      # The broker's image as docker-compose.yml runs it: the broker and each provider, with stand-in secrets and no
+      # Redis, must start and then stop cleanly. Importing the code (above) isn't starting it: gunicorn checks
+      # gunicorn.conf.py only as it starts.
       - name: Start its services
         if: matrix.image == 'broker'
         run: python3 scripts/check_image_starts.py auth-broker-broker

@@ -1,4 +1,4 @@
-"""The recipient-facing site: pairing the signed-in user with a device, and the device's settings page."""
+"""The owners' site: pairing the signed-in user with a device, and the device's settings page."""
 
 import re
 from http import HTTPStatus
@@ -62,16 +62,14 @@ def _write_subscriptions_to_redis() -> None:
         "glow": set(),
         "spotify": set(),
         "developer": set(),
-        # The notice board's place, for the notice providers (floods, weather warnings, roads...): each postcode
-        # in canonical form ("SW1A 1AA", "0150"); a Norwegian one is four digits (see postcode_country).
+        # The notice board's place, for the notice providers: each postcode in canonical form ("SW1A 1AA", "0150").
         "postcode": set(),
     }
 
     for config in configs:
         for stop_id in config.tfl_stop_ids:
             subs["entur" if stop_id.startswith("NSR:") else "tfl"].add(stop_id)
-        # By the place picked, not the text typed, so screens that picked the same place share its forecast; a
-        # config with only free text (not yet backfilled) by that text's slug (see weather_place.weather_key).
+        # By the place picked, not the text typed, so screens that picked the same place share its forecast.
         if weather_key := weather_place.weather_key(config):
             subs["weather"].add(weather_key)
         if config.spotify_enabled:
@@ -129,9 +127,9 @@ def about() -> ResponseReturnValue:
 def pair() -> ResponseReturnValue:
     """Pair the signed-in user with a device.
 
-    A device that has just finished WiFi setup sends its owner's browser here with a pairing token in the URL
-    fragment (or, if it can't set one, ?t=): the page waits for the device to register, then goes to its settings.
-    Without a token it asks for the code the device shows.
+    A device that has just finished Wi-Fi setup sends its owner's browser here with a pairing token (?t=, or the URL
+    fragment): the page waits for the device to register, then goes to its settings. Without a token it asks for the
+    code the device shows.
     """
     if request.method == "GET":
         return render_template("pair.html", error=None, token=request.args.get("t", ""))
@@ -190,7 +188,7 @@ def pair_by_token() -> ResponseReturnValue:
 def device_config() -> ResponseReturnValue:
     """Show a screen's settings page, and save the settings posted from it."""
     device_id = g.device_id
-    # A screen paired before screens were named automatically gets its stable name now, which lists it in the pool.
+    # A paired screen without a slug gets one now, which lists it in the pool.
     if assignments.auto_name(db.session.get(Device, device_id)) is not None:
         db.session.commit()
         config_store.publish(device_id)
@@ -254,8 +252,8 @@ def _save_device_config(device_id: str) -> ResponseReturnValue:
     github_changed = _save_github_token(device_id)
 
     db.session.commit()
-    # What the store has from an account that's gone or been replaced, before the nudge below has the providers write
-    # the new one's: so the screen never shows the old account's data, however long its key would have lasted.
+    # What the store has from an account that's gone or been replaced, before the providers are told to write the new
+    # one's, so the screen never shows the old account's data.
     stale = device_keys.energy(device_id) if glowmarkt_changed else []
     stale += device_keys.developer(device_id) if github_changed else []
     if stale:
@@ -272,11 +270,11 @@ def _weather_place(config: DeviceConfig) -> tuple[dict[str, Any] | None, list[st
     """Return the weather place posted (None for none) and what's wrong with it, as a list of at most one error.
 
     The picker posts the id of the place picked (weather_place_id) beside the text in its box (weather_location);
-    without JavaScript there's only the text, which is looked up instead (see weather_place.resolve).
+    weather_place.resolve decides which counts.
     """
     text = request.form.get("weather_location", "").strip()
-    # Only a place Open-Meteo knows is ever stored, so a stored one is one the device can use; if it can't be
-    # checked right now, that's refused too rather than saved unverified.
+    # Only a place Open-Meteo knows is ever stored; if it can't be checked right now, that's refused too rather than
+    # saved unverified.
     try:
         return weather_place.resolve(request.form.get("weather_place_id", ""), text, config), []
     except weather_place.PlaceNotFoundError:
@@ -295,7 +293,6 @@ def _save_glowmarkt_credentials(device_id: str) -> bool:
 
     Return whether that changes the account the glow-provider signs in with, or leaves it none.
     """
-    # A blank password field keeps the stored password.
     glowmarkt_password = request.form.get("glowmarkt_password", "")
     stored = db.session.get(GlowmarktCredentials, device_id)
     before = _glowmarkt_account(stored) if stored is not None else None
@@ -343,10 +340,7 @@ def _save_github_token(device_id: str) -> bool:
 @bp.route("/device/<device_id>/name", methods=["GET", "POST"])
 @require_paired_user
 def name_screen() -> ResponseReturnValue:
-    """Where a new screen used to be named before anything else: now its settings page, where its name is set.
-
-    A screen is named automatically at pairing (assignments.auto_name), and its owner calls it what they like there.
-    """
+    """Redirect to the screen's settings page, where its name is set."""
     return redirect(url_for("pages.device_config", device_id=g.device_id))
 
 
@@ -356,7 +350,6 @@ def name_screen() -> ResponseReturnValue:
 def screen_view() -> ResponseReturnValue:
     """Show what a screen shows, as its latest frame, and keep it current as the screen does."""
     config = db.session.get(DeviceConfig, g.device_id)
-    # What the screen is served: the render pool's record in Redis (services/frame_record.py).
     shown = frame_record.head(g.device_id)
     upright = config.orientation != "horizontal"
     width, height = (frame_image.HEIGHT, frame_image.WIDTH) if upright else (frame_image.WIDTH, frame_image.HEIGHT)
@@ -377,12 +370,10 @@ def screen_view() -> ResponseReturnValue:
 @bp.get("/device/<device_id>/screen/frame.png")
 @require_paired_user
 def screen_frame() -> ResponseReturnValue:
-    """Serve a screen's latest frame as a PNG, the right way up for how the screen is hung.
+    """Serve the frame the screen is served as a PNG, the right way up for how the screen is hung.
 
-    The same frame as the screen is served: the render pool's record in Redis (services/frame_record.py).
-    Conditional on the frame's ETag (and the orientation, which changes the picture), so a page polling it only
-    downloads a frame that changed. When it was drawn rides along in a header for the page to say: when the pool first
-    drew the picture.
+    Conditional on the frame's ETag and the orientation, so a page polling it only downloads a frame that changed.
+    X-Rendered-At is when the pool first drew the picture.
     """
     frame = frame_record.read(g.device_id)
     if frame is None:
@@ -449,8 +440,8 @@ def spotify_disconnect() -> ResponseReturnValue:
     if token is not None:
         db.session.delete(token)
         db.session.commit()
-        # What it was playing, and its top lists (kept up to two hours): the music provider writes them again
-        # within a minute for whatever is still linked.
+        # What it was playing, and its top lists: the music provider writes them again within a minute for whatever is
+        # still linked.
         device_keys.delete(device_keys.music(g.device_id))
     return redirect(url_for("pages.device_config", device_id=g.device_id))
 

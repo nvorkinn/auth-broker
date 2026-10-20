@@ -1,14 +1,11 @@
-"""The loop a provider runs in, written once for the providers that come after the music one.
+"""The loop a provider runs in, and the read-only app, Redis client and logging it runs with.
 
-A cycle at once on start, then on every epoch-aligned tick of the provider's interval (which may change from one
-cycle to the next), or early on a `v1:sub:changed` message (a config was saved). SIGINT and SIGTERM stop it between
-devices. A cycle that fails is logged and the next tick tries again; an unreachable Redis is logged and the
-subscription retried every RESUBSCRIBE_S, so a missed nudge only delays a change until the next tick.
+A cycle runs at once on start, then on every epoch-aligned tick of the provider's interval (which may change between
+cycles), or early on a `v1:sub:changed` message (a config was saved). SIGINT and SIGTERM stop it between devices. A
+failed cycle is logged and the next tick tries again; while Redis is unreachable the subscription is retried every
+RESUBSCRIBE_S, so a missed message only delays a change until the next tick.
 
-A provider runs in read_only_app(), which can only read the broker's database (the Glowmarkt provider uses it too),
-so its compose service mounts ./data read-only.
-
-(The music and Glowmarkt providers have their own copies of this, older than it.)
+The developer provider runs in it; the music and glow providers have loops of their own.
 """
 
 import logging
@@ -46,7 +43,7 @@ def next_tick(now: float, interval_s: float) -> float:
 class ProviderLoop(ABC):
     """Runs cycles against `store` (made with decode_responses=True), in `app`'s context, until stop().
 
-    A provider says what a cycle does (run_cycle) and how long to wait after it (interval_s).
+    A provider says what a cycle does (run_cycle) and how far apart the ticks are (interval_s).
     """
 
     # What the provider is called in its logs: "Developer".
@@ -94,10 +91,10 @@ class ProviderLoop(ABC):
         try:
             self.run_cycle()
         except RedisError as e:
-            # The error's type, not its text: a failed pipeline's quotes every command, keys and values.
+            # The error's type, not its text: a failed pipeline's text quotes its keys and values.
             self.logger.warning("%s: couldn't reach Redis (%s); trying again next tick", self.label, type(e).__name__)
         except Exception:
-            # The database, say: a provider that stops would have to be restarted by hand.
+            # The database, say.
             self.logger.exception("%s: the cycle failed; trying again next tick", self.label)
 
     def _wait_for_next_cycle(self) -> None:
@@ -111,8 +108,7 @@ class ProviderLoop(ABC):
     def _listen(self, timeout: float) -> bool:
         """Wait up to `timeout` for a `v1:sub:changed` message; return whether one came.
 
-        A message that came during a cycle is already waiting, so the next cycle starts at once. Losing Redis only
-        means waiting for the tick: every cycle reads the devices afresh anyway.
+        A message that came during a cycle is already waiting, so the next cycle starts at once.
         """
         if self._pubsub is None and self._resubscribe_at is not None and self.clock() < self._resubscribe_at:
             self._stopping.wait(timeout)
@@ -154,9 +150,9 @@ class ProviderLoop(ABC):
 def read_only_app() -> Flask:
     """Return an app that can only read the broker's database and decrypt what's in it: the one a provider runs in.
 
-    Not broker.create_app(): that migrates the database (taking a lock file next to it) and wants every one of the
-    broker's secrets. This needs only CREDENTIAL_ENCRYPTION_KEY, and opens the database read-only (SQLite's mode=ro,
-    see db.init_read_only_app), so the provider can never write to it, nor hold a write lock.
+    Not broker.create_app(), which migrates the database (taking a lock file next to it) and needs all the broker's
+    secrets. This needs only CREDENTIAL_ENCRYPTION_KEY and opens the database read-only (see db.init_read_only_app),
+    so a provider can't write to it or hold its write lock.
     """
     app = Flask(__name__)
     app.config["CREDENTIAL_ENCRYPTION_KEY"] = os.environ["CREDENTIAL_ENCRYPTION_KEY"]
@@ -165,7 +161,7 @@ def read_only_app() -> Flask:
 
 
 def connect() -> redis.Redis:
-    """Return a client for the store, from REDIS_URL and REDIS_PASSWORD, as the broker's own."""
+    """Return a client for the store, from REDIS_URL and REDIS_PASSWORD."""
     return redis.Redis.from_url(
         os.environ.get("REDIS_URL", "redis://127.0.0.1:6379/0"),
         password=os.environ.get("REDIS_PASSWORD") or None,
@@ -176,7 +172,7 @@ def connect() -> redis.Redis:
 
 
 def configure_logging() -> None:
-    """JSON lines on stdout, as gunicorn's are (gunicorn.conf.py), so Fluent Bit ships them the same way."""
+    """Log JSON lines to stdout, as gunicorn does (gunicorn.conf.py), so Fluent Bit ships them the same way."""
     from broker.log_format import JsonFormatter  # noqa: PLC0415 -- it imports gunicorn, which only this needs here
 
     handler = logging.StreamHandler(sys.stdout)

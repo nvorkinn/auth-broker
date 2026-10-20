@@ -2,29 +2,18 @@
 
     python -m broker.developer_provider
 
-It runs from the broker's image and reads the broker's database, read-only. For every device in `v1:sub:developer`'s
-terms (the developer panel switched on) it polls everything the panel shows (the owner's GitHub, with the token only
-the broker holds, and their AI plans) on its own, whether or not a renderer is looking, and writes it to
-`v1:developer:<device id>`, which is where the renderers get the panel from.
+It runs on provider_loop's loop, in read_only_app(): GitHub's tokens aren't refreshed, so there is nothing to write
+back. For every device with the developer panel on it polls the owner's GitHub and AI plans and writes them to
+`v1:developer:<device id>`.
 
-It also sets the pace. While the panel shows a release (running, or finished in the last github.SHOWN_AFTER), its stages
-change by the minute, so the provider polls every BURST_INTERVAL_S and asks for the screen to refresh as fast, with
-`v1:pace:developer:<device id>` (a TTL of PACE_TTL_S, renewed each cycle it still holds). Once none shows, the key is
-deleted (or lapses), and the screen goes back to its usual pace. See "The pace" in pi-dashboard's countdown README.
+While the panel shows a release (running, or finished within github.SHOWN_AFTER), its jobs change by the minute, so
+the provider polls every BURST_INTERVAL_S, asks for the screen to refresh as fast with
+`v1:pace:developer:<device id>`, and queues a render of the screen after each write (services/render_jobs.py), plus one
+more on the cycle that finds the release gone. Otherwise the pace key is deleted and the minute's tick draws the
+screen.
 
-On each of those cycles it also queues a render of the device's screen for the render pool (services/render_jobs.py,
-pi-dashboard's docs/stateless-renderers.md, "Config saves and bursts push jobs"), once its new data is written, so a
-pooled screen follows the release at the burst's pace rather than the ticker's minute; and once more on the cycle that
-finds the release gone, so it leaves the screen as soon as it would have with the pace. Outside a release it queues
-nothing: the minute's tick draws the screen. Only a screen the pool renders is queued (one with its own renderer
-isn't), and a job that can't be queued is logged (by its error's type) and left to the tick.
-
-A device whose GitHub rate-limits its token (403/429, see github.rate_limit_wait) isn't polled again until GitHub says
-it may be (Retry-After, or X-RateLimit-Reset), and its keys are left as they are meanwhile.
-
-It never writes to the database: it runs in provider_loop.read_only_app() (SQLite's mode=ro, no migrations), with
-./data mounted read-only, and needs only CREDENTIAL_ENCRYPTION_KEY of the broker's secrets, to decrypt the tokens.
-GitHub's personal access tokens aren't refreshed, so there is nothing to write back.
+A device whose token GitHub rate-limits isn't polled again until GitHub says (github.rate_limit_wait), and its keys are
+left as they are meanwhile.
 """
 
 import json
@@ -50,17 +39,17 @@ if TYPE_CHECKING:
     import redis
     from flask import Flask
 
-# Pull requests and builds change slowly, but a release that starts is worth catching soon: every full poll costs
-# GitHub ~25 calls (of the 5,000 an hour a token gets), which this keeps to a sixth.
+# Pull requests and builds change slowly, but a release that starts is worth catching soon. A full poll costs about
+# 25 GitHub calls, so this uses about a sixth of a token's 5,000 an hour.
 IDLE_INTERVAL_S = 120
 # While a release shows, its jobs change by the minute (and a finished one must go once its minute is up).
 BURST_INTERVAL_S = 20
-# The refresh pace asked of the screen while a release shows: what the renderer will not go under either.
+# The pace asked of the screen while a release shows: the fastest the broker allows (services/pace.py's HINT_FLOOR_S).
 PACE_S = 20
 # The pace key lapses unless the next cycle renews it: three burst cycles, so one missed poll doesn't slow the screen.
 PACE_TTL_S = store_keys.PACE_TTL_S
-# Kept long enough that a provider that is down for a while shows as missing data (a panel that says so), not stale.
-# The store contract's, as are the keys.
+# Short enough that a provider down for a while shows as missing data, not stale. The store contract's, as are the
+# keys.
 TTL_S = store_keys.DEVELOPER_TTL_S
 
 
@@ -97,10 +86,9 @@ def wanted_devices() -> list[Wanted]:
 
 
 def release_shown(snapshot: dict) -> bool:
-    """Whether the panel shows a release: one running, or one just finished (for github.SHOWN_AFTER).
+    """Whether the panel shows a release: one running, or one finished within github.SHOWN_AFTER.
 
-    A finished one counts too, so the fast pace lasts until it's gone from the screen, rather than the panel holding
-    it for up to an idle poll and refresh after its minute is up.
+    A finished one counts too, so the fast pace lasts until it's gone from the screen.
     """
     return bool((snapshot["github"] or {}).get("releases"))
 
@@ -121,8 +109,8 @@ class DeveloperProvider(ProviderLoop):
         # The devices whose last poll saw a release to show. A device whose poll fails stays as it was, so one
         # hiccup from GitHub doesn't slow the screen in the middle of a release.
         self._running: set[str] = set()
-        # Device -> when its token may be used again, after GitHub rate-limited it. Per device rather than for the whole
-        # provider: GitHub's limits are a token's (an owner's), not the app's as Spotify's are.
+        # Device -> when its token may be used again, after GitHub rate-limited it. Per device, as GitHub's limits are
+        # per token, not per app as Spotify's are.
         self._backoff_until: dict[str, float] = {}
 
     def interval_s(self) -> float:

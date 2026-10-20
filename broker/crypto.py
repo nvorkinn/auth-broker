@@ -1,15 +1,11 @@
-"""Encryption at rest for the secrets the broker has to hand back, under CREDENTIAL_ENCRYPTION_KEY."""
+"""Encryption at rest, under CREDENTIAL_ENCRYPTION_KEY, for secrets the broker has to use as they are (not hash)."""
 
 from cryptography.fernet import Fernet
 from flask import current_app
 
 
 def encrypt(plaintext: str) -> str:
-    """Encrypt a secret (e.g. a stored third-party password) so it isn't kept in plaintext at rest.
-
-    Reversible, unlike a password hash, because the broker has to hand the real value back to whoever needs to
-    authenticate with it.
-    """
+    """Encrypt a secret, such as a third-party password, for keeping at rest."""
     return _fernet().encrypt(plaintext.encode()).decode()
 
 

@@ -21,21 +21,19 @@ class Device(db.Model):
     __tablename__ = "devices"
 
     device_id: Mapped[str] = mapped_column(String, primary_key=True)
-    # The screen's secret, which identifies the device on its own (see auth.ROLES). SHA-256 hex (see auth.hash_secret).
+    # The SHA-256 of the screen's secret (auth.hash_secret), which identifies the device on its own. None once unlinked.
     display_secret_hash: Mapped[str | None] = mapped_column(String, index=True, unique=True)
-    # What the device's owner's browser presents to pair with it without a code (see
-    # services/pairing.py). Derived from the screen's (display) secret, so the device never has to send it.
+    # What the owner's browser presents to pair without a code (services/pairing.token_for), derived from the secret.
     pairing_token: Mapped[str | None] = mapped_column(String, index=True, unique=True)
-    # The Authentik user the device is paired with: the user id the login proxy passes in a header
-    # (see auth.current_user). One owner; settings are theirs to see and edit.
+    # The Authentik user id of the device's one owner (auth.current_user).
     owner: Mapped[str | None] = mapped_column(String, index=True)
     created_at: Mapped[datetime] = mapped_column(UTCDateTime)
     paired_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
     device_name: Mapped[str | None] = mapped_column(String)
-    # Bumped on authenticated device requests, at most once a minute (see require_device_auth).
+    # Bumped on authenticated device requests, at most once a minute (auth.LAST_SEEN_RESOLUTION).
     last_seen_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
-    # The same for the screen's own requests (today, every authenticated request is one): what decides whether
-    # the render pool still draws it (services/assignments.is_quiet).
+    # The same for the screen's own requests, which decides whether the render pool still draws it
+    # (services/assignments.is_quiet).
     display_last_seen_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
 
     config: Mapped[DeviceConfig | None] = relationship(back_populates="device", cascade="all, delete-orphan")
@@ -62,11 +60,10 @@ class PairingCode(db.Model):
 
 ORIENTATIONS = ("horizontal", "vertical")
 CLOCK_FORMATS = {"24h": "24-hour (13:00)", "12h": "12-hour (1:00 PM)"}
-# What the screen is drawn in: the API contract's language, with its name in itself for the config page.
+# The store contract's languages, each with its name in itself for the config page.
 LANGUAGES = {"en": "English", "nb": "Norsk"}
-# How the screen draws every panel (the departures, Spotify, the notice board): the API contract's style, with the
-# name and description the config page shows beside each one's picture (broker/static/styles/<style>.png, cut from
-# the renderer's own portrait snapshot of every panel in it).
+# The store contract's styles, how the screen draws every panel, with the name and description the config page shows
+# beside each one's picture (broker/static/styles/<style>.png).
 STYLES = {
     "airy": ("Airy", "Light labels, like the weather"),
     "hero": ("Hero", "Bold headers, with the first item big"),
@@ -85,12 +82,12 @@ class DeviceConfig(db.Model):
     language: Mapped[str] = mapped_column(String, default="en", server_default=text("'en'"))
     # How every panel is drawn, one of STYLES.
     style: Mapped[str] = mapped_column(String, default="airy", server_default=text("'airy'"))
-    # The weather's town or city by name, as renderers are sent it. Picked on the settings page, it is the name of
-    # the place below; a config saved before places were picked may have only this (see `flask weather backfill`).
+    # The weather's town or city by name, as the render pool is sent it: the name of the place below, or, with no
+    # place, the text typed (`flask weather backfill` gives it one).
     weather_location: Mapped[str] = mapped_column(String, default="", server_default=text("''"))
     # The place picked for the weather, as Open-Meteo's geocoding gave it: its id (GeoNames'), name, what the page
     # shows for it ("London, England, United Kingdom"), ISO country code ("GB") and coordinates. All None for
-    # none. See services/weather_place.py, whose weather_key() names the place by these.
+    # none. See services/weather_place.py.
     weather_place_id: Mapped[int | None] = mapped_column(Integer)
     weather_place_name: Mapped[str | None] = mapped_column(String)
     weather_place_label: Mapped[str | None] = mapped_column(String)
@@ -104,12 +101,12 @@ class DeviceConfig(db.Model):
     apple_music_enabled: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("0"))
     # The developer panel: GitHub pull requests and builds, and AI plans (see developer_provider.py).
     developer_enabled: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("0"))
-    # Every departure stop, in the owner's order: TfL NaPTAN ids and Entur NSR ids (NSR:...) mixed; the id says
-    # which (services/stops.py). Named for when they were all TfL's.
+    # Every departure stop, in the owner's order: despite the name, TfL NaPTAN ids and Entur ids (NSR:...) mixed; the
+    # id says which (services/stops.py).
     tfl_stop_ids: Mapped[list[str]] = mapped_column(JSON, default=list, server_default=text("'[]'"))
     # How the screen is mounted, one of ORIENTATIONS.
     orientation: Mapped[str] = mapped_column(String, default="vertical", server_default=text("'vertical'"))
-    # The screen's size in pixels as it reported at registration; 480x800 for screens registered before it did.
+    # The screen's size in pixels as it reported at registration; 480x800 after `devices unpair --config`.
     width: Mapped[int] = mapped_column(Integer, server_default=text("480"))
     height: Mapped[int] = mapped_column(Integer, server_default=text("800"))
 
@@ -162,7 +159,7 @@ class GlowmarktCredentials(db.Model):
 class GitHubToken(db.Model):
     """The GitHub token the owner gave for a device's developer panel, encrypted at rest.
 
-    A fine-grained personal access token, read-only. The broker makes the GitHub calls with it, so it never leaves.
+    A read-only fine-grained personal access token, used only by the developer provider.
     """
 
     __tablename__ = "github_tokens"
@@ -221,10 +218,9 @@ class AppleMusicPlay(db.Model):
 
 
 class RendererAssignment(db.Model):
-    """A screen's name, its slug, under which the render pool draws it (services/render_screens.py).
+    """A screen's slug, under which the render pool draws it (services/assignments.py).
 
-    See services/assignments.py. Created when the screen's owner names it; the slug can't change after, and goes with
-    the device.
+    Created when the screen is paired; the slug never changes, and goes with the device.
     """
 
     __tablename__ = "renderer_assignments"

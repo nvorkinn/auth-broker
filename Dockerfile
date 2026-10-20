@@ -1,11 +1,9 @@
-# The IP location data the config page suggests a weather location from (see broker/services/geoip.py),
-# as of this build: DB-IP City Lite and GeoNames' cities, both CC BY 4.0.
+# The IP location data the settings page suggests a weather place from (broker/services/geoip.py).
 # Data, not code, so it is fetched once on the build machine whatever platform the image is for.
 FROM --platform=$BUILDPLATFORM python:3.14-slim AS geodata
 COPY scripts/fetch_geodata.py /
 RUN python /fetch_geodata.py /geodata
 
-# uv itself, to install the dependencies with.
 FROM ghcr.io/astral-sh/uv:0.13.1 AS uv
 
 FROM python:3.14-slim
@@ -14,9 +12,8 @@ WORKDIR /app
 
 ENV PYTHONUNBUFFERED=1
 
-# The dependencies, exactly as uv.lock pins them (no dev group), in /app/.venv. vendor/countdown-api (the API contract
-# and its generated code) is installed from here, editable, so it has to stay where it is. uv is only mounted for this,
-# and keeps no cache, so neither is left in the image.
+# The dependencies as uv.lock pins them (no dev group), in /app/.venv. vendor/countdown-api (the store contract) is
+# installed editable, so it has to stay where it is. uv is only mounted and keeps no cache, so neither is left behind.
 ENV UV_COMPILE_BYTECODE=1 UV_LINK_MODE=copy UV_PYTHON_DOWNLOADS=never
 COPY vendor/countdown-api/ vendor/countdown-api/
 COPY pyproject.toml uv.lock ./

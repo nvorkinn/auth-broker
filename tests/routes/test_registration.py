@@ -1,7 +1,4 @@
-"""Test registration: POST /api/devices/register (screens).
-
-Also the ID-less endpoints a registered screen polls.
-"""
+"""Test a screen registering (POST /api/devices/register), and its polls once registered."""
 
 import threading
 from datetime import UTC, datetime, timedelta
@@ -173,7 +170,7 @@ def test_polling_is_not_throttled(client, register_device):
         assert client.post("/api/frame", headers=_auth(secret)).status_code == 404  # authenticated: no frame yet
 
 
-# --- the ID-less endpoints ------------------------------------------------------------------------
+# --- polling: the secret says which screen --------------------------------------------------------
 
 
 def test_a_screen_polls_frames_without_knowing_its_device_id(client, register_device, draw):
@@ -224,7 +221,7 @@ def test_no_frame_yet_is_a_json_404_asking_again_soon(client, register_device):
 
     assert response.status_code == 404
     assert response.get_json() == {"error": "no frame yet"}
-    # Not until 12:00:33, just after the next half-minute: the pool's first render lands within the minute.
+    # At most NO_FRAME_RETRY_S, not until 12:00:33.
     assert response.headers["Retry-After"] == "10"
 
 

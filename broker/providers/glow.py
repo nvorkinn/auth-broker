@@ -1,20 +1,15 @@
 """The glow-provider: every Glow device's energy readings, fetched from Glowmarkt and written to Redis.
 
-Run it from the broker's image: `python -m broker.providers.glow`. It reads the broker's database (read-only) for the
-devices with a Glowmarkt account, decrypts their passwords with CREDENTIAL_ENCRYPTION_KEY, and writes each device's
-readings to `v1:energy:<device id>` with a TTL, so the passwords never leave the broker. Renderers that read the store
-(pi-dashboard's GlowClient) draw the energy panel from there; standalone ones still call Glowmarkt with the
-credentials in their config.
+    python -m broker.providers.glow
 
-The value is Glowmarkt's own answers, as they came, in a thin wrapper (countdown-api's StoredEnergy):
+It runs in provider_loop.read_only_app() and decrypts the Glowmarkt passwords itself, so they never leave the broker.
+Each device's readings go to `v1:energy:<device id>`: Glowmarkt's own answers in a thin wrapper (countdown-api's
+StoredEnergy).
 
-    {"fetched_at": <ISO 8601, UTC>, "device_id": ..., "offset": <Glowmarkt's offset param, e.g. "-60">,
-     "resource_id": ..., "hourly": <readings, PT1H>, "daily": <readings, P1D>, "monthly": <readings, P1M>}
-
-The loop is pi-dashboard's provider runner's (countdown_providers.runner), in miniature: a cycle every INTERVAL_S,
-on the epoch-aligned tick, or sooner when the broker publishes on `v1:sub:changed`; a device that fails is logged and
-skipped (its key expires if it keeps failing); an unreachable Redis is logged and retried on the next tick; SIGTERM
-and SIGINT stop it between requests.
+Its loop is its own: a cycle at once, then on every epoch-aligned tick of INTERVAL_S, or sooner on `v1:sub:changed`,
+when only accounts new or changed since the last tick are fetched. A device that fails is logged and skipped (its key
+expires if it keeps failing); an unreachable Redis is logged and tried again on the next tick. SIGTERM and SIGINT stop
+it between devices.
 """
 
 import contextlib
@@ -54,15 +49,12 @@ logger = logging.getLogger("broker.providers.glow")
 
 SOURCE = store_keys.GLOW
 SUB_CHANGED = store_keys.SUB_CHANGED
-# Glowmarkt has a new half-hour's reading at most every 30 minutes (DCC data often lags by hours), and the panel's
-# pages are hours, days and months: every 15 minutes keeps the open hour's bar within a quarter of an hour, at three
-# readings requests per device, fewer than a renderer's own (each page every 10 minutes).
+# Glowmarkt has a new half-hour's reading at most every 30 minutes (DCC data often lags by hours): every 15 minutes
+# keeps the open hour's bar within a quarter of an hour, at three readings requests per device.
 INTERVAL_S = 15 * 60
-# About a day, as decided for energy (pi-dashboard's docs/stateless-renderers.md, "Expiry"): the readings change
-# slowly (a new half-hour at most every 30 minutes, DCC data often hours late), so Glowmarkt failing for hours changes
-# nothing on the screens, while after a day without a fetch (the provider down, or Glowmarkt failing all day) the key
-# is gone and the energy panel says it's not available, rather than draw readings that old. This TTL is the only
-# expiry: the renderers keep no copy of their own. The store contract's.
+# About a day (the store contract's): Glowmarkt failing for hours changes nothing on the screens, while after a day
+# without a fetch the key is gone and the energy panel says it's not available. The renderers keep no copy, so this
+# is the only expiry.
 TTL_S = store_keys.ENERGY_TTL_S
 # How long to wait before asking Redis again for the nudges, when it can't be reached.
 RESUBSCRIBE_S = 5
@@ -86,10 +78,10 @@ class Account:
 
 
 def accounts() -> list[Account]:
-    """Return the devices with a usable Glowmarkt account: the broker's `v1:sub:glow`, less any without a username.
+    """Return the devices with a usable Glowmarkt account: `v1:sub:glow`, less any with a blank username or password.
 
-    The same query the broker's subscriptions are made from, in one short read, so the broker's writes never wait on
-    it. Needs an app context. A password that won't decrypt (CREDENTIAL_ENCRYPTION_KEY changed) is logged and skipped.
+    One short read, so the broker's writes don't wait on it. Needs an app context. A password that won't decrypt
+    (CREDENTIAL_ENCRYPTION_KEY changed) is logged and skipped.
     """
     try:
         rows = db.session.execute(
@@ -119,7 +111,7 @@ def stored_value(account: Account, glow: GlowmarktAccount, now: datetime) -> dic
     """Fetch the device's three pages of readings, as of `now`, and return what's stored for it.
 
     Each page's window is the renderer's (GlowClient._page_config), in the screen's zone at today's offset, from the
-    start of its first bucket to now, so the renderer can draw any page from it, as of when it draws.
+    start of its first bucket to now, so the renderer can cut any page from it when it draws.
     """
     try:
         zone = ZoneInfo(account.zone)
@@ -168,7 +160,7 @@ class GlowProvider:
         self._pubsub: redis.client.PubSub | None = None
 
     def stop(self, *_: object) -> None:
-        """Stop after the request in flight (a signal handler)."""
+        """Stop after the device being fetched. The SIGTERM and SIGINT handler."""
         self.stopping.set()
 
     def run_cycle(self, *, nudged: bool = False) -> int:
@@ -272,7 +264,6 @@ def main() -> None:
         socket_timeout=5,
         socket_connect_timeout=5,
     )
-    # The broker's database, read-only (with ./data mounted :ro), like the developer provider's.
     provider = GlowProvider(read_only_app(), store)
     signal.signal(signal.SIGTERM, provider.stop)
     signal.signal(signal.SIGINT, provider.stop)

@@ -18,13 +18,12 @@ if TYPE_CHECKING:
 
 bp = Blueprint("frames", __name__, url_prefix="/api")
 
-# How long a screen with no frame to be shown sleeps at most: there's none until the pool's first render of it (a
-# screen just named, or a Redis that restarted), which lands within the minute, so it asks again soon.
+# How long a screen with no frame sleeps at most: the pool's first render of it (a screen just paired, or a Redis that
+# restarted) lands within the minute.
 NO_FRAME_RETRY_S = 10
 
-# Where a screen's reports go. Logs: VictoriaLogs' JSON lines endpoint, with the fields the dashboards
-# group by (see the README's Logs section). Telemetry: VictoriaMetrics' InfluxDB line protocol endpoint.
-# Both listen on the host's loopback, which the broker shares through host networking in compose.
+# Where a screen's reports go: VictoriaLogs' JSON lines endpoint and VictoriaMetrics' InfluxDB line protocol endpoint,
+# both on the host's loopback, which the broker shares through host networking.
 FORWARD_TIMEOUT = 2
 LOGS_URL_DEFAULT = "http://127.0.0.1:9428/insert/jsonline?_stream_fields=service,host&_msg_field=_msg&_time_field=_time"
 METRICS_URL_DEFAULT = "http://127.0.0.1:8428/write"
@@ -48,9 +47,8 @@ def post_frame(device_id: str) -> ResponseReturnValue:
     """Serve the screen its current frame, and forward what it logged and measured since its last poll.
 
     The screen polls this, with If-None-Match once it has a frame: 200 with the frame, 304 if it has it, 404 with none
-    yet. Every answer carries Retry-After, so its loop is just "handle the status, sleep Retry-After" (see
-    services/pace.py, the only place a sleep is worked out). It reports its logs and metrics here to save it a
-    request; both are forwarded without making the screen wait.
+    yet. Every answer carries Retry-After (services/pace.py), so its loop is just "handle the status, sleep
+    Retry-After". Its logs and metrics are forwarded without making it wait.
     """
     body = request.get_json(silent=True)
     if isinstance(body, dict):
@@ -121,9 +119,7 @@ def _post(url: str, request_kwargs: dict[str, object]) -> None:
 
 
 def _frame_response(device_id: str) -> ResponseReturnValue:
-    # The record the render pool wrote in Redis (services/frame_record.py): the only copy of the screen's frame.
     shown = frame_record.head(device_id)
-    # How long the screen sleeps before its next poll, on every answer: the pacing function (services/pace.py).
     sleep_s = pace.retry_after(device_id)
     if shown is None:
         return _no_frame(sleep_s)
@@ -133,7 +129,7 @@ def _frame_response(device_id: str) -> ResponseReturnValue:
     # make_conditional only looks at GET and HEAD, so a POST answers its 304 itself.
     if request.if_none_match.contains_weak(shown.etag):
         return Response(status=304, headers={"ETag": resp.headers["ETag"], "Retry-After": resp.headers["Retry-After"]})
-    # Only now the 48 KB: a screen that has the picture already never costs reading the record's.
+    # Only now the 48 KB, so a 304 never reads it.
     frame = frame_record.frame_of(device_id, shown.etag)
     if frame is None:
         # The record went, or changed, since its etag was read: serve it whole as it is now, if there is one.
@@ -147,5 +143,5 @@ def _frame_response(device_id: str) -> ResponseReturnValue:
 
 
 def _no_frame(sleep_s: int) -> ResponseReturnValue:
-    """Answer a screen that has no frame to be shown yet: 404, and ask again in at most NO_FRAME_RETRY_S."""
+    """Answer a screen that has no frame yet: 404, and ask again in at most NO_FRAME_RETRY_S."""
     return jsonify(error="no frame yet"), 404, {"Retry-After": str(min(sleep_s, NO_FRAME_RETRY_S))}

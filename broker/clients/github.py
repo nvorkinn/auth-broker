@@ -1,8 +1,8 @@
-"""Talks to GitHub on a device's behalf, with the token its owner gave for the developer panel.
+"""Talks to GitHub: for the developer panel with a device owner's token, and for the /github dashboard (Dashboard).
 
-What the panel shows: how many repos the owner has, their open pull requests, the ones waiting for their review,
-which repos are failing on their default branch, any release running (or just finished) with its jobs as GitHub's
-graph, and their Copilot premium requests this month.
+The panel shows how many repos the owner has, their open pull requests, the ones waiting for their review, which repos
+are failing on their default branch, any release running (or just finished) with its jobs as GitHub's graph, and their
+Copilot premium requests this month.
 """
 
 import hashlib
@@ -39,8 +39,8 @@ FAILED = {"failure", "timed_out", "startup_failure"}
 RELEASE = re.compile(r"release|deploy", re.IGNORECASE)
 # Runs started this recently are looked through for a release: one takes minutes, so this is plenty.
 RECENT_RUNS = timedelta(hours=6)
-# A finished release stays on the screen this long, so its result is seen. The provider keeps the fast pace while it
-# shows (broker/developer_provider.py), so it goes within about BURST_INTERVAL_S of this.
+# A finished release stays on the screen this long, so its result is seen. The developer provider keeps the fast pace
+# while it shows, so it goes within about its BURST_INTERVAL_S of this.
 SHOWN_AFTER = timedelta(minutes=1)
 # How long to leave GitHub alone after a rate limit that doesn't say how long: GitHub asks for at least a minute.
 DEFAULT_BACKOFF_S = 60
@@ -287,7 +287,7 @@ class Dashboard:
         self.session.close()
 
     def read(self, path: str, *, raw: bool = False, **params: str | int) -> str:
-        """Revalidate shared ETags: authenticated 304s do not consume GitHub's primary rate limit."""
+        """Return the text at `path`, revalidating a cached ETag: GitHub doesn't count authenticated 304s."""
         identity = json.dumps([self.cache_scope, path, params, raw], sort_keys=True)
         key = f"github-dashboard:{hashlib.sha256(identity.encode()).hexdigest()}"
         cached = None
@@ -573,7 +573,7 @@ SEMVER = re.compile(
 
 
 def next_release(releases: list[dict]) -> tuple[str | None, str]:
-    """Bump the highest released major/minor/patch, including prereleases; preserve its optional v prefix."""
+    """Return the highest semver release's tag (prereleases count) and the next minor version, keeping its v prefix."""
     if not releases:
         return None, "1.0.0"
     versions = [(match, release) for release in releases if (match := SEMVER.fullmatch(release["tag_name"]))]

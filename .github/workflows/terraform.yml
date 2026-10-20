@@ -1,12 +1,10 @@
 name: Terraform
 
-# Checks and plans terraform/ on pull requests that change it; all-checks treats a workflow that never started as
-# fine. The plan reads the live Authentik, so it needs the secrets below and is skipped without them (pull requests
-# from forks and Dependabot don't get them). Applies only ever run from a release tag: the Release workflow calls this
-# one with apply on, after deploy-authentik, and applies that tag's plan once it is approved in the terraform
-# environment. The "Run workflow" button (Actions > Terraform) plans whatever ref is picked, which shows drift; with
-# "apply" ticked it applies too, but only on the latest release tag, which is how a failed apply is retried. See
-# terraform/README.md.
+# Checks and plans terraform/ on pull requests that change it. The plan reads the live Authentik, so it needs the
+# secrets below and is skipped without them (fork and Dependabot pull requests). Applies run only from a release tag:
+# the Release workflow calls this with apply on, after deploy-authentik. The "Run workflow" button (Actions >
+# Terraform) plans any ref, which shows drift; with "apply" ticked it also applies, on the latest release tag only,
+# which is how a failed apply is retried. See terraform/README.md.
 on:
   pull_request:
     branches: [main]
@@ -49,8 +47,8 @@ env:
   TF_STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
   TF_STATE_REGION: ${{ vars.TF_STATE_REGION }}
   TF_STATE_ENDPOINT: ${{ vars.TF_STATE_ENDPOINT }}
-  # Oracle's S3 API answers the AWS SDK's default chunked, checksummed upload with 501 "AWS chunked encoding not
-  # supported", so state couldn't be saved. These make the S3 backend send a plain upload instead.
+  # Oracle's S3 API refuses the AWS SDK's default chunked, checksummed upload (501 "AWS chunked encoding not
+  # supported"), so state can't be saved. These make the S3 backend send a plain upload instead.
   AWS_REQUEST_CHECKSUM_CALCULATION: when_required
   AWS_RESPONSE_CHECKSUM_VALIDATION: when_required
 
@@ -58,8 +56,7 @@ defaults:
   run:
     working-directory: terraform
 
-# The checks and the plan don't depend on each other, so they all run side by side. A release's commit already passed
-# the checks on its pull request, so they only run there.
+# The checks and the plan run side by side. The checks run only on pull requests: a release's commit has passed them.
 jobs:
   validate:
     if: github.event_name == 'pull_request'

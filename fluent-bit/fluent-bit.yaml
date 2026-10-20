@@ -13,8 +13,8 @@ pipeline:
       mem_buf_limit: 16MB
       skip_long_lines: on
       refresh_interval: 10
-    # OTLP/HTTP from anything that speaks it. With no tag set, the URI path becomes the tag
-    # (/v1/logs, /v1/metrics), which the outputs below match on.
+    # OTLP/HTTP (the render pool's). With no tag set, the URI path becomes the tag (/v1/logs,
+    # /v1/metrics), which the outputs below match on.
     - name: opentelemetry
       listen: 127.0.0.1
       port: 4318
@@ -29,16 +29,15 @@ pipeline:
       scrape_interval: 30
 
   filters:
-    # Docker app logs that are JSON (the broker, the renderers, Caddy, Authentik, ...) get their fields
-    # lifted, so `level` and `_msg` reach VictoriaLogs as the app wrote them; other lines keep their text
-    # in `log`. Nothing is rewritten here: the apps emit the standard fields (see the README's Logs section).
+    # JSON log lines (the broker, Caddy, authentik, ...) get their fields lifted, so `level` and `_msg`
+    # reach VictoriaLogs as the app wrote them; other lines keep their text in `log`.
     - name: parser
       match: docker_logs
       key_name: log
       parser: json_log
       reserve_data: on
       preserve_key: off
-    # Docker puts the container's log tag (its name, set by the compose logging options) in attrs.tag;
+    # Docker puts the container's log tag (its name, from the compose logging options) in attrs.tag:
     # that is the stream's `service`.
     - name: nest
       match: docker_logs

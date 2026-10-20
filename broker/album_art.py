@@ -1,26 +1,16 @@
 """The album covers the music provider stores beside what's playing, so the renderers never call the image hosts.
 
-A renderer's now playing page shows the playing track's cover. Rather than each renderer downloading it from Spotify's
-or Apple's image host whenever it draws the page, the music provider (broker/spotify_provider.py) fetches it once and
-writes it to the store, keyed by the image's URL so that every screen showing the same album reads one copy:
+Each cover is stored once, however many screens show it, under the store contract's key for its URL
+(countdown_api.keys.album_art), as the image file's raw bytes: base64 would take a third more of Redis's 128 MB. The
+provider's decoding client can write them because it never reads one back (EXPIRE answers with a number);
+pi-dashboard reads them with a client that doesn't decode.
 
-    v1:art:<sha1 of the URL>  ->  the image file's bytes, as its host served it, with a TTL of ART_TTL_S
+Of an album's sizes, the one stored is the smallest at least ART_SIZE tall, else the tallest. pi-dashboard's
+store.music.art_image picks the same way to find the key, so change both together; the store contract's
+music_art.json, which both repositories' tests read, pins it.
 
-The key is the store contract's (countdown_api.keys.album_art), which pi-dashboard reads it by. The value is the
-file's raw bytes, not base64: that would take a third more of Redis's 128 MB, shared with every other key, for
-nothing. Writing bytes through the provider's client
-needs nothing special (decode_responses only decodes replies, and the provider never reads a cover back: it only renews
-their TTLs, and EXPIRE answers with a number); the renderer reads them with a client that doesn't decode
-(pi-dashboard's store.reader.binary_store()).
-
-Of an album's sizes, the one stored is the smallest at least ART_SIZE tall, else the tallest: Spotify's 300 px of its
-640, 300 and 64, and the one 300 px image the broker asks Apple Music for (clients/apple_music.py's ARTWORK_SIZE).
-pi-dashboard's store.music.art_image picks the same way to find the key, so change both together:
-The store contract's music_art.json, which both repositories' tests read, is the keys stored for music_player.json.
-
-A cover is fetched once, then its TTL renewed each cycle (every minute) while a player key still shows it, so it
-outlives that key (PLAYER_TTL_S); a cover nothing shows any more lapses by itself. A cover that can't be fetched is
-logged and left out, and tried again next cycle: the renderer then draws the page without one, as for a local file.
+A cover's TTL is renewed each cycle while a player key shows it; one nothing shows lapses by itself. A cover that
+can't be fetched is logged and tried again next cycle, and the screen goes without one meanwhile.
 """
 
 import logging
@@ -37,13 +27,13 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger("broker.album_art")
 
-# The tallest a renderer draws a cover: its Spotify area is 120 px high in every layout. It scales the stored one down.
+# The tallest a cover is drawn: the Spotify area is 120 px high in every layout. The renderer scales it down.
 ART_SIZE = 120
-# Renewed every minute while it's shown: longer than the player key's three minutes, so a cover never goes before the
-# key that shows it; short, so one nothing shows any more is soon out of Redis's way. The store contract's.
+# Longer than the player key's, so a cover never goes before the key that shows it; short, so one nothing shows is
+# soon out of Redis's way. The store contract's.
 ART_TTL_S = store_keys.ALBUM_ART_TTL_S
-# A 300 px JPEG is about 30 KB (a 640 px one, for an album that has no 300, 100 to 200 KB): anything bigger isn't
-# stored, so one odd image can't take a large part of Redis's 128 MB.
+# A 300 px JPEG is about 30 KB (a 640 px one 100 to 200 KB): anything bigger isn't stored, so one odd image can't take
+# a large part of Redis's 128 MB.
 MAX_ART_BYTES = 256 * 1024
 # Each cover is one request; a host that doesn't answer in this long is left alone until the next cycle.
 TIMEOUT_S = 5
@@ -92,9 +82,9 @@ class AlbumArt:
     """Keeps the covers the player keys show in `store`, fetching each with `session` only when it isn't there."""
 
     def __init__(self, store: redis.Redis, session: requests.Session | None = None) -> None:
-        """`store`: the music provider's client (decoding replies is fine: it never reads a cover back)."""
+        """Keep covers in `store`, fetching them with `session` (by default, a new one)."""
         self.store = store
-        # A session of its own: the covers come from a couple of hosts, so it keeps their connections open.
+        # The covers come from a couple of hosts, so the session's open connections are reused.
         self.session = session or requests.Session()
         self.fetched = 0
         # This cycle's: covers already seen to (so screens showing the same album cost one call, or one renewal), and
@@ -118,7 +108,7 @@ class AlbumArt:
                 continue
             self._seen.add(url)
             key = art_key(url)
-            # Still there: renewed, not fetched again. EXPIRE answers 0 for a key that's gone (lapsed, or evicted).
+            # EXPIRE answers 0 for a key that's gone (lapsed, or evicted).
             if self.store.expire(key, ART_TTL_S):
                 continue
             image = self._fetch(url)

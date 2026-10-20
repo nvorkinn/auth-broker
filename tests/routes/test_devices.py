@@ -13,7 +13,7 @@ from broker.services import pairing, renderer_config
 
 
 def _config(app, device_id):
-    """Return the device's config as the render pool reads it from the store, the way a response is read."""
+    """Return the device's config as the render pool reads it, wrapped like a test client's response."""
     with app.app_context():
         body = renderer_config.build(db.session.get(DeviceConfig, device_id), pairing_code=None).model_dump(mode="json")
     return SimpleNamespace(status_code=200, data=json.dumps(body).encode(), get_json=lambda: body)
@@ -99,7 +99,7 @@ def test_the_config_returns_defaults(app, register_device):
 
 
 def test_the_config_never_sends_the_tfl_key(app, client, register_device):
-    """The broker keeps TfL's key for its stop lookups; the providers have their own, and the screen reads the store."""
+    """The broker keeps TfL's key for its stop lookups; the providers have their own, and the pool reads the store."""
     device_id, _secret = register_device()
     _set_config(app, device_id, tfl_stop_ids=["940GZZLUEUS"])
 
@@ -111,7 +111,7 @@ def test_the_config_never_sends_the_tfl_key(app, client, register_device):
 
 
 def test_the_config_sends_no_weather_api_key(app, register_device):
-    """Nothing uses one: the weather provider calls Open-Meteo, which needs none, and the screen reads the store."""
+    """Nothing uses one: the weather provider calls Open-Meteo, which needs none, and the pool reads the store."""
     device_id, _secret = register_device()
 
     response = _config(app, device_id)
