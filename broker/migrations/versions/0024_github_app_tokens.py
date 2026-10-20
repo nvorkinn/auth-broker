@@ -38,5 +38,5 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    """Drop it: the dashboard falls back to its PAT, or asks to connect again."""
+    """Drop it: the dashboard asks to connect again."""
     op.drop_table("github_app_tokens")

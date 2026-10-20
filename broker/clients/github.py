@@ -318,7 +318,7 @@ class DashboardError(ValueError):
 
 
 class Dashboard:
-    """The personal dashboard's GitHub operations, all performed with its server-side PAT."""
+    """The personal dashboard's GitHub operations, all performed server-side as its signed-in user."""
 
     def __init__(self, token: str, cache: Redis | None = None) -> None:
         """Open a session for one dashboard request."""
@@ -595,7 +595,7 @@ class Dashboard:
         }
 
     def pending_deployments(self, repo: dict, run_id: int) -> list[dict]:
-        """Return approval gates and whether the PAT's user is allowed to release each gate."""
+        """Return approval gates and whether the token's user is allowed to release each gate."""
         return [
             {
                 "id": deployment["environment"]["id"],
