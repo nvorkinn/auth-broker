@@ -37,7 +37,6 @@ def run_migrations_offline() -> None:
 def run_migrations_online() -> None:
     """Run the migrations against the app's database."""
 
-    # Don't write an empty revision when autogenerate finds no schema changes.
     # Alembic passes all three positionally; only the scripts it is about to write matter here.
     def process_revision_directives(
         _context: MigrationContext, _revision: str | Iterable[str | None], directives: list[MigrationScript]

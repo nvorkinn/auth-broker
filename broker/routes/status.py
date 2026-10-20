@@ -1,7 +1,4 @@
-"""A read-only view of every device, for monitoring (e.g. a Home Assistant RESTful sensor).
-
-It never changes anything: resetting or deleting a device stays with the admin CLI.
-"""
+"""Read-only device list for monitoring, such as a Home Assistant RESTful sensor; changes stay with the admin CLI."""
 
 from typing import TYPE_CHECKING
 

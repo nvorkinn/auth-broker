@@ -29,7 +29,6 @@ function savePrefs() {
     try {
         localStorage.setItem(PREFS_KEY, JSON.stringify({ hidden: [...prefs.hidden], background: [...prefs.background] }));
     } catch {
-        // The choices still apply to this page view.
     }
 }
 
@@ -56,7 +55,6 @@ function link(text, url) {
             node.rel = "noopener noreferrer";
         }
     } catch {
-        // A missing or invalid check URL is rendered as text, not as a navigation.
     }
     return node;
 }
@@ -148,14 +146,12 @@ function renderPull(pr, project) {
     return row;
 }
 
-// A matrix (or reusable workflow) with this many jobs or fewer is drawn as one card per job unless told otherwise.
 const MATRIX_EXPANDED_MAX = 5;
 
 function matrixExpanded(node, mode) {
     return !!node.jobs && (mode ? mode === "expanded" : node.total <= MATRIX_EXPANDED_MAX);
 }
 
-// Replace each expanded matrix by a card per job, wired like the matrix was: same needs, needed by the same jobs.
 function explode(nodes, mode) {
     const parts = new Map(nodes.filter(node => matrixExpanded(node, mode)).map(node => [node.key,
         node.jobs.map((job, index) => ({ key: `${node.key}#${index}`, name: job.name, state: job.state,
@@ -523,14 +519,12 @@ async function discover() {
 async function tick() {
     if (document.hidden || Date.now() < pausedUntil) return;
     const available = 3 - [...projects.values()].filter(project => project.loading).length;
-    // Projects asked for by the Refresh buttons go first, then whoever has waited longest.
     const due = [...projects.values()].filter(project => !project.loading && project.nextRefresh <= Date.now())
         .sort((a, b) => Number(a.background) - Number(b.background) || a.nextRefresh - b.nextRefresh);
     await Promise.all(due.slice(0, Math.max(0, available)).map(refreshProject));
 }
 
-// Make the projects the Refresh buttons cover due now. A section's turn is brought forward alone, remembering when the
-// project's next full refresh was due, so refreshing one section never delays the other.
+// Brings one section forward alone, remembering when the full refresh was due, so the other never waits on it.
 function requestRefresh(section) {
     for (const project of projects.values()) {
         if (project.background) continue;

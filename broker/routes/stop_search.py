@@ -1,7 +1,4 @@
-"""Stop search for the settings page's stop picker, London's and Norway's stops together.
-
-It spends the broker's TfL key, so only a user paired with a device may use it.
-"""
+"""Stop search for the settings page's stop picker, across London and Norway. It spends the broker's TfL key."""
 
 from typing import TYPE_CHECKING
 

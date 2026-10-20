@@ -1,8 +1,4 @@
-"""Browser-facing Apple Music linking.
-
-The config page signs the listener in to Apple with MusicKit JS, which needs a developer token from here, and posts
-back the Music User Token Apple hands it, which is stored against the screen.
-"""
+"""Browser-facing Apple Music linking."""
 
 from typing import TYPE_CHECKING
 
@@ -24,7 +20,7 @@ bp = Blueprint("apple_music_link", __name__)
 @bp.get("/device/<device_id>/apple-music/developer-token")
 @require_paired_user
 def developer_token() -> ResponseReturnValue:
-    """Return what MusicKit JS is configured with: a developer token and the app's name. 404 if not set up here."""
+    """Return the developer token and app name that MusicKit JS is configured with."""
     if not apple_music.configured():
         return jsonify(error="Apple Music isn't set up on this server"), 404
     return jsonify(developer_token=apple_music.developer_token(), app_name=current_app.config["APPLE_MUSIC_APP_NAME"])
