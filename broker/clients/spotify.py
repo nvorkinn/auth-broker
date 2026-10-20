@@ -111,6 +111,27 @@ def get_queue(device_id: str) -> list[dict[str, object]]:
     return response.json()
 
 
+def get_currently_playing(device_id: str) -> dict[str, object]:
+    """Return Spotify's /me/player/currently-playing for the device: the track, `progress_ms` and `is_playing`.
+
+    {} when Spotify isn't linked or nothing is playing (204). Much cheaper than the queue, so the music provider asks
+    it every few seconds while something plays.
+    """
+    access_token = _get_access_token(device_id)
+    if access_token is None:
+        return {}
+
+    response = requests.get(
+        "https://api.spotify.com/v1/me/player/currently-playing",
+        headers={"Authorization": f"Bearer {access_token}"},
+        timeout=10,
+    )
+    if response.status_code == HTTPStatus.NO_CONTENT or not response.content:
+        return {}
+    response.raise_for_status()
+    return response.json()
+
+
 def get_users_top_items(device_id: str, type_: str, params: dict[str, str]) -> list[dict[str, object]] | None:
     """Spotify's top artists or tracks (`type_`) for the device's user; None when Spotify isn't linked."""
     access_token = _get_access_token(device_id)
