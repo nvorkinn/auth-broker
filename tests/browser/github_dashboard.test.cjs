@@ -87,7 +87,7 @@ async function harness(initial = active, repositories = [repo], storage = null) 
     let failure = null;
     const calls = [];
     const ids = new Map(["summary", "error", "projects", "refresh", "pulls", "workflows",
-        "pull-count", "workflow-count", "project-count", "refresh-pulls", "refresh-workflows", "hidden-projects", "pull-order"].map(id => [id, new Element("div")]));
+        "pull-count", "workflow-count", "project-count", "refresh-pulls", "refresh-workflows", "project-picker", "pull-order"].map(id => [id, new Element("div")]));
     const intervals = [];
     const document = {
         hidden: false,
@@ -204,7 +204,7 @@ test("PRs from all repositories share one list with repository labels, newest fi
     assert.match(text(rows[1]), /Build: Running/);
     assert.equal(app.ids.get("pull-count").textContent, "2");
     assert.equal(app.ids.get("projects").querySelectorAll(".pull").length, 0);
-    assert.equal(app.ids.get("projects").querySelectorAll("button").length, 4);
+    assert.equal(app.ids.get("projects").querySelectorAll("button").length, 2, "one New Release per project");
 });
 
 test("completed check details stay inline and open across refreshes; completed-only rows are compact", async () => {
@@ -442,22 +442,33 @@ test("ticking the box changes what Refresh covers and is remembered", async () =
     assert.deepEqual(JSON.parse(storage.saved[PREFS]).background, []);
 });
 
-test("hidden projects are neither shown nor fetched, and can be shown again", async () => {
+const pickerBox = (app, name) => app.ids.get("project-picker").querySelectorAll("input")
+    .find(input => input.dataset.repo === name);
+
+test("unticked projects in the picker are neither shown nor fetched, and can be ticked again", async () => {
     const storage = memory({ [PREFS]: JSON.stringify({ hidden: ["alice/another"] }) });
     const app = await harness(idle, [another, repo], storage);
     assert.equal(app.evaluate("projects.has('alice/another')"), false);
     assert.equal(projectCalls(app, "another").length, 0);
-    assert.equal(app.ids.get("hidden-projects").hidden, false);
+    assert.equal(app.ids.get("project-picker").children[0].textContent, "Projects (1 of 2)");
+    assert.equal(pickerBox(app, "alice/project").checked, true);
     assert.match(app.ids.get("summary").textContent, /1 repositories .* 1 hidden/);
-    app.ids.get("hidden-projects").querySelectorAll("button")[0].listeners.click();
+    const box = pickerBox(app, "alice/another");
+    assert.equal(box.checked, false);
+    box.checked = true;
+    box.listeners.change();
     await new Promise(setImmediate);
     assert.equal(app.evaluate("projects.has('alice/another')"), true);
     assert.equal(projectCalls(app, "another").length, 1);
     assert.deepEqual(JSON.parse(storage.saved[PREFS]).hidden, []);
-    checkboxOf(app, "alice/another").parentElement.parentElement.querySelectorAll("button")[1].listeners.click();
+    assert.equal(app.ids.get("project-picker").children[0].textContent, "Projects (2 of 2)");
+    const again = pickerBox(app, "alice/another");
+    again.checked = false;
+    again.listeners.change();
     assert.equal(app.evaluate("projects.has('alice/another')"), false);
     assert.deepEqual(JSON.parse(storage.saved[PREFS]).hidden, ["alice/another"]);
     assert.equal(app.ids.get("project-count").textContent, "1");
+    assert.equal(app.ids.get("projects").querySelectorAll("button").filter(node => node.textContent === "Hide").length, 0);
 });
 
 test("preferences survive storage that is missing or unreadable", async () => {
@@ -591,6 +602,8 @@ test("a failed run Refresh shows its error on that run and can be tried again", 
     assert.match(workflowsText(app), /Approve production/);
 });
 
+const FINISHED_MS = 120000;
+
 test("the latest finished release shows in full for two minutes, then as one line", async () => {
     const app = await harness({ ...idle, workflows: [finishedRelease(7, 100000 - 60000)] });
     assert.match(workflowsText(app), /Succeeded/);
@@ -608,19 +621,27 @@ test("the latest finished release shows in full for two minutes, then as one lin
     assert.equal(app.ids.get("workflow-count").textContent, "1");
 });
 
-test("a finished release collapses at once when a newer one runs, and can be opened again", async () => {
-    const app = await harness({ ...idle, active: true, workflows: [{ ...waitingRelease, id: 9 }, finishedRelease(8, 100000, "failure")] });
+test("a finished release is replaced as soon as a newer one starts", async () => {
+    const app = await harness({ ...idle, active: true, workflows: [{ ...waitingRelease, id: 9, number: 9 }, finishedRelease(8, 100000, "failure")] });
+    assert.match(workflowsText(app), /Release #9/);
+    assert.doesNotMatch(workflowsText(app), /Release #8|Failed/);
+    assert.equal(app.ids.get("workflows").querySelectorAll(".finished-toggle").length, 0);
+    assert.equal(app.ids.get("workflow-count").textContent, "1");
+    assert.match(app.ids.get("summary").textContent, /1 ongoing releases/);
+    assert.equal(fullCalls(app).at(-1).url, "/github/repositories/alice/project", "finished runs aren't rechecked");
+});
+
+test("a finished release can be opened again after it collapses", async () => {
+    const app = await harness({ ...idle, workflows: [finishedRelease(8, 100000 - FINISHED_MS, "failure")] });
     const list = app.ids.get("workflows");
     assert.equal(list.querySelectorAll(".collapsed").length, 1);
     assert.match(workflowsText(app), /Failed/);
-    assert.match(app.ids.get("summary").textContent, /1 ongoing releases/);
     list.querySelectorAll(".finished-toggle")[0].listeners.click();
     assert.equal(list.querySelectorAll(".collapsed").length, 0);
     assert.equal(list.querySelectorAll(".finished-toggle")[0].textContent, "Collapse");
     app.advance(60000);
     await app.tick();
     assert.equal(list.querySelectorAll(".collapsed").length, 0);
-    assert.equal(fullCalls(app).at(-1).url, "/github/repositories/alice/project?runs=9", "finished runs aren't rechecked");
 });
 
 test("a run refreshed to finished replaces the older finished release", async () => {

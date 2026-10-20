@@ -1,7 +1,8 @@
 "use strict";
 
 const projects = new Map();
-const hiddenRepos = new Map();
+// Every repository discovery found, in its order; the picker shows or hides each of them.
+const knownRepos = new Map();
 const PREFS_KEY = "github-dashboard:prefs";
 const csrf = document.querySelector('meta[name="csrf-token"]').content;
 const summary = document.getElementById("summary");
@@ -254,17 +255,19 @@ function finished(run) {
     return run.status === "completed";
 }
 
-// Ongoing runs, then the latest finished one: a run refreshed on its own can finish while an older one is shown.
+// Ongoing runs, then the latest finished one until a newer run starts: a run refreshed on its own can finish while
+// an older one is shown.
 function shownRuns(project) {
     const runs = project.data?.workflows || [];
+    const ongoing = runs.filter(run => !finished(run));
     const latest = runs.filter(finished).sort((a, b) => b.id - a.id)[0];
-    return [...runs.filter(run => !finished(run)), ...(latest ? [latest] : [])];
+    const replaced = !latest || ongoing.some(run => run.id > latest.id);
+    return [...ongoing, ...(replaced ? [] : [latest])];
 }
 
-// Collapsed once two minutes have passed since it finished, or as soon as a newer release is running.
-function collapseAt(project, run) {
-    const newer = (project.data?.workflows || []).some(other => !finished(other) && other.id > run.id);
-    return newer ? 0 : Date.parse(run.finished_at) + FINISHED_SHOWN_MS;
+// Collapsed once two minutes have passed since it finished.
+function collapseAt(run) {
+    return Date.parse(run.finished_at) + FINISHED_SHOWN_MS;
 }
 
 function renderWorkflow(run, project) {
@@ -292,7 +295,7 @@ function renderWorkflow(run, project) {
     }
     if (finished(run)) {
         const choice = project.finishedMode.get(run.id);
-        const collapsed = choice ? choice === "collapsed" : Date.now() >= collapseAt(project, run);
+        const collapsed = choice ? choice === "collapsed" : Date.now() >= collapseAt(run);
         const toggle = element("button", collapsed ? "Show jobs" : "Collapse", "finished-toggle");
         toggle.type = "button";
         toggle.addEventListener("click", () => {
@@ -377,7 +380,7 @@ function renderOverview() {
     document.getElementById("workflow-count").textContent = String(workflows.length);
     document.getElementById("project-count").textContent = String(all.length);
     summary.textContent = `${all.length} repositories · ${pulls.length} open PRs · ${ongoing} ongoing releases`
-        + (hiddenRepos.size ? ` · ${hiddenRepos.size} hidden` : "")
+        + (knownRepos.size > all.length ? ` · ${knownRepos.size - all.length} hidden` : "")
         + (unloaded ? ` · ${unloaded} not loaded` : "") + (errors ? ` · ${errors} refresh errors` : "");
     renderRefreshLabels();
     requestAnimationFrame(fitGraphs);
@@ -392,34 +395,39 @@ function renderRefreshLabels() {
         : "Refresh the projects marked Refresh now; the others still update in the background";
 }
 
-function renderHidden() {
-    const box = document.getElementById("hidden-projects");
-    box.hidden = !hiddenRepos.size;
-    const nodes = [...hiddenRepos.values()].map(repo => {
-        const row = element("div", undefined, "hidden-project");
-        const show = element("button", "Show");
-        show.type = "button";
-        show.addEventListener("click", () => showProject(repo));
-        row.append(element("span", repo.full_name), show);
-        return row;
+// A checkbox per discovered repository in the Projects & releases header; unticked ones are neither shown nor fetched.
+function renderPicker() {
+    const picker = document.getElementById("project-picker");
+    const summaryLine = element("summary", `Projects (${projects.size} of ${knownRepos.size})`);
+    summaryLine.title = "Pick which projects are shown and refreshed";
+    const options = [...knownRepos.values()].map(repo => {
+        const option = element("label", undefined, "project-option");
+        const checkbox = element("input");
+        checkbox.type = "checkbox";
+        checkbox.checked = projects.has(repo.full_name);
+        checkbox.dataset.repo = repo.full_name;
+        checkbox.addEventListener("change", () => {
+            if (checkbox.checked) showProject(repo); else hideProject(projects.get(repo.full_name));
+        });
+        option.append(checkbox, document.createTextNode(` ${repo.full_name}`));
+        return option;
     });
-    box.replaceChildren(element("p", `Hidden projects (${hiddenRepos.size}) are not refreshed.`, "release-hint"), ...nodes);
+    picker.replaceChildren(summaryLine, element("div", undefined, "project-options"));
+    picker.lastElementChild.append(...options);
 }
 
 function hideProject(project) {
     project.card.remove();
     projects.delete(project.repo.full_name);
-    hiddenRepos.set(project.repo.full_name, project.repo);
     setMember(prefs.hidden, project.repo.full_name, true);
-    renderHidden();
+    renderPicker();
     renderOverview();
 }
 
 function showProject(repo) {
-    hiddenRepos.delete(repo.full_name);
     setMember(prefs.hidden, repo.full_name, false);
     addProject(repo);
-    renderHidden();
+    renderPicker();
     renderOverview();
     tick();
 }
@@ -432,7 +440,7 @@ function renderProject(project) {
     project.workflowRows = shownRuns(project).map(run => renderWorkflow(run, project));
     // Draw again when a finished run is due to collapse; tick() checks this every second.
     project.redrawAt = Math.min(Infinity, ...shownRuns(project).filter(run => finished(run)
-        && !project.finishedMode.has(run.id)).map(run => collapseAt(project, run)).filter(at => at > Date.now()));
+        && !project.finishedMode.has(run.id)).map(collapseAt).filter(at => at > Date.now()));
     for (const row of [...project.pullRows, ...project.workflowRows]) {
         for (const details of row.querySelectorAll("details")) details.open = expanded.has(details.dataset.detailKey);
     }
@@ -625,10 +633,7 @@ function addProject(repo) {
     checkbox.checked = !prefs.background.has(repo.full_name);
     include.title = "Include in the Refresh buttons. Unticked projects still update in the background.";
     include.append(checkbox, document.createTextNode(" Refresh now"));
-    const hide = element("button", "Hide");
-    hide.type = "button";
-    hide.title = "Stop showing and refreshing this project";
-    heading.append(title, button, include, hide);
+    heading.append(title, button, include);
     const result = element("p", undefined, "release-result");
     result.setAttribute("role", "status");
     const error = element("p", undefined, "error");
@@ -649,7 +654,6 @@ function addProject(repo) {
         setMember(prefs.background, repo.full_name, project.background);
         renderRefreshLabels();
     });
-    hide.addEventListener("click", () => hideProject(project));
     if (project.background) card.className = "project background";
     projects.set(repo.full_name, project);
 }
@@ -666,12 +670,12 @@ async function discover() {
                 projects.delete(name);
             }
         }
-        for (const name of hiddenRepos.keys()) if (!names.has(name)) hiddenRepos.delete(name);
+        knownRepos.clear();
         for (const repo of data.repositories) {
-            if (prefs.hidden.has(repo.full_name)) hiddenRepos.set(repo.full_name, repo);
-            else if (!projects.has(repo.full_name)) addProject(repo);
+            knownRepos.set(repo.full_name, repo);
+            if (!prefs.hidden.has(repo.full_name) && !projects.has(repo.full_name)) addProject(repo);
         }
-        renderHidden();
+        renderPicker();
         renderOverview();
         errorBanner.hidden = true;
     } catch (error) {
@@ -737,6 +741,11 @@ document.addEventListener("visibilitychange", () => {
         requestRefresh("all");
         discover().then(tick);
     }
+});
+// The project picker closes on a click anywhere else, like a select would.
+document.addEventListener("click", event => {
+    const picker = document.getElementById("project-picker");
+    if (picker.open && !picker.contains(event.target)) picker.open = false;
 });
 window.addEventListener("resize", fitGraphs);
 discover().then(tick);
