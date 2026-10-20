@@ -36,7 +36,7 @@ def dashboard_view(view: Callable[..., ResponseReturnValue]) -> View:
     @require_user
     def wrapped(**kwargs: str) -> ResponseReturnValue:
         config = current_app.config
-        if not (config["GITHUB_DASHBOARD_TOKEN"] or github_app.configured()) or not config["GITHUB_DASHBOARD_USER_ID"]:
+        if not github_app.configured() or not config["GITHUB_DASHBOARD_USER_ID"]:
             return jsonify(error="The GitHub dashboard is not configured."), 503
         if current_user() != config["GITHUB_DASHBOARD_USER_ID"]:
             return jsonify(error="This dashboard is private."), 403
@@ -54,15 +54,8 @@ def dashboard_view(view: Callable[..., ResponseReturnValue]) -> View:
 
 
 def _dashboard() -> github.Dashboard:
-    """Open the GitHub client: as the user through the GitHub App once they've connected, else with the PAT."""
-    token = current_app.config["GITHUB_DASHBOARD_TOKEN"]
-    if github_app.configured():
-        try:
-            token = github_app.token(current_user())
-        except github_app.NotConnectedError:
-            if not token:
-                raise
-    return github.Dashboard(token, current_app.extensions["redis"])
+    """Open the GitHub client as the user, through the GitHub App they've connected."""
+    return github.Dashboard(github_app.token(current_user()), current_app.extensions["redis"])
 
 
 @bp.errorhandler(json.JSONDecodeError)
@@ -95,13 +88,13 @@ def private_response(response: Response) -> Response:
 @bp.get("/")
 @dashboard_view
 def index() -> ResponseReturnValue:
-    """Serve the dashboard without placing the PAT in the browser."""
+    """Serve the dashboard without placing the user's GitHub token in the browser."""
     if "github_dashboard_csrf" not in session:
         session["github_dashboard_csrf"] = secrets.token_urlsafe(32)
     return render_template(
         "github_dashboard.html",
         csrf=session["github_dashboard_csrf"],
-        connect=github_app.configured() and not github_app.connected(current_user()),
+        connect=not github_app.connected(current_user()),
         webhooks=bool(current_app.config["GITHUB_APP_WEBHOOK_SECRET"]),
     )
 
@@ -110,8 +103,6 @@ def index() -> ResponseReturnValue:
 @dashboard_view
 def connect() -> ResponseReturnValue:
     """Send the user to sign in to the GitHub App."""
-    if not github_app.configured():
-        return jsonify(error="The GitHub App is not configured."), 404
     state = secrets.token_urlsafe(32)
     session["github_app_state"] = state
     return redirect(github_app.authorize_url(state))
@@ -123,8 +114,6 @@ def callback() -> ResponseReturnValue:
     """Finish the sign-in GitHub sent the user back from, if this session started it."""
     expected = session.pop("github_app_state", "")
     received = request.args.get("state", "")
-    if not github_app.configured():
-        return jsonify(error="The GitHub App is not configured."), 404
     if not expected or not hmac.compare_digest(expected.encode(), received.encode()):
         return jsonify(error="This sign-in wasn't started here. Press Connect GitHub again."), 400
     code = request.args.get("code", "")
@@ -147,7 +136,7 @@ def changes() -> ResponseReturnValue:
 @bp.get("/repositories")
 @dashboard_view
 def repositories() -> ResponseReturnValue:
-    """Discover every owned repository accessible to the PAT."""
+    """Discover every owned repository the App can reach."""
     api = _dashboard()
     try:
         return jsonify(repositories=api.repositories())

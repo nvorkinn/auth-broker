@@ -13,7 +13,6 @@ from broker.services import github_app
 def app_setup(app):
     app.config.update(
         GITHUB_DASHBOARD_USER_ID="user-1",
-        GITHUB_DASHBOARD_TOKEN="",
         GITHUB_APP_CLIENT_ID="Iv1.client",
         GITHUB_APP_CLIENT_SECRET="shh",
         GITHUB_APP_WEBHOOK_SECRET="hook",
@@ -115,12 +114,15 @@ def test_github_calls_use_the_app_token_once_connected(app_setup, client):
     assert dashboard.call_args.args[0] == "ghu_user"
 
 
-def test_without_a_sign_in_the_pat_is_used_or_the_user_is_asked_to_connect(app_setup, client):
+def test_without_a_sign_in_the_user_is_asked_to_connect(app_setup, client):
     with patch("broker.routes.github_dashboard.github.Dashboard") as dashboard:
-        dashboard.return_value.repositories.return_value = []
         response = client.get("/github/repositories")
-        assert response.status_code == 409
-        assert response.json == {"error": "Connect GitHub to use the dashboard."}
-        app_setup.config["GITHUB_DASHBOARD_TOKEN"] = "test-pat"
-        assert client.get("/github/repositories").status_code == 200
-    assert dashboard.call_args.args[0] == "test-pat"
+    assert response.status_code == 409
+    assert response.json == {"error": "Connect GitHub to use the dashboard."}
+    dashboard.assert_not_called()
+
+
+def test_without_the_app_the_dashboard_is_off(app_setup, client):
+    app_setup.config["GITHUB_APP_CLIENT_SECRET"] = ""
+    assert client.get("/github").status_code == 503
+    assert client.get("/github/connect").status_code == 503

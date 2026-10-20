@@ -8,8 +8,13 @@ from broker.clients import github
 
 @pytest.fixture
 def dashboard(app):
-    app.config.update(GITHUB_DASHBOARD_USER_ID="user-1", GITHUB_DASHBOARD_TOKEN="test-pat")
-    with patch("broker.routes.github_dashboard.github.Dashboard") as api:
+    app.config.update(
+        GITHUB_DASHBOARD_USER_ID="user-1", GITHUB_APP_CLIENT_ID="Iv1.client", GITHUB_APP_CLIENT_SECRET="shh"
+    )
+    with (
+        patch("broker.routes.github_dashboard.github_app.token", return_value="ghu_user"),
+        patch("broker.routes.github_dashboard.github.Dashboard") as api,
+    ):
         yield api.return_value
 
 
@@ -29,10 +34,10 @@ def test_authentication_and_personal_authorization(client, anonymous_client, das
     assert not dashboard.repositories.called
 
 
-def test_dashboard_never_exposes_the_pat(client, dashboard):
+def test_dashboard_never_exposes_the_token(client, dashboard):
     response = client.get("/github")
     assert response.status_code == 200
-    assert b"test-pat" not in response.data
+    assert b"ghu_user" not in response.data
     assert response.headers["Cache-Control"] == "no-store"
     assert b"csrf-token" in response.data
     assert b'rel="icon" type="image/svg+xml" href="/static/github_dashboard.svg"' in response.data
