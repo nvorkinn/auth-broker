@@ -1,8 +1,4 @@
-"""Browser-facing Spotify linking.
-
-Sends the recipient to Spotify to approve access, then stores the tokens Spotify hands back against the device
-the signed-in user is paired with.
-"""
+"""Browser-facing Spotify linking."""
 
 import secrets
 from typing import TYPE_CHECKING

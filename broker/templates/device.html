@@ -4,7 +4,6 @@
 {% block heading %}{% endblock %}
 
 {% block content %}
-{# A carousel of a setting's looks, one picture in view at a time; the one in view is the one chosen. #}
 {% macro style_picker(field, hint, styles, chosen, folder, width, height) %}
         <fieldset class="form-group style-picker" aria-describedby="{{ field }}_hint">
             <legend class="form-legend">Style</legend>
@@ -51,7 +50,6 @@
 <form id="displayUnlinkForm" method="POST" action="{{ url_for('pages.display_unlink', device_id=device_id) }}"></form>
 
 <form method="POST" action="{{ url_for('pages.device_config', device_id=device_id) }}">
-    <!-- General -->
     <div class="card">
         <div class="card-header">
             <h2 class="card-title">General</h2>
@@ -83,8 +81,7 @@
                 <p id="language_hint" class="form-hint">The language of your screen's text.</p>
             </fieldset>
 
-            <!-- Read-only for now: the page always submits its own orientation, shown below but not editable.
-                 A disabled fieldset isn't submitted, so the value goes in this hidden input instead. -->
+            <!-- A disabled fieldset isn't submitted, so the orientation goes in this hidden input instead. -->
             <input type="hidden" name="orientation" value="{{ page_orientation }}">
             <fieldset class="form-group" disabled>
                 <legend class="form-legend">Orientation</legend>
@@ -100,7 +97,6 @@
         </div>
     </div>
 
-    <!-- Style: one look for every panel -->
     <div class="card">
         <div class="card-header">
             <h2 class="card-title">Style</h2>
@@ -108,14 +104,13 @@
         {{ style_picker("style", "How your screen draws its departures, Spotify and notice board.", styles, config.style, "styles", 360, 396) }}
     </div>
 
-    <!-- Weather -->
     <div class="card">
         <div class="card-header">
             <h2 class="card-title">Weather</h2>
         </div>
         <div class="form-grid">
-            <!-- A town or city picked from Open-Meteo's search: the id of the one picked goes in weather_place_id. Typing
-                 clears it, so text that wasn't picked (or a browser without JavaScript) is looked up when saved. -->
+            <!-- Typing clears the picked place, so text that wasn't picked (or a browser without JavaScript)
+                 is looked up when saved. -->
             <div class="form-group">
                 <label for="weather_location">Weather location</label>
                 <div class="search-container" style="margin-bottom: 0;">
@@ -129,7 +124,6 @@
         </div>
     </div>
 
-    <!-- Notice board -->
     <div class="card">
         <div class="card-header">
             <h2 class="card-title">Notice board</h2>
@@ -155,7 +149,6 @@
         </div>
     </div>
 
-    <!-- Departures: London's stops (TfL) and Norway's (Entur), in any mix -->
     <div class="card">
         <div class="card-header">
             <h2 class="card-title">Departures</h2>
@@ -200,7 +193,6 @@
         </div>
     </div>
 
-    <!-- Music: Spotify, Apple Music, or both -->
     <div class="card">
         <div class="card-header">
             <h2 class="card-title">Music</h2>
@@ -243,7 +235,6 @@
         {% endif %}
     </div>
 
-    <!-- Developer -->
     <div class="card">
         <div class="card-header">
             <h2 class="card-title">Developer</h2>
@@ -278,7 +269,6 @@
         </div>
     </div>
 
-    <!-- Energy -->
     <div class="card">
         <div class="card-header">
             <h2 class="card-title">Energy</h2>
@@ -302,7 +292,6 @@
         </div>
     </div>
 
-    <!-- Screen -->
     <div class="card">
         <div class="card-header">
             <h2 class="card-title">Screen</h2>
