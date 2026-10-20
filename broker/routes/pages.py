@@ -154,8 +154,10 @@ def pair() -> ResponseReturnValue:
             return _too_many_attempts(lockout)
         return _render_pair(error="That code is invalid or has expired.")
 
-    # Paired, and the code spent: its config goes back in the store, for the render pool to draw.
+    # Paired, and the code spent: its config goes back in the store, for the render pool to draw, and what it shows
+    # (the weather location registration gave it) is subscribed to.
     config_store.publish(device_id)
+    _write_subscriptions_to_redis()
     return redirect(url_for("pages.device_config"))
 
 
@@ -183,8 +185,10 @@ def pair_by_token() -> ResponseReturnValue:
         return jsonify(status="invalid"), 400
     status = pairing.pair_by_token(current_user(), token)
     if status == "paired":
-        # A paired screen's config goes in the store (all of them: this one is known here only by its token).
+        # A paired screen's config goes in the store (all of them: this one is known here only by its token), and
+        # what it shows is subscribed to.
         config_store.publish_all()
+        _write_subscriptions_to_redis()
     return jsonify(status=status), {"paired": 200, "waiting": 202, "taken": 409}[status]
 
 

@@ -1,6 +1,7 @@
-"""Suggests a weather location from the visitor's IP, to prefill the config page's empty field.
+"""Suggests a weather location from an IP, a town or city name.
 
-It's only ever a suggestion: nothing is stored until the user saves the form.
+A new screen starts with the one its own IP suggests (services/registration.py); the config page prefills an empty
+field with the one the visitor's IP suggests, stored only if they save it.
 
 The lookup is local, so no IP leaves the server: DB-IP's City Lite database places the IP, and the
 suggestion is the biggest town or city near there from GeoNames, since an IP's place is rough at best
