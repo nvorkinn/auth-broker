@@ -19,7 +19,7 @@ from sqlalchemy import func, select
 from broker.db import db
 from broker.models import Device, DeviceConfig
 
-from . import geoip, pairing
+from . import config_store, device_keys, frame_record, geoip, pairing
 
 # Bound on what anyone can add: how many screens may sit unpaired at once, and for how long before
 # they have to register again.
@@ -49,12 +49,12 @@ def register_screen(secret_hash: str, width: int, height: int, ip: str | None = 
     if device is not None:
         return Registered(device_id=device.device_id)
 
-    _drop_stale_screens(datetime.now(UTC))
-    if _unpaired_screens() >= MAX_UNPAIRED_SCREENS:
-        db.session.commit()
-        return None
-    device_id = _new_device(secret_hash, width, height, ip)
+    dropped = _drop_stale_screens(datetime.now(UTC))
+    device_id = None if _unpaired_screens() >= MAX_UNPAIRED_SCREENS else _new_device(secret_hash, width, height, ip)
     db.session.commit()
+    _forget_in_store(dropped)
+    if device_id is None:
+        return None
     # So its screen shows a code to pair with by hand right away, if its owner isn't sent to /pair by WiFi setup.
     pairing.issue_code(device_id)
     return Registered(device_id=device_id, created=True)
@@ -66,10 +66,11 @@ def _unpaired_screens() -> int:
     )
 
 
-def _drop_stale_screens(now: datetime) -> None:
-    """Forget screens that registered, were never paired and have waited longer than allowed.
+def _drop_stale_screens(now: datetime) -> list[str]:
+    """Delete screens that registered, were never paired and have waited longer than allowed (not committed).
 
-    They register again with their next call (a 401 tells them to).
+    Returns their ids, for _forget_in_store once the delete is committed. They register again with their next call
+    (a 401 tells them to).
     """
     stale = db.session.scalars(
         select(Device).where(
@@ -80,6 +81,19 @@ def _drop_stale_screens(now: datetime) -> None:
     ).all()
     for device in stale:
         db.session.delete(device)
+    return [device.device_id for device in stale]
+
+
+def _forget_in_store(device_ids: list[str]) -> None:
+    """After the commit: remove what the store holds for devices that are gone, as `flask devices forget` does.
+
+    Their frame, provider keys and pairing code are deleted, and publishing each takes its config copy out and the
+    device out of the render pool's screens. A Redis that can't be asked is logged by those, never raised.
+    """
+    for device_id in device_ids:
+        frame_record.forget(device_id)
+        device_keys.forget(device_id)
+        config_store.publish(device_id)
 
 
 def _new_device(display_secret_hash: str, width: int, height: int, ip: str | None) -> str:

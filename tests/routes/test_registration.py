@@ -4,13 +4,15 @@ import threading
 from datetime import UTC, datetime, timedelta
 from unittest.mock import patch
 
+import fakeredis
 import pytest
+from redis import RedisError
 from sqlalchemy import select
 
 from broker.auth import hash_secret
 from broker.db import db
 from broker.models import Device, DeviceConfig
-from broker.services import pace, pairing, registration
+from broker.services import device_keys, pace, pairing, pairing_key, registration, render_screens
 from broker.services.frame_record import FRAME_BYTES
 from broker.services.pair_throttle import MAX_REGISTRATION_LOCKOUT_SECONDS, REGISTRATIONS_PER_MINUTE, PairThrottle
 
@@ -79,6 +81,60 @@ def test_screens_nobody_has_paired_are_capped_and_expire(app, client, monkeypatc
     # The stale one is forgotten to make room, and a screen's next call is a 401 so it registers again.
     assert _register(client, "display-three-0123456789").status_code == 201
     assert _device(app, first) is None
+
+
+def test_a_dropped_stale_screen_leaves_nothing_in_the_store(app, client, monkeypatch):
+    store = fakeredis.FakeRedis(decode_responses=True)
+    app.extensions["redis"] = store
+    monkeypatch.setattr(registration, "MAX_UNPAIRED_SCREENS", 2)
+    stale = _register(client, "display-one-0123456789").get_json()["device_id"]
+    kept = _register(client, "display-two-0123456789").get_json()["device_id"]
+    own = [pairing_key.key(stale), *device_keys.energy(stale), *device_keys.music(stale), *device_keys.developer(stale)]
+    for key in own:
+        store.set(key, "{}", ex=3600)
+    store.set(pairing_key.key(kept), "{}", ex=3600)
+    assert store.hexists(render_screens.SCREENS, stale)
+    with app.app_context():
+        db.session.get(Device, stale).created_at = datetime.now(UTC) - registration.UNPAIRED_TTL - timedelta(seconds=1)
+        db.session.commit()
+
+    assert _register(client, "display-three-0123456789").status_code == 201
+
+    assert not any(store.exists(key) for key in own)
+    assert not store.hexists(render_screens.SCREENS, stale)
+    assert store.exists(pairing_key.key(kept))
+    assert store.hexists(render_screens.SCREENS, kept)
+
+
+def test_a_screen_is_dropped_from_the_store_when_the_cap_still_refuses_a_new_one(app, client, monkeypatch):
+    store = fakeredis.FakeRedis(decode_responses=True)
+    app.extensions["redis"] = store
+    monkeypatch.setattr(registration, "MAX_UNPAIRED_SCREENS", 1)
+    stale = _register(client, "display-one-0123456789").get_json()["device_id"]
+    with app.app_context():
+        db.session.get(Device, stale).created_at = datetime.now(UTC) - registration.UNPAIRED_TTL - timedelta(seconds=1)
+        db.session.commit()
+    store.set(pairing_key.key(stale), "{}", ex=3600)
+
+    with patch.object(registration, "_unpaired_screens", return_value=1):
+        assert _register(client, "display-two-0123456789").status_code == 503
+
+    assert _device(app, stale) is None
+    assert not store.exists(pairing_key.key(stale))
+
+
+def test_a_redis_failure_never_blocks_dropping_a_stale_screen(app, client, monkeypatch):
+    monkeypatch.setattr(registration, "MAX_UNPAIRED_SCREENS", 1)
+    stale = _register(client, "display-one-0123456789").get_json()["device_id"]
+    with app.app_context():
+        db.session.get(Device, stale).created_at = datetime.now(UTC) - registration.UNPAIRED_TTL - timedelta(seconds=1)
+        db.session.commit()
+    broken = fakeredis.FakeRedis(decode_responses=True)
+    app.extensions["redis"] = broken
+    with patch.object(broken, "pipeline", side_effect=RedisError("secret command text")):
+        assert _register(client, "display-two-0123456789").status_code == 201
+
+    assert _device(app, stale) is None
 
 
 def test_a_paired_screen_never_expires(app, client):
