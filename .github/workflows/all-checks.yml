@@ -45,7 +45,7 @@ jobs:
           # polls in a row.
           ok='["success","skipped","neutral"]'
           settled=0
-          sleep 20
+          sleep 5
           while true; do
             runs=$(gh api --paginate "repos/$REPO/actions/runs?head_sha=$SHA&per_page=100" |
               jq -s --argjson run_id "$RUN_ID" --arg workflow "$WORKFLOW_NAME" --arg approval "$AUTO_APPROVE_WORKFLOW" '
