@@ -113,8 +113,8 @@ docker compose pull "${services[@]}"
 if [ -n "$var" ]; then
   docker compose up -d --no-deps --force-recreate "${services[@]}"
 else
-  # Recreates only what changed. The deploy-authentik and deploy-config (for
-  # redis) jobs can run at once, so they take turns.
+  # Recreates only what changed. Jobs for these can run at once, so
+  # they take turns.
   (
     flock 9
     docker compose up -d --wait --wait-timeout 600 "${services[@]}"

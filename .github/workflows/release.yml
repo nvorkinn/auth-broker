@@ -143,31 +143,35 @@ jobs:
 
   # Each waits for approval through its environment's protection rule
   # (Settings > Environments), then has the host fetch this release's bundle
-  # and run its deploy.sh once per service. They deploy this repo's images, so
+  # and run its deploy.sh for one service. They deploy this repo's images, so
   # they wait for them.
   deploy:
-    name: ${{ matrix.environment }}
+    name: deploy ${{ matrix.service }}
     needs: [tag, images, package]
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
+      # Two at a time, in this order, the next starting as one finishes. The
+      # services are independent, so a failure doesn't stop the rest.
+      max-parallel: 2
       matrix:
         include:
-          - environment: deploy-caddy
-            services: caddy
-          # Fluent Bit, VictoriaLogs and VictoriaMetrics only collect logs and
-          # metrics, so they ride along with the broker rather than needing an
-          # approval of their own. So does Redis, which is recreated only when
-          # its service changes.
-          - environment: deploy-config
-            services: auth-broker fluent-bit victoria-logs victoria-metrics redis
-    environment: ${{ matrix.environment }}
+          - service: caddy
+          - service: auth-broker
+          - service: fluent-bit
+          - service: victoria-logs
+          - service: victoria-metrics
+          # Recreated only when its service changes.
+          - service: redis
+    environment: deploy-infra
     concurrency:
-      group: ${{ matrix.environment }}-${{ needs.tag.outputs.value }}
+      # Per service: a group the whole matrix shared would cancel all but one
+      # of its pending jobs.
+      group: deploy-${{ matrix.service }}-${{ needs.tag.outputs.value }}
       cancel-in-progress: false
     env: &deploy-env
       TAG: ${{ needs.tag.outputs.value }}
-      SERVICES: ${{ matrix.services }}
+      SERVICE: ${{ matrix.service }}
       DEPLOY_TARGET: ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}
       BUNDLE_URL: ${{ github.server_url }}/${{ github.repository }}/releases/download/${{ needs.tag.outputs.value }}/deploy-${{ needs.tag.outputs.value }}.tar.gz
       BUNDLE_SHA256: ${{ needs.package.outputs.sha256 }}
@@ -184,14 +188,8 @@ jobs:
           chmod 600 ~/.ssh/id_deploy
           printf '%s\n' "$DEPLOY_SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
 
-      # In order, stopping at the first failure.
-      - name: Deploy ${{ matrix.services }}
-        run: |
-          for service in $SERVICES; do
-            echo "::group::Deploy $service"
-            ssh -i ~/.ssh/id_deploy "$DEPLOY_TARGET" bash -s -- "$service" "$TAG" "$BUNDLE_URL" "$BUNDLE_SHA256" < scripts/fetch-release.sh
-            echo "::endgroup::"
-          done
+      - name: Deploy ${{ matrix.service }}
+        run: ssh -i ~/.ssh/id_deploy "$DEPLOY_TARGET" bash -s -- "$SERVICE" "$TAG" "$BUNDLE_URL" "$BUNDLE_SHA256" < scripts/fetch-release.sh
 
   # authentik runs upstream's image, so this only needs the bundle and can be
   # approved while the images are still building. Same steps as deploy.
@@ -205,7 +203,7 @@ jobs:
         include:
           # authentik's configuration is the terraform job's, below.
           - environment: deploy-authentik
-            services: authentik
+            service: authentik
     environment: ${{ matrix.environment }}
     concurrency:
       group: ${{ matrix.environment }}-${{ needs.tag.outputs.value }}
