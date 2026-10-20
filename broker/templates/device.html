@@ -174,8 +174,8 @@
                             <div class="item-text">
                                 <h4>{{ stop.name }}</h4>
                                 <p>
-                                    {% if stop.source == 'entur' %}{% if stop.indent %}{{ stop.subtitle.split(' • ')[0] }} • {% endif %}<code>{{ stop.id }}</code>{% else %}NaPTAN: <code>{{ stop.id }}</code>{% endif %}
-                                    {% if stop.lines %} • {{ stop.lines | join(', ') }}{% endif %}
+                                    {% if stop.source == 'entur' and stop.indent %}{{ stop.subtitle.split(' • ')[0] }}{% if stop.lines %} • {% endif %}{% endif %}
+                                    {{ stop.lines | join(', ') }}
                                     <span class="page-badge">Page {{ ((loop.index0 // 2) + 1) }}</span>
                                 </p>
                             </div>
@@ -468,11 +468,12 @@
         return `<div class="mode-icon mode-${cls}">${escapeHtml(label)}</div>`;
     }
 
-    // What a saved stop's card says under its name: the platform, if it's one, and the id.
+    // What a saved stop's card says under its name: its lines, after the platform if it's a Norwegian platform.
     function stopDetail(stop) {
-        if (stop.source !== 'entur') return `NaPTAN: <code>${escapeHtml(stop.id)}</code>`;
-        const platform = stop.indent ? `${escapeHtml(stop.subtitle.split(' • ')[0])} • ` : '';
-        return `${platform}<code>${escapeHtml(stop.id)}</code>`;
+        const lines = escapeHtml(stop.lines.join(', '));
+        if (stop.source !== 'entur' || !stop.indent) return lines;
+        const platform = escapeHtml(stop.subtitle.split(' • ')[0]);
+        return lines ? `${platform} • ${lines}` : platform;
     }
 
     let lastResults = [];
@@ -587,7 +588,7 @@
                 ${modeIcon(stop)}
                 <div class="item-text">
                     <h4>${escapeHtml(stop.name)}</h4>
-                    <p>${stopDetail(stop)}${stop.lines.length ? ` • ${escapeHtml(stop.lines.join(', '))}` : ''} <span class="page-badge"></span></p>
+                    <p>${stopDetail(stop)} <span class="page-badge"></span></p>
                 </div>
             </div>
             <div class="stop-actions">

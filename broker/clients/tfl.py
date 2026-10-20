@@ -16,6 +16,8 @@ if TYPE_CHECKING:
 
 API_BASE = "https://api.tfl.gov.uk"
 _STOP_ID = re.compile(r"[A-Za-z0-9_-]+")
+# A search ending in what could be a bus stop's letter, as "Westmoreland Road K" or "Westmoreland Road stop K".
+_LETTERED_QUERY = re.compile(r"(?P<name>.*?\S)\s+(?:stop\s+)?(?P<letter>[A-Za-z]{1,2}[0-9]?)", re.IGNORECASE)
 # How many of a bus stop's routes its subtitle names before "(+n more)".
 SUBTITLE_LINES = 6
 
@@ -50,6 +52,11 @@ def _lines(node: dict[str, Any]) -> list[str]:
 
 def _letter(node: dict[str, Any]) -> str:
     return node.get("stopLetter") or node.get("indicator") or ""
+
+
+def _plain_letter(letter: str) -> str:
+    """Reduce a stop letter as typed or as TfL writes it ("K", "->K", "Stop K") to "K", to compare them."""
+    return re.sub(r"[^A-Z0-9]", "", letter.upper()).removeprefix("STOP")
 
 
 def _display_name(node: dict[str, Any], default: str = "") -> str:
@@ -120,9 +127,22 @@ def _search_result(node: dict[str, Any]) -> dict[str, Any] | None:
 def search_stops(query: str) -> list[dict[str, Any]]:
     """Tube stations and bus stops matching the query.
 
-    Raises if TfL's search itself fails; a match whose details can't be fetched is skipped.
+    A query ending in a stop letter ("Westmoreland Road K") lists the stops of that name with that letter, or, if
+    there are none, whatever matches the query as typed. Raises if TfL's search itself fails; a match whose details
+    can't be fetched is skipped.
     """
     http = requests.Session()
+    lettered = _LETTERED_QUERY.fullmatch(query.strip())
+    if lettered:
+        letter = _plain_letter(lettered["letter"])
+        named = _search(lettered["name"], http)
+        with_letter = [result for result in named if result["letter"] and _plain_letter(result["letter"]) == letter]
+        if with_letter:
+            return with_letter
+    return _search(query, http)
+
+
+def _search(query: str, http: requests.Session) -> list[dict[str, Any]]:
     params = {"query": query, "modes": "tube,bus", "maxResults": "15", **_params()}
     response = http.get(f"{API_BASE}/StopPoint/Search", params=params, timeout=6)
     response.raise_for_status()

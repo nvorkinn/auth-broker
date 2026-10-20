@@ -1,5 +1,7 @@
 from unittest.mock import Mock, patch
 
+import pytest
+
 
 def _mock_get(json_data, status_code=200):
     response = Mock()
@@ -82,6 +84,70 @@ def test_search_stops_lists_bus_stops_nested_under_a_hub_once_each(paired_client
     assert results[0]["mode"] == "bus"
     assert results[0]["subtitle"] == "Stop F • 1, 2, 3, 4, 5, 6 (+2 more)"
     assert results[1]["subtitle"] == "Bus • "
+
+
+WESTMORELAND_ROAD = {
+    "id": "490G00022401",
+    "commonName": "Westmoreland Road",
+    "stopType": "NaptanOnstreetBusCoachStopCluster",
+    "children": [
+        {
+            "naptanId": "490014493K",
+            "commonName": "Westmoreland Road",
+            "stopType": "NaptanPublicBusCoachTram",
+            "stopLetter": "K",
+        },
+        {
+            "naptanId": "490014493L",
+            "commonName": "Westmoreland Road",
+            "stopType": "NaptanPublicBusCoachTram",
+            "stopLetter": "->L",
+        },
+    ],
+}
+
+
+def _search_westmoreland_road(client, query):
+    searched = []
+
+    def fake_get(self, url, params=None, timeout=None, headers=None):
+        if "Search" in url:
+            searched.append(params["query"])
+            found = params["query"].lower() == "westmoreland road"  # TfL ignores case
+            return _mock_get({"matches": [{"id": "490G00022401"}] if found else []})
+        return _mock_get(WESTMORELAND_ROAD)
+
+    with patch("broker.clients.tfl.requests.Session.get", fake_get):
+        results = client.get("/api/stops/search", query_string={"q": query}).get_json()
+    return [r["id"] for r in results], searched
+
+
+def test_search_stops_lists_every_stop_of_a_name(paired_client):
+    client, _, _ = paired_client
+    assert _search_westmoreland_road(client, "Westmoreland Road") == (
+        ["490014493K", "490014493L"],
+        ["Westmoreland Road"],
+    )
+
+
+@pytest.mark.parametrize("query", ["Westmoreland Road K", "westmoreland road k", "Westmoreland Road stop K"])
+def test_search_stops_finds_a_bus_stop_by_its_letter(paired_client, query):
+    client, _, _ = paired_client
+    assert _search_westmoreland_road(client, query)[0] == ["490014493K"]
+
+
+def test_search_stops_matches_letters_tfl_writes_with_an_arrow(paired_client):
+    client, _, _ = paired_client
+    assert _search_westmoreland_road(client, "Westmoreland Road L")[0] == ["490014493L"]
+
+
+def test_search_stops_searches_as_typed_when_no_stop_has_that_letter(paired_client):
+    """A query that only looks like it ends in a letter (as "Earls Ct" does) still searches for what was typed."""
+    client, _, _ = paired_client
+    assert _search_westmoreland_road(client, "Westmoreland Road Z") == (
+        [],
+        ["Westmoreland Road", "Westmoreland Road Z"],
+    )
 
 
 def test_search_stops_returns_500_when_tfl_search_fails(paired_client):
