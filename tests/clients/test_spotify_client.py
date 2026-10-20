@@ -25,7 +25,7 @@ def _link_spotify(device_id):
 def test_get_queue_returns_empty_when_not_linked(app, paired_client):
     _, device_id, _ = paired_client
     with app.app_context():
-        assert spotify_module.get_queue(device_id) == []
+        assert spotify_module.get_queue(device_id) == {}
 
 
 def test_get_queue_passes_through_spotify_response(app, paired_client):
@@ -67,7 +67,7 @@ def test_get_queue_returns_empty_on_204(app, paired_client):
     with app.app_context():
         _link_spotify(device_id)
         with patch("broker.clients.spotify.requests.get", return_value=_mock_response(status_code=204, content=b"")):
-            assert spotify_module.get_queue(device_id) == []
+            assert spotify_module.get_queue(device_id) == {}
 
 
 def test_get_currently_playing_returns_empty_when_not_linked(app, paired_client):
@@ -159,4 +159,4 @@ def test_get_users_top_items_returns_empty_on_204(app, paired_client):
     with app.app_context():
         _link_spotify(device_id)
         with patch("broker.clients.spotify.requests.get", return_value=_mock_response(status_code=204, content=b"")):
-            assert spotify_module.get_users_top_items(device_id, "artists", {}) == []
+            assert spotify_module.get_users_top_items(device_id, "artists", {}) == {}
