@@ -288,17 +288,12 @@ dependencies = [
 ]
 
 [package.metadata]
-requires-dist = [
-    { name = "flask", marker = "extra == 'server'", specifier = ">=3.1" },
-    { name = "pydantic", specifier = ">=2.13" },
-    { name = "requests", marker = "extra == 'client'", specifier = ">=2.32" },
-]
-provides-extras = ["client", "server"]
+requires-dist = [{ name = "pydantic", specifier = ">=2.13" }]
 
 [package.metadata.requires-dev]
 dev = [
     { name = "jsonschema", specifier = ">=4.25" },
-    { name = "openapi-codegen", extras = ["yaml"], url = "https://github.com/nvorkinn/openapi-codegen/releases/download/v2.0.0/openapi_codegen-2.0.0-py3-none-any.whl" },
+    { name = "openapi-codegen", extras = ["yaml"], url = "https://github.com/nvorkinn/openapi-codegen/releases/download/v2.1.0/openapi_codegen-2.1.0-py3-none-any.whl" },
     { name = "pre-commit" },
     { name = "pytest", specifier = ">=8.4" },
     { name = "ruff" },
