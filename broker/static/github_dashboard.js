@@ -21,14 +21,23 @@ const QUICK_IN_FLIGHT = 4;
 const PUBLISH_POLL_MS = 10000;
 const PUBLISH_WATCH_MS = 300000;
 
+// How the PR list can be ordered; ISO timestamps sort as text, and ties go by repository and number.
+const PULL_ORDERS = {
+    newest: (a, b) => b.dataset.created.localeCompare(a.dataset.created),
+    oldest: (a, b) => a.dataset.created.localeCompare(b.dataset.created),
+    attention: (a, b) => Number(a.dataset.priority) - Number(b.dataset.priority),
+};
+
 // Per-browser choices: hidden projects are neither shown nor fetched; background ones keep auto-refreshing but are
-// left out of the Refresh buttons. Storage can be blocked, in which case the choices last until the page closes.
+// left out of the Refresh buttons; and the PR list's order. Storage can be blocked, in which case the choices last
+// until the page closes.
 function loadPrefs() {
     try {
         const saved = JSON.parse(localStorage.getItem(PREFS_KEY));
-        return { hidden: new Set(saved?.hidden), background: new Set(saved?.background) };
+        const order = Object.hasOwn(PULL_ORDERS, saved?.order) ? saved.order : "newest";
+        return { hidden: new Set(saved?.hidden), background: new Set(saved?.background), order };
     } catch {
-        return { hidden: new Set(), background: new Set() };
+        return { hidden: new Set(), background: new Set(), order: "newest" };
     }
 }
 
@@ -36,7 +45,7 @@ const prefs = loadPrefs();
 
 function savePrefs() {
     try {
-        localStorage.setItem(PREFS_KEY, JSON.stringify({ hidden: [...prefs.hidden], background: [...prefs.background] }));
+        localStorage.setItem(PREFS_KEY, JSON.stringify({ hidden: [...prefs.hidden], background: [...prefs.background], order: prefs.order }));
     } catch {
     }
 }
@@ -149,6 +158,7 @@ function renderPull(pr, project) {
         details.append(element("summary", `${completed.length} completed checks`), checkList(completed));
         checks.append(details);
     }
+    row.dataset.created = pr.created_at;
     row.dataset.priority = pr.mergeable === false || failed.length ? "0"
         : remaining.length || pr.mergeable === null ? "1" : pr.draft ? "3" : "2";
     row.append(identity, readiness, checks);
@@ -354,7 +364,7 @@ function reconcile(container, nodes) {
 function renderOverview() {
     const all = [...projects.values()];
     const pulls = all.flatMap(project => project.pullRows).sort((a, b) =>
-        Number(a.dataset.priority) - Number(b.dataset.priority) || a.dataset.key.localeCompare(b.dataset.key, undefined, { numeric: true }));
+        PULL_ORDERS[prefs.order](a, b) || a.dataset.key.localeCompare(b.dataset.key, undefined, { numeric: true }));
     const workflows = all.flatMap(project => project.workflowRows);
     const ongoing = all.flatMap(project => shownRuns(project).filter(run => !finished(run))).length;
     const unloaded = all.filter(project => !project.data).length;
@@ -705,6 +715,13 @@ function requestRefresh(section) {
 document.getElementById("refresh").addEventListener("click", async () => {
     requestRefresh("all");
     await Promise.all([discover(), tick()]);
+});
+const pullOrder = document.getElementById("pull-order");
+pullOrder.value = prefs.order;
+pullOrder.addEventListener("change", () => {
+    prefs.order = Object.hasOwn(PULL_ORDERS, pullOrder.value) ? pullOrder.value : "newest";
+    savePrefs();
+    renderOverview();
 });
 document.getElementById("refresh-pulls").addEventListener("click", () => {
     requestRefresh("pulls");

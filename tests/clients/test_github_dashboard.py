@@ -126,6 +126,7 @@ def test_pull_checks_include_paginated_checks_and_latest_legacy_statuses(api):
             "draft": False,
             "mergeable": False,
             "mergeable_state": "dirty",
+            "created_at": "2026-10-19T08:00:00Z",
             "state": "open",
         },
     )
@@ -142,6 +143,7 @@ def test_pull_checks_include_paginated_checks_and_latest_legacy_statuses(api):
     )
     pr = api.pull(path, 7)
     assert pr["mergeable"] is False
+    assert pr["created_at"] == "2026-10-19T08:00:00Z"
     assert len(pr["checks"]) == 103
     assert pr["refresh"] is True
     assert [check["state"] for check in pr["checks"][-2:]] == ["success", "pending"]

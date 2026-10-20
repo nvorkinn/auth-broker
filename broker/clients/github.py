@@ -475,6 +475,7 @@ class Dashboard:
             "base": pr["base"]["ref"],
             "mergeable": pr["mergeable"],
             "merge_state": pr["mergeable_state"],
+            "created_at": pr["created_at"],
             "checks": checks,
             "refresh": pr["mergeable"] is None or any(check["pending"] for check in checks),
         }
