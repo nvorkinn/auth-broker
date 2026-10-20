@@ -1,17 +1,14 @@
 """A device's live pairing code in the store, `v1:pairing:<device id>`, for a screen the render pool draws.
 
-The copy of a screen's config in the store (services/config_store.py) never carries a pairing code, and there's none
-at all while the device has a code to show. A render in the pool (pi-dashboard's docs/stateless-renderers.md) reads
-only the store, so while a code is live the broker keeps this key: the screen's config (the contract's
-ConfigResponse, made by renderer_config.build) with the code in it. That's everything the pool needs to draw the
-pairing screen in the screen's own size and language; the screen stays in the pool's list while it has a live code
-(services/render_screens.py). The store contract's pairing_key.json pins the shape (pi-dashboard's store.pairing reads
-it).
+The store's copy of a screen's config (services/config_store.py) never carries a pairing code. While a code is live, the
+broker keeps this key as well: the screen's config (renderer_config.build) with the code in it. That's everything the
+pool needs to draw the pairing screen at the screen's size and language. The screen stays in the pool's list while it
+has a live code (services/render_screens.py). The store contract's pairing_key.json pins the shape.
 
-Plaintext, by Nikolai's decision (stateless-renderers.md, "The pairing screen"): every Redis reader on the host can
-see a live code for its ten minutes, the same trust as the config. Its TTL is the code's own expiry, so the key lapses
-with the code by itself; it goes sooner when the code does (used, replaced, or the device paired, unpaired or
-forgotten: pairing.py, device_keys.forget). An issued code is written over the last one's key.
+Plaintext, by Nikolai's decision (stateless-renderers.md, "The pairing screen"): every Redis reader on the host can see
+a live code for its ten minutes, the same trust as the config. The key's TTL is the code's own expiry, so it lapses with
+the code; it's removed sooner when the code is used or replaced, or the device is paired, unpaired or forgotten
+(pairing.py, device_keys.forget). An issued code is written over the last one's key.
 
 Redis that can't be asked never stops a code being issued or used: the error's type is logged (never the code, nor a
 failed command's text, which quotes the value), and the key lapses by its TTL or is never there, so a pooled screen

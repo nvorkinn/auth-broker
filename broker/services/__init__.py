@@ -1,1 +1,1 @@
-"""The broker's logic behind its routes: pairing, registration, the screens' names and stops."""
+"""The broker's logic behind its routes: pairing, registration, screens' configs and names, stops and weather."""
