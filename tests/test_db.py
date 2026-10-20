@@ -1,9 +1,11 @@
+import logging
 import sqlite3
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 from threading import Event, Lock
 
 import pytest
+from alembic import command
 from alembic.autogenerate import compare_metadata
 from alembic.migration import MigrationContext
 from alembic.script import ScriptDirectory
@@ -129,12 +131,47 @@ def test_concurrent_app_startup_serializes_migrations(app, monkeypatch):
         first_app = first.result(timeout=10)
         second_app = second.result(timeout=10)
 
-    assert calls == 2
+    # The second start waited for the first's migrations, then found the DB at head and left it alone.
+    assert calls == 1
     assert _current_revision(first_app) == _head_revision(first_app)
     assert _current_revision(second_app) == _head_revision(second_app)
     for started_app in (first_app, second_app):
         with started_app.app_context():
             db.engine.dispose()
+
+
+def _alembic_messages(caplog):
+    return [record.getMessage() for record in caplog.records if record.name.startswith("alembic")]
+
+
+def test_starting_on_a_db_at_head_logs_nothing_from_alembic(app, caplog):
+    """Every `flask` command starts the app; its output shouldn't open with Alembic's "Context impl SQLiteImpl."."""
+    caplog.set_level(logging.INFO)
+
+    again = create_app()
+
+    assert _alembic_messages(caplog) == []
+    with again.app_context():
+        db.engine.dispose()
+
+
+def test_starting_on_a_db_behind_head_migrates_it_and_logs_the_migrations(app, caplog):
+    # Through Alembic's own command, as the app's startup does: `flask db downgrade` would load alembic.ini's logging
+    # config, which stops Alembic's loggers propagating to the root logger, where caplog listens.
+    with app.app_context():
+        config = app.extensions["migrate"].migrate.get_config()
+        config.attributes["app_startup"] = True
+        command.downgrade(config, "0023")
+        db.engine.dispose()
+    caplog.set_level(logging.INFO)
+    caplog.clear()
+
+    again = create_app()
+
+    assert "Running upgrade 0023 -> 0024, " in "\n".join(_alembic_messages(caplog))
+    assert _current_revision(again) == _head_revision(again)
+    with again.app_context():
+        db.engine.dispose()
 
 
 def test_foreign_keys_are_enforced_after_migrating(app):
