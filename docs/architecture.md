@@ -227,7 +227,9 @@ clock (the ESP32 has none), and sent as `Retry-After` on every frame answer.
 - Renders land on the minute, and the screen polls twice as often, 3 s after each half-minute (about :03 and :33), so
   an out-of-cycle render shows within about 30 seconds.
 - A provider whose data is bursty writes a pace hint, `v1:pace:<source>:<id>`, with a short TTL. The developer
-  provider writes 20 s while a release is running. The broker reads the hints for the screen's panels on each poll;
+  provider writes 20 s while a release is running, and the music provider while Spotify plays (it then fetches the
+  track's position, `/me/player/currently-playing`, every 20 s and queues a render after each write; the queue and
+  the rest stay a minute apart). The broker reads the hints for the screen's panels on each poll;
   the shortest live one (at least 20 s) replaces the minute, so the screen polls every 10 s. When the key lapses, the
   screen goes back to the half-minute.
 - A slot under 5 s away is skipped for the next, and every answer starts from the clock again, so network delay never

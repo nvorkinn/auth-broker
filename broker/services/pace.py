@@ -110,11 +110,15 @@ def key(source: str, item_id: str) -> str:
 def hint_keys(config: DeviceConfig | None) -> list[str]:
     """Return the pace keys of the providers behind the screen's own panels.
 
-    Only the developer provider's, while the screen's developer panel is on.
+    The developer provider's while the screen's developer panel is on, and the music provider's while its Spotify is.
     """
-    if config is None or not config.developer_enabled:
+    if config is None:
         return []
-    return [key("developer", config.device_id)]
+    return [
+        key(source, config.device_id)
+        for source, on in (("developer", config.developer_enabled), ("spotify", config.spotify_enabled))
+        if on
+    ]
 
 
 def screen_hints(device_id: str, now: datetime) -> list[Hint]:

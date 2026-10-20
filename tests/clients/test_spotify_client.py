@@ -70,6 +70,35 @@ def test_get_queue_returns_empty_on_204(app, paired_client):
             assert spotify_module.get_queue(device_id) == []
 
 
+def test_get_currently_playing_returns_empty_when_not_linked(app, paired_client):
+    _, device_id, _ = paired_client
+    with app.app_context():
+        assert spotify_module.get_currently_playing(device_id) == {}
+
+
+def test_get_currently_playing_passes_through_spotify_response(app, paired_client):
+    _, device_id, _ = paired_client
+    payload = {"is_playing": True, "progress_ms": 61234, "item": {"id": "tab01", "name": "Espresso"}}
+
+    with app.app_context():
+        _link_spotify(device_id)
+        with patch("broker.clients.spotify.requests.get", return_value=_mock_response(payload)) as mocked:
+            playing = spotify_module.get_currently_playing(device_id)
+
+    assert mocked.call_args.args[0] == "https://api.spotify.com/v1/me/player/currently-playing"
+    assert mocked.call_args.kwargs["headers"] == {"Authorization": "Bearer access"}
+    assert playing == payload
+
+
+def test_get_currently_playing_returns_empty_on_204(app, paired_client):
+    _, device_id, _ = paired_client
+
+    with app.app_context():
+        _link_spotify(device_id)
+        with patch("broker.clients.spotify.requests.get", return_value=_mock_response(status_code=204, content=b"")):
+            assert spotify_module.get_currently_playing(device_id) == {}
+
+
 def test_get_queue_refreshes_expired_token(app, paired_client):
     _, device_id, _ = paired_client
 

@@ -12,7 +12,7 @@ import fakeredis
 import pytest
 import redis
 
-from broker import developer_provider
+from broker import developer_provider, spotify_provider
 from broker.db import db
 from broker.models import DeviceConfig
 from broker.services import pace
@@ -266,12 +266,14 @@ def store(app):
 
 @pytest.fixture
 def screen(app, register_device):
-    """Register a screen; return a function that sets its developer panel and returns its id."""
+    """Register a screen; return a function that sets its bursty panels and returns its id."""
     device_id, _ = register_device()
 
-    def _set(*, developer: bool) -> str:
+    def _set(*, developer: bool = False, spotify: bool = False) -> str:
         with app.app_context():
-            db.session.get(DeviceConfig, device_id).developer_enabled = developer
+            config = db.session.get(DeviceConfig, device_id)
+            config.developer_enabled = developer
+            config.spotify_enabled = spotify
             db.session.commit()
         return device_id
 
@@ -290,6 +292,24 @@ def test_the_developer_panel_has_the_key_the_developer_provider_writes(app, scre
         keys = pace.hint_keys(db.session.get(DeviceConfig, device_id))
 
     assert keys == [developer_provider.pace_key(device_id)] == [f"v1:pace:developer:{device_id}"]
+
+
+def test_the_music_area_has_the_key_the_music_provider_writes(app, screen):
+    device_id = screen(spotify=True)
+
+    with app.app_context():
+        keys = pace.hint_keys(db.session.get(DeviceConfig, device_id))
+
+    assert keys == [spotify_provider.pace_key(device_id)] == [f"v1:pace:spotify:{device_id}"]
+
+
+def test_both_panels_have_both_keys(app, screen):
+    device_id = screen(developer=True, spotify=True)
+
+    with app.app_context():
+        keys = pace.hint_keys(db.session.get(DeviceConfig, device_id))
+
+    assert keys == [f"v1:pace:developer:{device_id}", f"v1:pace:spotify:{device_id}"]
 
 
 def test_a_screen_without_bursty_panels_has_no_keys_and_asks_redis_nothing(app, screen):

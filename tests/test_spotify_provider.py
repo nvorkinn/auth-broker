@@ -24,12 +24,19 @@ from broker.album_art import ART_TTL_S
 from broker.clients import spotify as spotify_client
 from broker.db import db
 from broker.models import AppleMusicPlay, AppleMusicToken, DeviceConfig, SpotifyToken
+from broker.services import render_jobs
+from broker.services.render_jobs import JOBS, SCREENS, queued_key
 from broker.spotify_provider import (
+    BURST_INTERVAL_S,
+    INTERVAL_S,
+    PACE_S,
+    PACE_TTL_S,
     PLAYER_TTL_S,
     TOP_INTERVAL_S,
     TOP_TTL_S,
     MusicProvider,
     next_tick,
+    pace_key,
     player_key,
     top_key,
 )
@@ -55,11 +62,25 @@ def _response(body=None, status_code=200, headers=None):
     return response
 
 
+def playback_answer(*, progress_ms=None, is_playing=None, item=None):
+    """Return Spotify's /me/player/currently-playing answer for the fixture's player: its track and its position."""
+    position = PLAYER["spotify_playback"]
+    return {
+        "item": PLAYER["spotify"]["currently_playing"] if item is None else item,
+        "progress_ms": position["progress_ms"] if progress_ms is None else progress_ms,
+        "is_playing": position["is_playing"] if is_playing is None else is_playing,
+        "currently_playing_type": "track",
+    }
+
+
 class FakeSpotify:
     """Spotify's Web API and token endpoint, as far as the provider calls them, answering from the fixture."""
 
-    def __init__(self, queue=None, *, revoked=frozenset(), top_429=None):
+    def __init__(self, queue=None, *, playback=None, revoked=frozenset(), top_429=None):
         self.queue = PLAYER["spotify"] if queue is None else queue
+        # What /me/player/currently-playing answers: Spotify's own shape, the fixture's track and position by default.
+        # "204" for nothing playing, "fail" for a server error.
+        self.playback = playback_answer() if playback is None else playback
         self.revoked = revoked
         # A 429 for the top lists, with these headers (e.g. {"Retry-After": "120"}), while set.
         self.top_429 = top_429
@@ -70,6 +91,10 @@ class FakeSpotify:
         self.gets.append((url, params))
         if url == f"{SPOTIFY_API}/me/player/queue":
             return _response(None, 204) if self.queue == "204" else _response(self.queue)
+        if url == f"{SPOTIFY_API}/me/player/currently-playing":
+            if self.playback == "fail":
+                return _response({"error": {"status": 500}}, 500)
+            return _response(None, 204) if self.playback == "204" else _response(self.playback)
         if self.top_429 is not None:
             return _response({"error": {"status": 429}}, 429, self.top_429)
         type_ = url.removeprefix(f"{SPOTIFY_API}/me/top/")
@@ -111,9 +136,27 @@ def image_host():
         yield host
 
 
+class Clock:
+    """The provider's clock, which only moves when a test says."""
+
+    def __init__(self, now=FETCHED_AT):
+        self.now = now
+
+    def __call__(self):
+        return self.now
+
+    def advance(self, seconds):
+        self.now += seconds
+
+
 @pytest.fixture
-def provider(app, store):
-    return MusicProvider(app, store, clock=lambda: FETCHED_AT)
+def clock():
+    return Clock()
+
+
+@pytest.fixture
+def provider(app, store, clock):
+    return MusicProvider(app, store, clock=clock)
 
 
 @pytest.fixture
@@ -230,7 +273,7 @@ def test_a_cover_still_playing_is_renewed_each_minute_not_fetched_again(app, bin
     assert binary.ttl(COVERS["spotify"]["key"]) > ART_TTL_S - 5
 
 
-def test_a_cover_that_cant_be_fetched_doesnt_cost_the_player(provider, store, binary, device, image_host):
+def test_a_cover_that_cant_be_fetched_doesnt_cost_the_player(provider, clock, store, binary, device, image_host):
     """The renderer draws the page without it; it's tried again next cycle."""
     device_id = device()
     image_host.replace(responses.GET, COVERS["spotify"]["url"], status=500)
@@ -240,6 +283,7 @@ def test_a_cover_that_cant_be_fetched_doesnt_cost_the_player(provider, store, bi
     assert _stored(store, player_key(device_id))["spotify"] == PLAYER["spotify"]
     assert binary.get(COVERS["spotify"]["key"]) is None
     image_host.replace(responses.GET, COVERS["spotify"]["url"], body=ART, content_type="image/jpeg")
+    clock.advance(INTERVAL_S)
     _run(provider)
     assert binary.get(COVERS["spotify"]["key"]) == ART
 
@@ -375,8 +419,8 @@ def test_one_devices_revoked_token_doesnt_stop_the_others(provider, store, devic
     assert store.get(player_key(revoked)) is None
     assert store.get(top_key(revoked)) is None
     assert _stored(store, player_key(fine)) == {**PLAYER, "apple_music": None}
-    # Only the player's refresh is tried: the top lists would only fail the same way.
-    assert fake.refreshes == ["revoked"]
+    # Only the player's refresh is tried (the position's, then the queue's): the top lists would only fail the same way.
+    assert fake.refreshes == ["revoked", "revoked"]
 
 
 def test_a_failing_service_leaves_the_other_ones_part(provider, store, device, musickit):
@@ -453,10 +497,10 @@ def test_switching_a_service_on_fetches_its_top_lists_at_once(app, provider, sto
     assert _stored(store, top_key(device_id))["apple_music"] == TOP["apple_music"]
 
 
-def test_a_failed_top_fetch_is_tried_again_next_cycle(app, store, device):
+def test_a_failed_top_fetch_is_tried_again_next_cycle(app, store, clock, device):
     """Any failure but a 429 (which waits for Retry-After, see below) is tried again on the next cycle."""
     device_id = device()
-    provider = MusicProvider(app, store, clock=lambda: FETCHED_AT)
+    provider = MusicProvider(app, store, clock=clock)
     failing = FakeSpotify()
     original = failing.get
 
@@ -469,6 +513,7 @@ def test_a_failed_top_fetch_is_tried_again_next_cycle(app, store, device):
     _run(provider, failing)
     assert store.get(top_key(device_id)) is None
 
+    clock.advance(INTERVAL_S)
     _run(provider)
 
     assert _stored(store, top_key(device_id))["spotify"] == TOP["spotify"]
@@ -554,3 +599,207 @@ def test_other_errors_are_not_treated_as_rate_limits():
     assert retry_after(ValueError("boom")) is None
     unreadable = requests.HTTPError("429", response=_response(None, 429, {"Retry-After": "soon"}))
     assert retry_after(unreadable) == spotify_provider.DEFAULT_BACKOFF_S
+
+
+# --- while Spotify plays: the position, every BURST_INTERVAL_S ---------------------------------------------------
+
+
+def _pool(store, *device_ids):
+    """Put screens in the render pool, as services/render_screens.py does."""
+    store.hset(SCREENS, mapping={device_id: f"screen-{device_id}" for device_id in device_ids})
+
+
+def _jobs(store):
+    """Return the render pool's queue, and take its jobs as the pool's worker would (pop, then claim: the flag goes)."""
+    jobs = store.lrange(JOBS, 0, -1)
+    store.delete(JOBS, *(queued_key(device_id) for device_id in jobs))
+    return jobs
+
+
+def _urls(fake):
+    return [url.removeprefix(SPOTIFY_API) for url, _ in fake.gets]
+
+
+def test_the_position_is_stored_with_the_time_it_was_fetched(provider, store, device):
+    device_id = device()
+
+    _run(provider)
+
+    assert _stored(store, player_key(device_id))["spotify_playback"] == PLAYER["spotify_playback"]
+
+
+def test_a_playing_track_asks_for_a_faster_refresh_and_queues_a_render(provider, store, device):
+    device_id = device()
+    _pool(store, device_id)
+
+    _run(provider)
+
+    assert store.get(pace_key(device_id)) == str(PACE_S)
+    assert 0 < store.ttl(pace_key(device_id)) <= PACE_TTL_S
+    assert _jobs(store) == [device_id]
+    assert provider.interval_s() == BURST_INTERVAL_S
+
+
+def test_between_minutes_only_the_position_is_fetched_and_written(provider, clock, store, device):
+    device_id = device()
+    _pool(store, device_id)
+    _run(provider)
+    _jobs(store)
+    clock.advance(BURST_INTERVAL_S)
+    fake = FakeSpotify(playback=playback_answer(progress_ms=81234))
+
+    assert _run(provider, fake) == 1
+
+    assert _urls(fake) == ["/me/player/currently-playing"]
+    stored = _stored(store, player_key(device_id))
+    # The queue is the last full cycle's, with its time; the position is new.
+    assert stored["fetched_at"] == PLAYER["fetched_at"]
+    assert stored["spotify"] == PLAYER["spotify"]
+    assert stored["spotify_playback"] == {
+        "fetched_at": datetime.fromtimestamp(clock(), UTC).isoformat(),
+        "is_playing": True,
+        "progress_ms": 81234,
+        "track_id": "tab01",
+    }
+    assert store.get(pace_key(device_id)) == str(PACE_S)
+    assert _jobs(store) == [device_id]
+
+
+def test_the_minute_fetches_everything_again(provider, clock, store, device):
+    device_id = device()
+    _run(provider)
+    clock.advance(BURST_INTERVAL_S)
+    _run(provider)
+    clock.advance(BURST_INTERVAL_S)
+    _run(provider)
+    clock.advance(BURST_INTERVAL_S)
+    fake = FakeSpotify()
+
+    _run(provider, fake)
+
+    assert _urls(fake)[:2] == ["/me/player/currently-playing", "/me/player/queue"]
+    assert _stored(store, player_key(device_id))["fetched_at"] == datetime.fromtimestamp(clock(), UTC).isoformat()
+
+
+def test_a_new_track_fetches_the_queue_at_once(provider, clock, store, device):
+    device_id = device()
+    _run(provider)
+    clock.advance(BURST_INTERVAL_S)
+    other = {**PLAYER["spotify"]["currently_playing"], "id": "tab02", "name": "Please Please Please"}
+    fake = FakeSpotify(
+        queue={"currently_playing": other, "queue": []}, playback=playback_answer(item=other, progress_ms=900)
+    )
+
+    _run(provider, fake)
+
+    assert "/me/player/queue" in _urls(fake)
+    stored = _stored(store, player_key(device_id))
+    assert stored["spotify"]["currently_playing"]["id"] == "tab02"
+    assert stored["spotify_playback"]["track_id"] == "tab02"
+
+
+def test_paused_ends_the_burst_with_one_last_render(provider, clock, store, device):
+    device_id = device()
+    _pool(store, device_id)
+    _run(provider)
+    _jobs(store)
+    clock.advance(BURST_INTERVAL_S)
+
+    _run(provider, FakeSpotify(playback=playback_answer(is_playing=False)))
+
+    stored = _stored(store, player_key(device_id))
+    assert stored["spotify_playback"]["is_playing"] is False
+    assert store.get(pace_key(device_id)) is None
+    assert _jobs(store) == [device_id]
+    assert provider.interval_s() == INTERVAL_S
+    # And no more renders from this provider while it stays paused.
+    clock.advance(INTERVAL_S)
+    _run(provider, FakeSpotify(playback=playback_answer(is_playing=False)))
+    assert _jobs(store) == []
+
+
+def test_nothing_playing_has_no_position_and_no_pace(provider, store, device):
+    device_id = device()
+    _pool(store, device_id)
+
+    _run(provider, FakeSpotify(queue="204", playback="204"))
+
+    assert _stored(store, player_key(device_id))["spotify_playback"] is None
+    assert store.get(pace_key(device_id)) is None
+    assert _jobs(store) == []
+    assert provider.interval_s() == INTERVAL_S
+
+
+def test_stopping_between_minutes_fetches_the_queue_and_queues_a_last_render(provider, clock, store, device):
+    device_id = device()
+    _pool(store, device_id)
+    _run(provider)
+    _jobs(store)
+    clock.advance(BURST_INTERVAL_S)
+
+    _run(provider, FakeSpotify(queue="204", playback="204"))
+
+    stored = _stored(store, player_key(device_id))
+    assert stored["spotify"] == {"currently_playing": None, "queue": []}
+    assert stored["spotify_playback"] is None
+    assert _jobs(store) == [device_id]
+    assert provider.interval_s() == INTERVAL_S
+
+
+def test_a_position_that_cant_be_fetched_leaves_the_last_one_and_the_pace(provider, clock, store, device):
+    device_id = device()
+    _run(provider)
+    before = store.get(player_key(device_id))
+    clock.advance(BURST_INTERVAL_S)
+
+    assert _run(provider, FakeSpotify(playback="fail")) == 0
+
+    assert store.get(player_key(device_id)) == before
+    assert store.get(pace_key(device_id)) == str(PACE_S)
+    assert provider.interval_s() == BURST_INTERVAL_S
+
+
+def test_an_episode_has_no_position_to_show(provider, store, device):
+    device_id = device()
+
+    _run(provider, FakeSpotify(playback={"item": None, "progress_ms": 5000, "is_playing": True}))
+
+    assert _stored(store, player_key(device_id))["spotify_playback"] is None
+    assert store.get(pace_key(device_id)) is None
+
+
+def test_a_device_no_longer_wanted_stops_the_burst(app, provider, clock, store, device):
+    device_id = device()
+    _run(provider)
+    assert provider.interval_s() == BURST_INTERVAL_S
+    with app.app_context():
+        db.session.get(DeviceConfig, device_id).spotify_enabled = False
+        db.session.commit()
+    clock.advance(BURST_INTERVAL_S)
+
+    _run(provider)
+
+    assert provider.interval_s() == INTERVAL_S
+
+
+def test_apple_music_alone_never_bursts_and_is_fetched_once_a_minute(provider, clock, store, device, musickit):
+    device_id = device(spotify=False, apple_music=True)
+    _run(provider)
+    clock.advance(BURST_INTERVAL_S)
+    fake = FakeSpotify()
+
+    assert _run(provider, fake) == 0
+
+    assert fake.gets == []
+    assert provider.interval_s() == INTERVAL_S
+    assert _stored(store, player_key(device_id))["spotify_playback"] is None
+    assert store.get(pace_key(device_id)) is None
+
+
+def test_a_render_job_that_cant_be_queued_doesnt_cost_the_position(provider, store, device):
+    device_id = device()
+    _pool(store, device_id)
+    with patch.object(render_jobs, "enqueue", side_effect=lambda *_: 0):
+        _run(provider)
+
+    assert _stored(store, player_key(device_id))["spotify_playback"] is not None
