@@ -26,7 +26,13 @@
             <section class="panel pulls-panel" aria-labelledby="pulls-heading">
                 <div class="panel-heading">
                     <h2 id="pulls-heading">Open pull requests <span id="pull-count" class="count">0</span></h2>
-                    <span class="muted">All projects &middot; newest first</span>
+                    <label class="muted pull-order">All projects &middot;
+                        <select id="pull-order">
+                            <option value="newest">Newest first</option>
+                            <option value="oldest">Oldest first</option>
+                            <option value="attention">Attention first</option>
+                        </select>
+                    </label>
                     <button id="refresh-pulls" type="button" title="Refresh only the pull requests of the projects marked Refresh now">Refresh</button>
                 </div>
                 <div id="pulls"><p class="empty">Loading pull requests...</p></div>

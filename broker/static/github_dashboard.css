@@ -32,6 +32,7 @@ button:focus-visible, a:focus-visible, summary:focus-visible { outline: 2px soli
 .panel { min-width: 0; background: var(--card); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
 .panel-heading { padding: 10px 12px; border-bottom: 1px solid var(--border); }
 .panel-heading > .muted { font-size: 11px; }
+.pull-order select { color: var(--text); background: #223047; border: 1px solid #405475; border-radius: 5px; padding: 2px 4px; font: inherit; }
 .count { display: inline-block; color: var(--muted); background: #223047; padding: 0 6px; border-radius: 10px; margin-left: 4px; font-size: 12px; }
 .pull { display: grid; grid-template-columns: minmax(0, 1fr) 116px minmax(0, .9fr); gap: 10px; padding: 10px 12px; border-bottom: 1px solid var(--border); align-items: start; }
 .pull:last-child { border-bottom: 0; }

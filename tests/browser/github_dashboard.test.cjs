@@ -87,7 +87,7 @@ async function harness(initial = active, repositories = [repo], storage = null) 
     let failure = null;
     const calls = [];
     const ids = new Map(["summary", "error", "projects", "refresh", "pulls", "workflows",
-        "pull-count", "workflow-count", "project-count", "refresh-pulls", "refresh-workflows", "hidden-projects"].map(id => [id, new Element("div")]));
+        "pull-count", "workflow-count", "project-count", "refresh-pulls", "refresh-workflows", "hidden-projects", "pull-order"].map(id => [id, new Element("div")]));
     const intervals = [];
     const document = {
         hidden: false,
@@ -700,4 +700,28 @@ test("after New Release, full reads come every 10 seconds until its run appears"
     assert.equal(fullCalls(app).length, 4);
     await steps(app, 5, 10000);
     assert.equal(fullCalls(app).length, 4, "back to once a minute once the run is shown");
+});
+
+test("the PR order can be picked, and is remembered", async () => {
+    const storage = memory();
+    const other = { ...repo, full_name: "alice/another" };
+    const ready = { ...active.pulls[0], number: 2, title: "Ready", mergeable: true, checks: [], created_at: "2026-10-19T08:00:00Z" };
+    const app = await harness(url => url.endsWith("/another") ? { ...idle, pulls: [ready] } : active, [other, repo], storage);
+    const keys = () => app.ids.get("pulls").children.map(row => row.dataset.key);
+    const order = app.ids.get("pull-order");
+    assert.equal(order.value, "newest");
+    assert.deepEqual(keys(), ["alice/another#2", "alice/project#4"]);
+    for (const [value, expected] of [["oldest", ["alice/project#4", "alice/another#2"]],
+        ["attention", ["alice/project#4", "alice/another#2"]], ["newest", ["alice/another#2", "alice/project#4"]]]) {
+        order.value = value;
+        order.listeners.change();
+        assert.deepEqual(keys(), expected, value);
+    }
+    order.value = "oldest";
+    order.listeners.change();
+    assert.equal(JSON.parse(storage.saved[PREFS]).order, "oldest");
+    const again = await harness(active, [repo], storage);
+    assert.equal(again.ids.get("pull-order").value, "oldest");
+    const unknown = await harness(active, [repo], memory({ [PREFS]: JSON.stringify({ order: "constructor" }) }));
+    assert.equal(unknown.ids.get("pull-order").value, "newest");
 });
