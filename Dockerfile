@@ -1,12 +1,12 @@
 # The IP location data the settings page suggests a weather place from (broker/services/geoip.py).
 # Data, not code, so it is fetched once on the build machine whatever platform the image is for.
-FROM --platform=$BUILDPLATFORM python:3.14-slim AS geodata
+FROM --platform=$BUILDPLATFORM python:3.15-slim AS geodata
 COPY scripts/fetch_geodata.py /
 RUN python /fetch_geodata.py /geodata
 
 FROM ghcr.io/astral-sh/uv:0.13.3 AS uv
 
-FROM python:3.14-slim
+FROM python:3.15-slim
 
 WORKDIR /app
 
