@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 
 {% block title %}Countdown{% endblock %}
+{% block container_class %} wide{% endblock %}
 {% block heading %}{% endblock %}
 
 {% block hero %}
@@ -74,262 +75,268 @@
 <form id="displayUnlinkForm" method="POST" action="{{ url_for('pages.display_unlink', device_id=device_id) }}"></form>
 
 <form class="settings" method="POST" action="{{ url_for('pages.device_config', device_id=device_id) }}">
-    <div class="card">
-        <div class="card-header">
-            <h2 class="card-title">General</h2>
-        </div>
-        <div class="form-grid">
-            <fieldset class="form-group" aria-describedby="clock_format_hint">
-                <legend class="form-legend">Clock format</legend>
-                <div class="checkbox-group" style="gap: 20px; flex-wrap: wrap;">
-                    {% for value, label in clock_formats.items() %}
-                        <span class="checkbox-group">
-                            <input type="radio" id="clock_format_{{ value }}" name="clock_format" value="{{ value }}" {% if config.clock_format == value %}checked{% endif %} required>
-                            <label for="clock_format_{{ value }}" style="margin: 0; font-size: 14px; font-weight: normal;">{{ label }}</label>
-                        </span>
-                    {% endfor %}
+    <div class="settings-columns">
+        <div class="settings-column">
+            <div class="card">
+                <div class="card-header">
+                    <h2 class="card-title">General</h2>
                 </div>
-                <p id="clock_format_hint" class="form-hint">Used for all clock times on this screen.</p>
-            </fieldset>
-
-            <fieldset class="form-group" aria-describedby="language_hint">
-                <legend class="form-legend">Language</legend>
-                <div class="checkbox-group" style="gap: 20px; flex-wrap: wrap;">
-                    {% for value, label in languages.items() %}
-                        <span class="checkbox-group">
-                            <input type="radio" id="language_{{ value }}" name="language" value="{{ value }}" {% if config.language == value %}checked{% endif %} required>
-                            <label for="language_{{ value }}" style="margin: 0; font-size: 14px; font-weight: normal;">{{ label }}</label>
-                        </span>
-                    {% endfor %}
-                </div>
-                <p id="language_hint" class="form-hint">The language of your screen's text.</p>
-            </fieldset>
-
-            <!-- A disabled fieldset isn't submitted, so the orientation goes in this hidden input instead. -->
-            <input type="hidden" name="orientation" value="{{ page_orientation }}">
-            <fieldset class="form-group" disabled>
-                <legend class="form-legend">Orientation</legend>
-                <div class="checkbox-group" style="gap: 20px;">
-                    {% for orientation in orientations %}
-                        <span class="checkbox-group">
-                            <input type="radio" id="orientation_{{ orientation }}" name="orientation" value="{{ orientation }}" {% if page_orientation == orientation %}checked{% endif %}>
-                            <label for="orientation_{{ orientation }}" style="margin: 0; font-size: 14px; font-weight: normal;">{{ orientation | capitalize }}</label>
-                        </span>
-                    {% endfor %}
-                </div>
-            </fieldset>
-        </div>
-    </div>
-
-    <div class="card">
-        <div class="card-header">
-            <h2 class="card-title">Style</h2>
-        </div>
-        {{ style_picker("style", "How your screen draws its departures, Spotify and notice board.", styles, config.style, "styles", 360, 396) }}
-    </div>
-
-    <div class="card">
-        <div class="card-header">
-            <h2 class="card-title">Weather</h2>
-        </div>
-        <div class="form-grid">
-            <!-- Typing clears the picked place, so text that wasn't picked (or a browser without JavaScript)
-                 is looked up when saved. -->
-            <div class="form-group">
-                <label for="weather_location">Weather location</label>
-                <div class="search-container" style="margin-bottom: 0;">
-                    <input type="text" id="weather_location" name="weather_location" value="{{ config.weather_place_label or config.weather_location or weather_suggestion or '' }}" placeholder="Search for a town or city" autocomplete="off" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="placeResults" aria-describedby="weather_location_hint">
-                    <span id="placeSpinner" class="search-spinner">Searching…</span>
-                    <div id="placeResults" class="search-results" role="listbox" aria-label="Towns and cities"></div>
-                </div>
-                <input type="hidden" id="weather_place_id" name="weather_place_id" value="{{ config.weather_place_id if config.weather_place_id is not none else '' }}">
-                <p id="weather_location_hint" class="form-hint">Used for the forecast on your screen.{% if config.weather_place_label %} Now: <span id="weather_place_saved">{{ config.weather_place_label }}</span>.{% endif %}{% if weather_suggestion %} Suggested from your location.{% endif %}</p>
-            </div>
-        </div>
-    </div>
-
-    <div class="card">
-        <div class="card-header">
-            <h2 class="card-title">Notice board</h2>
-        </div>
-        <div class="form-grid">
-            <div class="form-group">
-                <label for="postcode">Postcode</label>
-                <input
-                    type="text"
-                    id="postcode"
-                    name="postcode"
-                    value="{{ config.postcode }}"
-                    placeholder="e.g. SW1A 1AA or 0150"
-                    pattern="\s*([A-Za-z]{1,2}[0-9][A-Za-z0-9]?\s*[0-9][A-Za-z]{2}|[0-9]{4})\s*"
-                    title="A UK or Norwegian postcode, e.g. SW1A 1AA or 0150"
-                    autocapitalize="characters"
-                    autocomplete="postal-code"
-                    maxlength="10"
-                    aria-describedby="postcode_hint"
-                >
-                <p id="postcode_hint" class="form-hint">Used for local information on your screen's notice board, in the UK or Norway.</p>
-            </div>
-        </div>
-    </div>
-
-    <div class="card">
-        <div class="card-header">
-            <h2 class="card-title">Departures</h2>
-        </div>
-        <div class="search-container">
-            <input type="text" id="searchInput" class="search-input" placeholder="Search for a station or stop in London or Norway" autocomplete="off">
-            <span id="searchSpinner" class="search-spinner">Searching…</span>
-            <div id="searchResults" class="search-results"></div>
-        </div>
-
-        <input type="hidden" name="stops_order" id="stopsOrderInput" value="{{ stops | map(attribute='id') | join(',') }}">
-
-        <div id="stopsList" class="stops-list">
-            {% if stops %}
-                {% for stop in stops %}
-                    <div class="stop-card" data-id="{{ stop.id }}">
-                        <div class="stop-order">
-                            <span class="order-badge">{{ loop.index }}</span>
-                            {% set icon = MODE_ICONS.get(stop.mode) %}
-                            <div class="mode-icon mode-{{ icon[0] if icon else 'bus' }}">
-                                {% if icon %}{{ icon[1] }}{% else %}{{ stop.letter or '🚌' }}{% endif %}
-                            </div>
-                            <div class="item-text">
-                                <h4>{{ stop.name }}</h4>
-                                <p>
-                                    {% if stop.source == 'entur' and stop.indent %}{{ stop.subtitle.split(' • ')[0] }}{% if stop.lines %} • {% endif %}{% endif %}
-                                    {{ stop.lines | join(', ') }}
-                                    <span class="page-badge">Page {{ ((loop.index0 // 2) + 1) }}</span>
-                                </p>
-                            </div>
+                <div class="form-grid">
+                    <fieldset class="form-group" aria-describedby="clock_format_hint">
+                        <legend class="form-legend">Clock format</legend>
+                        <div class="checkbox-group" style="gap: 20px; flex-wrap: wrap;">
+                            {% for value, label in clock_formats.items() %}
+                                <span class="checkbox-group">
+                                    <input type="radio" id="clock_format_{{ value }}" name="clock_format" value="{{ value }}" {% if config.clock_format == value %}checked{% endif %} required>
+                                    <label for="clock_format_{{ value }}" style="margin: 0; font-size: 14px; font-weight: normal;">{{ label }}</label>
+                                </span>
+                            {% endfor %}
                         </div>
-                        <div class="stop-actions">
-                            <button type="button" class="btn-action btn-move-up" title="Move Up">▲</button>
-                            <button type="button" class="btn-action btn-move-down" title="Move Down">▼</button>
-                            <button type="button" class="btn-action btn-delete" title="Remove">✕</button>
+                        <p id="clock_format_hint" class="form-hint">Used for all clock times on this screen.</p>
+                    </fieldset>
+
+                    <fieldset class="form-group" aria-describedby="language_hint">
+                        <legend class="form-legend">Language</legend>
+                        <div class="checkbox-group" style="gap: 20px; flex-wrap: wrap;">
+                            {% for value, label in languages.items() %}
+                                <span class="checkbox-group">
+                                    <input type="radio" id="language_{{ value }}" name="language" value="{{ value }}" {% if config.language == value %}checked{% endif %} required>
+                                    <label for="language_{{ value }}" style="margin: 0; font-size: 14px; font-weight: normal;">{{ label }}</label>
+                                </span>
+                            {% endfor %}
                         </div>
+                        <p id="language_hint" class="form-hint">The language of your screen's text.</p>
+                    </fieldset>
+
+                    <!-- A disabled fieldset isn't submitted, so the orientation goes in this hidden input instead. -->
+                    <input type="hidden" name="orientation" value="{{ page_orientation }}">
+                    <fieldset class="form-group" disabled>
+                        <legend class="form-legend">Orientation</legend>
+                        <div class="checkbox-group" style="gap: 20px;">
+                            {% for orientation in orientations %}
+                                <span class="checkbox-group">
+                                    <input type="radio" id="orientation_{{ orientation }}" name="orientation" value="{{ orientation }}" {% if page_orientation == orientation %}checked{% endif %}>
+                                    <label for="orientation_{{ orientation }}" style="margin: 0; font-size: 14px; font-weight: normal;">{{ orientation | capitalize }}</label>
+                                </span>
+                            {% endfor %}
+                        </div>
+                    </fieldset>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-header">
+                    <h2 class="card-title">Style</h2>
+                </div>
+                {{ style_picker("style", "How your screen draws its departures, Spotify and notice board.", styles, config.style, "styles", 360, 396) }}
+            </div>
+
+            <div class="card">
+                <div class="card-header">
+                    <h2 class="card-title">Weather</h2>
+                </div>
+                <div class="form-grid">
+                    <!-- Typing clears the picked place, so text that wasn't picked (or a browser without JavaScript)
+                         is looked up when saved. -->
+                    <div class="form-group">
+                        <label for="weather_location">Weather location</label>
+                        <div class="search-container" style="margin-bottom: 0;">
+                            <input type="text" id="weather_location" name="weather_location" value="{{ config.weather_place_label or config.weather_location or weather_suggestion or '' }}" placeholder="Search for a town or city" autocomplete="off" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="placeResults" aria-describedby="weather_location_hint">
+                            <span id="placeSpinner" class="search-spinner">Searching…</span>
+                            <div id="placeResults" class="search-results" role="listbox" aria-label="Towns and cities"></div>
+                        </div>
+                        <input type="hidden" id="weather_place_id" name="weather_place_id" value="{{ config.weather_place_id if config.weather_place_id is not none else '' }}">
+                        <p id="weather_location_hint" class="form-hint">Used for the forecast on your screen.{% if config.weather_place_label %} Now: <span id="weather_place_saved">{{ config.weather_place_label }}</span>.{% endif %}{% if weather_suggestion %} Suggested from your location.{% endif %}</p>
                     </div>
-                {% endfor %}
-            {% else %}
-                <div class="empty-stops">No stops yet.</div>
-            {% endif %}
-        </div>
-    </div>
-
-    <div class="card">
-        <div class="card-header">
-            <h2 class="card-title">Music</h2>
-        </div>
-        <div class="status-row">
-            <div class="checkbox-group">
-                <input type="checkbox" id="spotify_enabled" name="spotify_enabled" {% if config.spotify_enabled %}checked{% endif %}>
-                <label for="spotify_enabled" style="margin: 0; cursor: pointer; font-size: 14px;">Spotify</label>
-            </div>
-            <div class="status-row">
-                {% if spotify_linked %}
-                    <span class="status-pill status-linked">Connected</span>
-                    <button type="submit" form="spotifyDisconnectForm" class="btn-action btn-delete">Disconnect</button>
-                {% else %}
-                    <span class="status-pill status-unlinked">Not connected</span>
-                    <a href="{{ url_for('spotify_oauth.login', device=device_id) }}" class="btn-action" style="text-decoration:none;">Connect</a>
-                {% endif %}
-            </div>
-        </div>
-        {% if apple_music_available or config.apple_music_enabled %}
-            <div class="status-row" style="margin-top: 12px;">
-                <div class="checkbox-group">
-                    <input type="checkbox" id="apple_music_enabled" name="apple_music_enabled" {% if config.apple_music_enabled %}checked{% endif %}>
-                    <label for="apple_music_enabled" style="margin: 0; cursor: pointer; font-size: 14px;">Apple Music</label>
                 </div>
-                {% if apple_music_available %}
+            </div>
+
+            <div class="card">
+                <div class="card-header">
+                    <h2 class="card-title">Notice board</h2>
+                </div>
+                <div class="form-grid">
+                    <div class="form-group">
+                        <label for="postcode">Postcode</label>
+                        <input
+                            type="text"
+                            id="postcode"
+                            name="postcode"
+                            value="{{ config.postcode }}"
+                            placeholder="e.g. SW1A 1AA or 0150"
+                            pattern="\s*([A-Za-z]{1,2}[0-9][A-Za-z0-9]?\s*[0-9][A-Za-z]{2}|[0-9]{4})\s*"
+                            title="A UK or Norwegian postcode, e.g. SW1A 1AA or 0150"
+                            autocapitalize="characters"
+                            autocomplete="postal-code"
+                            maxlength="10"
+                            aria-describedby="postcode_hint"
+                        >
+                        <p id="postcode_hint" class="form-hint">Used for local information on your screen's notice board, in the UK or Norway.</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="settings-column">
+            <div class="card">
+                <div class="card-header">
+                    <h2 class="card-title">Departures</h2>
+                </div>
+                <div class="search-container">
+                    <input type="text" id="searchInput" class="search-input" placeholder="Search for a station or stop in London or Norway" autocomplete="off">
+                    <span id="searchSpinner" class="search-spinner">Searching…</span>
+                    <div id="searchResults" class="search-results"></div>
+                </div>
+
+                <input type="hidden" name="stops_order" id="stopsOrderInput" value="{{ stops | map(attribute='id') | join(',') }}">
+
+                <div id="stopsList" class="stops-list">
+                    {% if stops %}
+                        {% for stop in stops %}
+                            <div class="stop-card" data-id="{{ stop.id }}">
+                                <div class="stop-order">
+                                    <span class="order-badge">{{ loop.index }}</span>
+                                    {% set icon = MODE_ICONS.get(stop.mode) %}
+                                    <div class="mode-icon mode-{{ icon[0] if icon else 'bus' }}">
+                                        {% if icon %}{{ icon[1] }}{% else %}{{ stop.letter or '🚌' }}{% endif %}
+                                    </div>
+                                    <div class="item-text">
+                                        <h4>{{ stop.name }}</h4>
+                                        <p>
+                                            {% if stop.source == 'entur' and stop.indent %}{{ stop.subtitle.split(' • ')[0] }}{% if stop.lines %} • {% endif %}{% endif %}
+                                            {{ stop.lines | join(', ') }}
+                                            <span class="page-badge">Page {{ ((loop.index0 // 2) + 1) }}</span>
+                                        </p>
+                                    </div>
+                                </div>
+                                <div class="stop-actions">
+                                    <button type="button" class="btn-action btn-move-up" title="Move Up">▲</button>
+                                    <button type="button" class="btn-action btn-move-down" title="Move Down">▼</button>
+                                    <button type="button" class="btn-action btn-delete" title="Remove">✕</button>
+                                </div>
+                            </div>
+                        {% endfor %}
+                    {% else %}
+                        <div class="empty-stops">No stops yet.</div>
+                    {% endif %}
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-header">
+                    <h2 class="card-title">Music</h2>
+                </div>
+                <div class="status-row">
+                    <div class="checkbox-group">
+                        <input type="checkbox" id="spotify_enabled" name="spotify_enabled" {% if config.spotify_enabled %}checked{% endif %}>
+                        <label for="spotify_enabled" style="margin: 0; cursor: pointer; font-size: 14px;">Spotify</label>
+                    </div>
                     <div class="status-row">
-                        {% if apple_music_linked %}
+                        {% if spotify_linked %}
                             <span class="status-pill status-linked">Connected</span>
-                            <button type="submit" form="appleMusicDisconnectForm" class="btn-action btn-delete">Disconnect</button>
+                            <button type="submit" form="spotifyDisconnectForm" class="btn-action btn-delete">Disconnect</button>
                         {% else %}
                             <span class="status-pill status-unlinked">Not connected</span>
-                            <button type="button" id="appleMusicConnect" class="btn-action" data-token-url="{{ url_for('apple_music_link.developer_token', device_id=device_id) }}">Connect</button>
+                            <a href="{{ url_for('spotify_oauth.login', device=device_id) }}" class="btn-action" style="text-decoration:none;">Connect</a>
                         {% endif %}
                     </div>
+                </div>
+                {% if apple_music_available or config.apple_music_enabled %}
+                    <div class="status-row" style="margin-top: 12px;">
+                        <div class="checkbox-group">
+                            <input type="checkbox" id="apple_music_enabled" name="apple_music_enabled" {% if config.apple_music_enabled %}checked{% endif %}>
+                            <label for="apple_music_enabled" style="margin: 0; cursor: pointer; font-size: 14px;">Apple Music</label>
+                        </div>
+                        {% if apple_music_available %}
+                            <div class="status-row">
+                                {% if apple_music_linked %}
+                                    <span class="status-pill status-linked">Connected</span>
+                                    <button type="submit" form="appleMusicDisconnectForm" class="btn-action btn-delete">Disconnect</button>
+                                {% else %}
+                                    <span class="status-pill status-unlinked">Not connected</span>
+                                    <button type="button" id="appleMusicConnect" class="btn-action" data-token-url="{{ url_for('apple_music_link.developer_token', device_id=device_id) }}">Connect</button>
+                                {% endif %}
+                            </div>
+                        {% endif %}
+                    </div>
+                    <p id="apple_music_error" class="form-hint" role="alert" hidden></p>
+                    <p class="form-hint">Apple Music shows what you played last, since Apple doesn't share what's playing now. With both on, Spotify shows while it's playing, and the two take turns with their top lists.</p>
                 {% endif %}
             </div>
-            <p id="apple_music_error" class="form-hint" role="alert" hidden></p>
-            <p class="form-hint">Apple Music shows what you played last, since Apple doesn't share what's playing now. With both on, Spotify shows while it's playing, and the two take turns with their top lists.</p>
-        {% endif %}
-    </div>
 
-    <div class="card">
-        <div class="card-header">
-            <h2 class="card-title">Developer</h2>
-        </div>
-        <div class="status-row">
-            <div class="checkbox-group">
-                <input type="checkbox" id="developer_enabled" name="developer_enabled" {% if config.developer_enabled %}checked{% endif %}>
-                <label for="developer_enabled" style="margin: 0; cursor: pointer; font-size: 14px;">Enabled</label>
-            </div>
-            <div class="status-row">
-                {% if github_linked %}
-                    <span class="status-pill status-linked">GitHub connected</span>
-                    <button type="submit" form="githubDisconnectForm" class="btn-action btn-delete">Remove token</button>
-                {% else %}
-                    <span class="status-pill status-unlinked">GitHub not connected</span>
-                {% endif %}
-            </div>
-        </div>
-        <div class="form-group" style="margin-top: 12px;">
-            <label for="github_token">GitHub token</label>
-            <input
-                type="password"
-                id="github_token"
-                name="github_token"
-                placeholder="{{ 'Saved — leave blank to keep it' if github_linked else 'github_pat_…' }}"
-                autocomplete="new-password"
-            >
-            <span class="card-subtitle" style="display: block; margin-top: 6px;">
-                A <a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener">fine-grained token</a>,
-                read-only, for all your repositories: Actions, Contents, Metadata and Pull requests, plus Plan for Copilot usage.
-            </span>
-        </div>
-    </div>
-
-    <div class="card">
-        <div class="card-header">
-            <h2 class="card-title">Energy</h2>
-        </div>
-        <div class="form-grid">
-            <div class="form-group">
-                <label for="glowmarkt_username">Username</label>
-                <input type="text" id="glowmarkt_username" name="glowmarkt_username" value="{{ glowmarkt.username }}" autocomplete="off">
+            <div class="card">
+                <div class="card-header">
+                    <h2 class="card-title">Developer</h2>
+                </div>
+                <div class="status-row">
+                    <div class="checkbox-group">
+                        <input type="checkbox" id="developer_enabled" name="developer_enabled" {% if config.developer_enabled %}checked{% endif %}>
+                        <label for="developer_enabled" style="margin: 0; cursor: pointer; font-size: 14px;">Enabled</label>
+                    </div>
+                    <div class="status-row">
+                        {% if github_linked %}
+                            <span class="status-pill status-linked">GitHub connected</span>
+                            <button type="submit" form="githubDisconnectForm" class="btn-action btn-delete">Remove token</button>
+                        {% else %}
+                            <span class="status-pill status-unlinked">GitHub not connected</span>
+                        {% endif %}
+                    </div>
+                </div>
+                <div class="form-group" style="margin-top: 12px;">
+                    <label for="github_token">GitHub token</label>
+                    <input
+                        type="password"
+                        id="github_token"
+                        name="github_token"
+                        placeholder="{{ 'Saved — leave blank to keep it' if github_linked else 'github_pat_…' }}"
+                        autocomplete="new-password"
+                    >
+                    <span class="card-subtitle" style="display: block; margin-top: 6px;">
+                        A <a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener">fine-grained token</a>,
+                        read-only, for all your repositories: Actions, Contents, Metadata and Pull requests, plus Plan for Copilot usage.
+                    </span>
+                </div>
             </div>
 
-            <div class="form-group">
-                <label for="glowmarkt_password">Password</label>
-                <input
-                    type="password"
-                    id="glowmarkt_password"
-                    name="glowmarkt_password"
-                    placeholder="{{ 'Saved — leave blank to keep it' if glowmarkt.has_password else '' }}"
-                    autocomplete="new-password"
-                >
-            </div>
-        </div>
-    </div>
+            <div class="card">
+                <div class="card-header">
+                    <h2 class="card-title">Energy</h2>
+                </div>
+                <div class="form-grid">
+                    <div class="form-group">
+                        <label for="glowmarkt_username">Username</label>
+                        <input type="text" id="glowmarkt_username" name="glowmarkt_username" value="{{ glowmarkt.username }}" autocomplete="off">
+                    </div>
 
-    <div class="card">
-        <div class="card-header">
-            <h2 class="card-title">Screen</h2>
-        </div>
-        <div class="form-group">
-            <label for="screen_name">Name</label>
-            <input type="text" id="screen_name" name="screen_name" value="{{ screen_name }}" maxlength="{{ name_max }}" placeholder="e.g. Kitchen" autocomplete="off">
-            <p class="card-subtitle">What it's called in the list of your screens. Change it whenever you like.</p>
-        </div>
-        <div class="status-row">
-            <span class="card-subtitle">Screen: {{ 'attached' if display_attached else 'not attached' }}</span>
-            {% if display_attached %}
-                <button type="submit" form="displayUnlinkForm" class="btn-action btn-delete">Unlink screen</button>
-            {% endif %}
+                    <div class="form-group">
+                        <label for="glowmarkt_password">Password</label>
+                        <input
+                            type="password"
+                            id="glowmarkt_password"
+                            name="glowmarkt_password"
+                            placeholder="{{ 'Saved — leave blank to keep it' if glowmarkt.has_password else '' }}"
+                            autocomplete="new-password"
+                        >
+                    </div>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-header">
+                    <h2 class="card-title">Screen</h2>
+                </div>
+                <div class="form-group">
+                    <label for="screen_name">Name</label>
+                    <input type="text" id="screen_name" name="screen_name" value="{{ screen_name }}" maxlength="{{ name_max }}" placeholder="e.g. Kitchen" autocomplete="off">
+                    <p class="card-subtitle">What it's called in the list of your screens. Change it whenever you like.</p>
+                </div>
+                <div class="status-row">
+                    <span class="card-subtitle">Screen: {{ 'attached' if display_attached else 'not attached' }}</span>
+                    {% if display_attached %}
+                        <button type="submit" form="displayUnlinkForm" class="btn-action btn-delete">Unlink screen</button>
+                    {% endif %}
+                </div>
+            </div>
         </div>
     </div>
 

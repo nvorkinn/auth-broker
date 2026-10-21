@@ -250,11 +250,11 @@
             counter-reset: section;
         }
 
-        .settings > .card {
+        .settings-column > .card {
             counter-increment: section;
         }
 
-        .settings > .card > .card-header::before {
+        .settings-column > .card > .card-header::before {
             content: counter(section, decimal-leading-zero) " /";
             display: block;
             margin-bottom: 4px;
@@ -262,6 +262,52 @@
             font-size: 13px;
             color: var(--red);
             letter-spacing: .06em;
+        }
+
+        /* On a wide window a screen's page widens and its sections sit in two columns, in the same order (the
+           first column, then the second), so no card is stretched across the whole window. "See what's on the
+           screen" sits beside the screens' tabs, over the second column, and Save under it. */
+        @media (min-width: 1100px) {
+            .container.wide {
+                max-width: 1280px;
+                display: grid;
+                grid-template-columns: repeat(2, minmax(0, 1fr));
+                column-gap: 24px;
+            }
+
+            .container.wide > * {
+                grid-column: 1 / -1;
+            }
+
+            .container.wide > .screens {
+                grid-column: 1;
+                align-self: center;
+                margin: 0 0 24px;
+            }
+
+            .container.wide > .screen-link {
+                grid-column: 2;
+            }
+
+            .settings-columns {
+                display: grid;
+                grid-template-columns: repeat(2, minmax(0, 1fr));
+                column-gap: 24px;
+                align-items: start;
+            }
+
+            .container.wide .save-bar {
+                display: flex;
+                justify-content: flex-end;
+            }
+
+            .container.wide .save-bar .btn-save {
+                width: calc((100% - 24px) / 2);
+            }
+
+            .container.wide .hero-lede {
+                max-width: 64ch;
+            }
         }
 
         @media (max-width: 680px) {
@@ -849,7 +895,7 @@
     </style>
 </head>
 <body>
-    <div class="container">
+    <div class="container{% block container_class %}{% endblock %}">
         <header>
             <div class="brand">
                 <img class="brand-logo" src="{{ url_for('static', filename='countdown-pill.svg') }}" alt="Countdown" width="172" height="34">
