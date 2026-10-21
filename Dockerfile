@@ -4,7 +4,7 @@ FROM --platform=$BUILDPLATFORM python:3.15-slim AS geodata
 COPY scripts/fetch_geodata.py /
 RUN python /fetch_geodata.py /geodata
 
-FROM ghcr.io/astral-sh/uv:0.13.3 AS uv
+FROM ghcr.io/astral-sh/uv:0.13.4 AS uv
 
 FROM python:3.15-slim
 
