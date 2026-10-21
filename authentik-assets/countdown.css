@@ -1,0 +1,274 @@
+/* Countdown's sign-in: the login box drawn as the e-paper screen itself, on a wall.
+
+   Terraform sets this as the nikolaivorkinn.com brand's custom CSS (terraform/login.tf). Authentik puts a brand's
+   CSS in the page and in every component's shadow root, admin and user pages too, so every rule here names a part
+   only the flow pages have: the login layout (.pf-c-login*), a stage's card (ak-flow-card) or the page holding a
+   flow (body:has(ak-flow-executor)). A selector can't reach into another component's shadow root, so each rule
+   names parts of a single component; custom properties do inherit through them, which is how the screen's size
+   reaches the form.
+
+   Flows in compatibility mode (the passkey and Google ones) have no real shadow roots: everything is in the page,
+   each slotted part moved to where its slot is, and the page's copy of this CSS is the only one. Authentik writes
+   that copy with the less-than, greater-than and ampersand characters escaped, which breaks any rule using them,
+   so the rules here use descendant selectors only: those match both ways.
+
+   The screen's pictures, the wallpaper and the fonts are in this folder (authentik-assets/, served at
+   /static/dist/assets/countdown/). On a screen at least 900 x 640 the box is the whole 800 x 480 display, and on a
+   smaller one the display hung portrait; either way the screen's picture has its arrivals panel blank under its
+   first two departures, and the form's rows carry on from there. Stages that don't fit there get the screen's grey
+   paper and bezel around Authentik's usual box. */
+
+@font-face { font-family: "Countdown Ubuntu"; font-weight: 400; font-display: swap; src: url("/static/dist/assets/countdown/Ubuntu-Regular.woff2") format("woff2"); }
+@font-face { font-family: "Countdown Ubuntu"; font-weight: 500; font-display: swap; src: url("/static/dist/assets/countdown/Ubuntu-Medium.woff2") format("woff2"); }
+@font-face { font-family: "Countdown Ubuntu"; font-weight: 700; font-display: swap; src: url("/static/dist/assets/countdown/Ubuntu-Bold.woff2") format("woff2"); }
+
+/* ---- The wall ---- */
+
+/* Every flow gets the wallpaper, whatever background the flow itself names, and a phone too: Authentik leaves the
+   picture off on narrow screens and paints the page white. */
+body:has(ak-flow-executor) {
+  background: #dcdcd5 url("/static/dist/assets/countdown/wallpaper.jpg") center / cover no-repeat !important;
+}
+body:has(ak-flow-executor)::before { background-image: url("/static/dist/assets/countdown/wallpaper.jpg") !important; }
+.pf-c-login { --ak-c-login--BackgroundColorOverlay: transparent !important; }
+.pf-c-login::before { background: transparent !important; }
+
+.pf-c-login {
+  --cd-ink: #141517;
+  --cd-epaper: #d3d5d4;  /* the panel's white, as e-paper looks */
+  --cd-bezel: #1d1e20;
+  --cd-wall-ink: #6f7276;
+  --cd-font: "Countdown Ubuntu", "Ubuntu", system-ui, sans-serif;
+  font-family: var(--cd-font);
+}
+
+/* "Powered by authentik" and the language picker are on the wall. */
+.pf-c-login__footer, .pf-c-login ak-locale-select { color: var(--cd-wall-ink) !important; text-shadow: none !important; }
+ak-flow-executor ak-brand-links :is(a, li) { color: var(--cd-wall-ink) !important; text-shadow: none !important; }
+
+/* ---- The screen ---- */
+
+/* Grey e-paper in a black bezel, rounded, with a soft shadow below, a little glare on the glass and the logo on
+   the bezel's bottom edge like a maker's badge. The logo's own header row goes: the badge stands in for it. */
+.pf-c-login__main {
+  --cd-bezel-width: 16px;
+  --cd-bezel-bottom: calc(var(--cd-bezel-width) + 10px);
+  /* One pixel of the screen's own 800 x 480 picture, and the form's unit, which sizes its rows like the screen's. */
+  --cd-px: 1.25px;
+  --cd-u: var(--cd-px);
+  --cd-bar: calc(var(--cd-u) * 4);
+  position: relative;
+  color: var(--cd-ink);
+  background-color: var(--cd-epaper) !important;
+  border: solid var(--cd-bezel) !important;
+  border-width: var(--cd-bezel-width) var(--cd-bezel-width) var(--cd-bezel-bottom) !important;
+  border-radius: calc(var(--cd-bezel-width) * .6) !important;
+  box-shadow: 0 60px 90px -40px rgba(0, 0, 0, .55), 0 20px 30px -20px rgba(0, 0, 0, .4) !important;
+}
+.pf-c-login__main::before {
+  content: ""; position: absolute; inset: 0; z-index: 1; pointer-events: none;
+  background: linear-gradient(115deg, rgba(255, 255, 255, .2), transparent 35%);
+}
+.pf-c-login__main::after {
+  content: ""; position: absolute; left: 50%; bottom: calc((var(--cd-bezel-bottom) + 17px) / -2); transform: translateX(-50%);
+  width: 84px; height: 17px;
+  background: url("/static/dist/assets/countdown/countdown-pill.svg") center / contain no-repeat;
+}
+.pf-c-login__main-header.pf-c-brand { display: none !important; }
+
+/* The stages whose form fits the arrivals panel: the box is the whole display, its picture the background. */
+.pf-c-login__main:has(ak-stage-identification, ak-stage-password) {
+  width: var(--cd-w) !important; max-width: none !important; box-sizing: content-box;
+  margin-inline: auto !important; padding: 0 !important;
+  background: var(--cd-epaper) url("/static/dist/assets/countdown/screen-landscape.png") top left / 100% 100% no-repeat !important;
+  background-blend-mode: multiply !important;
+  /* The picture's paper, so a form that runs past the blank panel (an error, say) covers the picture cleanly. */
+  --cd-stage-paper: var(--cd-epaper);
+}
+@media (min-width: 900px) and (min-height: 640px) {
+  .pf-c-login:has(.pf-c-login__main :is(ak-stage-identification, ak-stage-password)) {
+    grid-template-columns: 1fr [main] auto 1fr !important;
+  }
+  .pf-c-login__main:has(ak-stage-identification, ak-stage-password) {
+    --cd-w: min(1000px, 86vw, calc((100vh - 170px) * 800 / 480));
+    --cd-px: calc(var(--cd-w) / 800);
+    --cd-bezel-width: calc(var(--cd-w) * .028);
+    aspect-ratio: 800 / 480;
+  }
+  /* The rows start under the picture's two departures at each stop (y 107) and keep to the panel (x 5-546). */
+  .pf-c-login__main :is(ak-stage-identification, ak-stage-password) {
+    margin: calc(var(--cd-px) * 107 + 1px) 0 0 calc(var(--cd-px) * 5) !important; padding: 0 !important;
+    width: calc(var(--cd-px) * 541); background: var(--cd-stage-paper);
+  }
+}
+/* Phones and small windows: the display hung portrait, one stop across it, its type 1.3 times the usual so it
+   reads at this size; the form's rows to the same scale. */
+@media not ((min-width: 900px) and (min-height: 640px)) {
+  .pf-c-login__main { --cd-bezel-width: 12px; margin-inline: 12px !important; }
+  .pf-c-login__main:has(ak-stage-identification, ak-stage-password) {
+    --cd-w: min(100vw - 52px, 480px, calc((100svh - 160px) * 480 / 800));
+    --cd-px: calc(var(--cd-w) / 480);
+    --cd-u: calc(var(--cd-px) * 1.3);
+    --cd-bar: calc(var(--cd-px) * 5);
+    --cd-bezel-width: 14px;
+    aspect-ratio: 480 / 800; align-self: center;
+    background-image: url("/static/dist/assets/countdown/screen-portrait.png") !important;
+  }
+  .pf-c-login__main :is(ak-stage-identification, ak-stage-password) {
+    margin: calc(var(--cd-px) * 337 + 1px) 0 0 calc(var(--cd-px) * 5) !important; padding: 0 !important;
+    width: calc(var(--cd-px) * 470); background: var(--cd-stage-paper);
+  }
+}
+
+/* ---- A stage's card ---- */
+
+/* Authentik also puts a stage's card in the user settings page, so the rules for what's in a card name a card in
+   a flow's stage, which the flow marks part="challenge": from the stage's own shadow root (:host), and in
+   compatibility mode from the page. Only a flow's card has a header, so the card's own parts go by that. */
+
+/* The title is the stop's name with a thick rule under it, as the screen heads a panel. On the display, the
+   picture's own stop header stands in for it, so it's kept for screen readers only. */
+.pf-c-login__main-header {
+  padding: 0 0 calc(var(--cd-u) * 6) !important; margin: 0 0 calc(var(--cd-u) * 4) !important;
+  border-bottom: calc(var(--cd-u) * 2.4) solid var(--cd-ink);
+}
+.pf-c-login__main-header .pf-c-title {
+  font: 500 max(22px, calc(var(--cd-u) * 18)) / 1.2 var(--cd-font) !important; color: var(--cd-ink) !important; text-align: left;
+}
+.pf-c-login__main-header { position: var(--cd-title-position, static); clip-path: var(--cd-title-clip, none); }
+.pf-c-login__main:has(ak-stage-identification, ak-stage-password) {
+  --cd-title-position: absolute; --cd-title-clip: inset(50%);
+}
+.pf-c-login__main-header ~ :is(.pf-c-login__main-body, .pf-c-login__main-footer) { margin: 0 !important; padding: 0 !important; gap: 0 !important; }
+
+/* Rows: each field is a departure, numbered where the route goes, the box where the destination goes and its name
+   in small type under it, as "then 9, 16 min" sits under a destination. The black bar is painted, not a border:
+   Chrome rounds border widths down to whole pixels, and on a phone the picture's bars are 3.56px wide. */
+:host([part="challenge"]) ak-flow-card .pf-c-form,
+[part="challenge"] ak-flow-card .pf-c-form { counter-reset: row; gap: 0 !important; font-family: var(--cd-font); color: var(--cd-ink); }
+:host([part="challenge"]) ak-flow-card .pf-c-form :is(.pf-c-form__group:not(.pf-m-action, .pf-c-form__group .pf-c-form__group), ak-form-static[username]),
+[part="challenge"] ak-flow-card .pf-c-form :is(.pf-c-form__group:not(.pf-m-action, .pf-c-form__group .pf-c-form__group), ak-form-static[username]) {
+  counter-increment: row;
+  display: grid !important; grid-template-columns: auto minmax(0, 1fr); align-items: baseline;
+  column-gap: calc(var(--cd-u) * 10) !important; row-gap: 0;
+  margin: 0 !important; padding: calc(var(--cd-u) * 5) 0 calc(var(--cd-u) * 4) calc(var(--cd-bar) + var(--cd-u) * 7) !important;
+  border: 0 !important; border-bottom: 1px solid var(--cd-ink) !important;
+  background: linear-gradient(var(--cd-ink), var(--cd-ink)) left top / var(--cd-bar) 100% no-repeat !important;
+}
+:host([part="challenge"]) ak-flow-card .pf-c-form :is(.pf-c-form__group:not(.pf-m-action, .pf-c-form__group .pf-c-form__group), ak-form-static[username])::before,
+[part="challenge"] ak-flow-card .pf-c-form :is(.pf-c-form__group:not(.pf-m-action, .pf-c-form__group .pf-c-form__group), ak-form-static[username])::before {
+  content: counter(row); grid-column: 1; grid-row: 1;
+  font: 700 max(15px, calc(var(--cd-u) * 17.5)) / 1 var(--cd-font); color: var(--cd-ink);
+}
+/* The box takes the row's first free place, beside the number; its name and any error go under them. */
+:host([part="challenge"]) ak-flow-card .pf-c-form .pf-c-form__group .pf-c-form__label,
+[part="challenge"] ak-flow-card .pf-c-form .pf-c-form__group .pf-c-form__label {
+  grid-column: 1 / -1; grid-row: 2; margin: calc(var(--cd-u) * 2) 0 0 !important; padding: 0 !important;
+}
+:host([part="challenge"]) ak-flow-card .pf-c-form .pf-c-form__group .pf-c-form__helper-text,
+[part="challenge"] ak-flow-card .pf-c-form .pf-c-form__group .pf-c-form__helper-text { grid-column: 1 / -1; }
+:host([part="challenge"]) ak-flow-card .pf-c-form .pf-c-form__group :is(.pf-c-form__label, .pf-c-form__label-text),
+[part="challenge"] ak-flow-card .pf-c-form .pf-c-form__group :is(.pf-c-form__label, .pf-c-form__label-text) {
+  font: 400 max(11px, calc(var(--cd-u) * 10.5)) var(--cd-font) !important; color: var(--cd-ink) !important; letter-spacing: 0;
+}
+:host([part="challenge"]) ak-flow-card .pf-c-form .pf-c-form__label-text::after,
+[part="challenge"] ak-flow-card .pf-c-form .pf-c-form__label-text::after,
+:host([part="challenge"]) ak-flow-card .pf-c-form .pf-c-form__label-required,
+[part="challenge"] ak-flow-card .pf-c-form .pf-c-form__label-required { content: none !important; display: none !important; }
+:host([part="challenge"]) ak-flow-card .pf-c-form .pf-c-form__group .pf-c-form__group,
+[part="challenge"] ak-flow-card .pf-c-form .pf-c-form__group .pf-c-form__group { display: block; min-width: 0; margin: 0 !important; padding: 0; border: 0; background: none; }
+/* The box is the destination: no frame of its own, and no text in it (its name is under it). 16px at least, or
+   iPhones zoom in on it. */
+:host([part="challenge"]) ak-flow-card .pf-c-form .pf-c-form-control,
+[part="challenge"] ak-flow-card .pf-c-form .pf-c-form-control {
+  width: 100%; min-width: 0; margin: 0 !important; height: auto !important; padding: calc(var(--cd-u) * 2) 0 !important;
+  font: 500 max(16px, calc(var(--cd-u) * 15)) var(--cd-font) !important; color: var(--cd-ink) !important;
+  background: transparent !important; border: 0 !important; border-bottom: 1px solid rgba(20, 21, 23, .4) !important;
+  border-radius: 0 !important; box-shadow: none !important; outline: none !important;
+}
+:host([part="challenge"]) ak-flow-card .pf-c-form .pf-c-form-control:focus,
+[part="challenge"] ak-flow-card .pf-c-form .pf-c-form-control:focus { border-bottom-color: var(--cd-ink) !important; }
+:host([part="challenge"]) ak-flow-card .pf-c-form .pf-c-form-control::placeholder,
+[part="challenge"] ak-flow-card .pf-c-form .pf-c-form-control::placeholder { color: transparent !important; }
+:host([part="challenge"]) ak-flow-card .pf-c-form .pf-c-input-group,
+[part="challenge"] ak-flow-card .pf-c-form .pf-c-input-group { background: transparent !important; }
+:host([part="challenge"]) ak-flow-card .pf-c-form .pf-c-form__helper-text,
+[part="challenge"] ak-flow-card .pf-c-form .pf-c-form__helper-text { font: 400 max(12px, calc(var(--cd-u) * 10)) var(--cd-font); color: var(--cd-ink); }
+/* The signed-in user's row: the avatar and name where the destination goes, "Not you?" where the minutes go.
+   E-paper has no colour, so the avatar goes black and white. */
+:host([part="challenge"]) ak-flow-card .pf-c-form ak-form-static[username],
+[part="challenge"] ak-flow-card .pf-c-form ak-form-static[username] { grid-template-columns: auto minmax(0, 1fr) !important; align-items: center !important; filter: grayscale(1) contrast(1.4); }
+:host([part="challenge"]) ak-flow-card .pf-c-form ak-form-static[username]::before,
+[part="challenge"] ak-flow-card .pf-c-form ak-form-static[username]::before { align-self: center; }
+
+/* The button is the next departure as the hero style draws it: a black row, its name on the left and an arrow
+   where "2 min" goes. */
+:host([part="challenge"]) ak-flow-card .pf-c-form .pf-c-form__group.pf-m-action,
+[part="challenge"] ak-flow-card .pf-c-form .pf-c-form__group.pf-m-action { margin: calc(var(--cd-u) * 7) 0 0 !important; padding: 0 !important; }
+:host([part="challenge"]) ak-flow-card .pf-c-button.pf-m-primary,
+[part="challenge"] ak-flow-card .pf-c-button.pf-m-primary {
+  position: relative; display: flex !important; align-items: center !important; justify-content: flex-start !important;
+  width: 100%; padding: calc(var(--cd-u) * 6) calc(var(--cd-u) * 11) !important;
+  font: 500 max(16px, calc(var(--cd-u) * 15)) var(--cd-font) !important; letter-spacing: 0; text-align: left;
+  color: #fff !important; background: var(--cd-ink) !important; border: 0 !important; border-radius: 0 !important;
+}
+:host([part="challenge"]) ak-flow-card .pf-c-button.pf-m-primary::after,
+[part="challenge"] ak-flow-card .pf-c-button.pf-m-primary::after {
+  content: "→"; position: absolute; inset: 50% calc(var(--cd-u) * 11) auto auto; transform: translateY(-52%);
+  border: 0 !important; font: 700 max(18px, calc(var(--cd-u) * 17)) var(--cd-font);
+}
+/* The other ways in (a security key, Google) are the rows after it: the same row outlined, not filled. */
+:host([part="challenge"]) ak-flow-card .pf-c-button.pf-m-secondary,
+[part="challenge"] ak-flow-card .pf-c-button.pf-m-secondary,
+:host([part="challenge"]) ak-flow-card .pf-c-button.source-button,
+[part="challenge"] ak-flow-card .pf-c-button.source-button {
+  position: relative; display: flex !important; align-items: center !important; justify-content: flex-start !important; gap: calc(var(--cd-u) * 8);
+  width: 100%; margin: calc(var(--cd-u) * 5) 0 0 !important; padding: calc(var(--cd-u) * 4) calc(var(--cd-u) * 11) !important;
+  font: 500 max(14px, calc(var(--cd-u) * 12.5)) var(--cd-font) !important; letter-spacing: 0; text-align: left; text-decoration: none !important;
+  color: var(--cd-ink) !important; background: transparent !important;
+  border: 1.5px solid var(--cd-ink) !important; border-radius: 0 !important;
+}
+:host([part="challenge"]) ak-flow-card .pf-c-button.pf-m-secondary::before,
+[part="challenge"] ak-flow-card .pf-c-button.pf-m-secondary::before { content: none !important; }
+:host([part="challenge"]) ak-flow-card .pf-c-button.pf-m-secondary::after,
+[part="challenge"] ak-flow-card .pf-c-button.pf-m-secondary::after,
+:host([part="challenge"]) ak-flow-card .pf-c-button.source-button::after,
+[part="challenge"] ak-flow-card .pf-c-button.source-button::after {
+  content: "→"; position: absolute; inset: 50% calc(var(--cd-u) * 11) auto auto; transform: translateY(-52%);
+  border: 0 !important; font: 700 max(16px, calc(var(--cd-u) * 14)) var(--cd-font);
+}
+/* A source's button is only its icon; its name is in the label. */
+:host([part="challenge"]) ak-flow-card .pf-c-button.source-button::before,
+[part="challenge"] ak-flow-card .pf-c-button.source-button::before { content: attr(aria-label); order: 1; }
+:host([part="challenge"]) ak-flow-card .pf-c-button.source-button .pf-c-button__icon,
+[part="challenge"] ak-flow-card .pf-c-button.source-button .pf-c-button__icon { margin: 0 !important; filter: grayscale(1); }
+:host([part="challenge"]) ak-flow-card .pf-c-button.source-button img,
+[part="challenge"] ak-flow-card .pf-c-button.source-button img { width: max(16px, calc(var(--cd-u) * 13)); height: auto; display: block; }
+:host([part="challenge"]) ak-flow-card [slot="footer"],
+[part="challenge"] ak-flow-card [slot="footer"] { display: block !important; margin: 0 !important; padding: 0 !important; border: 0; }
+/* "Or" between the button and the other ways in: the rows say that already. */
+:host([part="challenge"]) ak-flow-card .pf-c-form ak-divider,
+[part="challenge"] ak-flow-card .pf-c-form ak-divider { display: none !important; }
+
+/* Sign up and Forgot: small print at the panel's foot. */
+:host([part="challenge"]) ak-flow-card .pf-c-login__main-footer-band,
+[part="challenge"] ak-flow-card .pf-c-login__main-footer-band {
+  display: flex !important; flex-wrap: wrap; justify-content: space-between; gap: 0 calc(var(--cd-u) * 12);
+  margin: calc(var(--cd-u) * 6) 0 0 !important; padding: 0 !important; border: 0 !important; background: none !important;
+  font: 400 max(12px, calc(var(--cd-u) * 10.5)) var(--cd-font); color: var(--cd-ink);
+}
+:host([part="challenge"]) ak-flow-card .pf-c-login__main-footer-band .pf-c-login__main-footer-band-item,
+[part="challenge"] ak-flow-card .pf-c-login__main-footer-band .pf-c-login__main-footer-band-item { margin: 0 !important; padding: 0 !important; text-align: left; }
+:host([part="challenge"]) ak-flow-card a,
+[part="challenge"] ak-flow-card a { color: var(--cd-ink) !important; text-underline-offset: 2px; }
+
+/* ---- Stages in Authentik's own box (a passkey prompt, sign-up's fields, an email sent, a consent...) ---- */
+/* The same grey paper and bezel, with the rows, title and buttons above at their usual size. */
+.pf-c-login__main:not(:has(ak-stage-identification, ak-stage-password)) {
+  padding: 22px 28px 28px !important;
+}
+@media not ((min-width: 900px) and (min-height: 640px)) {
+  .pf-c-login__main:not(:has(ak-stage-identification, ak-stage-password)) {
+    --cd-px: 1.1px; padding: 18px 18px 24px !important;
+  }
+}

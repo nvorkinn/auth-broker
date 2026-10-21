@@ -12,7 +12,8 @@ main.tf        (empty: the resources are in the files below)
 imports.tf     id lookups and `local.ids`, for the import blocks next to each resource
 recovery.tf    the password recovery flow and its stages
 enrollment.tf  the sign-up flow and its stages, and the policy that gates it (policies/)
-login.tf       the login flow's title, passkey login, the brands
+login.tf       the login flow's title, passkey login, the brands and the sign-in's look
+               (its CSS, pictures and fonts are in ../authentik-assets/)
 passwordless.tf  the passkey-only sign-in flow linked from the login screen
 google.tf      the Google login source and its two flows
 bindings.tf    which stages each flow runs, and the policy bindings

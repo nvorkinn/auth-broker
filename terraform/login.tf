@@ -92,12 +92,17 @@ import {
   id = local.ids.brands["authentik-default"]
 }
 
+# The sign-in's look: the wallpaper and the CSS that draws the login box as the Countdown screen, both shipped in
+# authentik-assets/ (served at /static/dist/assets/countdown/, deployed with the authentik service). The CSS also
+# puts the wallpaper behind every flow, whatever background the flow names. Authentik keeps the CSS without its
+# final newline, so it's chomped here, or every plan would show it changed.
 resource "authentik_brand" "nikolaivorkinn" {
   domain                           = "nikolaivorkinn.com"
   branding_title                   = "Countdown"
   branding_logo                    = "/static/dist/assets/countdown/countdown-pill.svg"
   branding_favicon                 = "countdown-favicon.svg.svg"
-  branding_default_flow_background = "820461.jpg"
+  branding_default_flow_background = "/static/dist/assets/countdown/wallpaper.jpg"
+  branding_custom_css              = chomp(file("${path.module}/../authentik-assets/countdown.css"))
   flow_authentication              = authentik_flow.authentication.uuid
   flow_recovery                    = authentik_flow.recovery.uuid
 }

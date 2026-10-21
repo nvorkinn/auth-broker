@@ -89,11 +89,16 @@ fi
   cp "$bundle/docker-compose.yml" docker-compose.yml.tmp
   mv docker-compose.yml.tmp docker-compose.yml
   # authentik-assets/ is the server's public static mount (brand assets
-  # only); made here so Docker doesn't create it root-owned.
+  # only); made here so Docker doesn't create it root-owned. The authentik
+  # deploy ships the bundle's whole folder into it, each file copied then
+  # mv'd so the server never serves a half-written one.
   mkdir -p authentik-assets
   if [ "$service" = authentik ]; then
-    cp "$bundle/authentik-assets/countdown-pill.svg" authentik-assets/.countdown-pill.svg.tmp
-    mv authentik-assets/.countdown-pill.svg.tmp authentik-assets/countdown-pill.svg
+    for asset in "$bundle"/authentik-assets/*; do
+      name="$(basename "$asset")"
+      cp "$asset" "authentik-assets/.$name.tmp"
+      mv "authentik-assets/.$name.tmp" "authentik-assets/$name"
+    done
   fi
   # Keep only the version pins: secrets are in the *.env files and settings
   # in the compose file.
