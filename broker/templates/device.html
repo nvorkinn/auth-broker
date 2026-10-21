@@ -3,6 +3,30 @@
 {% block title %}Countdown{% endblock %}
 {% block heading %}{% endblock %}
 
+{% block hero %}
+<section class="hero">
+    <div>
+        <p class="kicker">Your screen</p>
+        <h1>{{ screen_label }}</h1>
+        <p class="hero-lede">Departures, weather, notices and music on 7.5 inches of e-paper. Change anything here and the screen picks it up on its next refresh.</p>
+        <ul class="chips" aria-label="Current settings">
+            <li>{{ styles[config.style][0] }}</li>
+            <li>{{ languages[config.language] }}</li>
+            <li>{{ stops | length }} {{ 'stop' if stops | length == 1 else 'stops' }}</li>
+            {# "24-hour (13:00)" without its example. #}
+            <li>{{ clock_formats[config.clock_format].split(' (')[0] }}</li>
+        </ul>
+    </div>
+    <a class="bezel{% if frame_height > frame_width %} upright{% endif %}" href="{{ url_for('pages.screen_view', device_id=device_id) }}" aria-label="See what's on the screen">
+        {% if has_frame %}
+            <img src="{{ url_for('pages.screen_frame', device_id=device_id) }}" alt="" width="{{ frame_width }}" height="{{ frame_height }}">
+        {% else %}
+            <span class="bezel-empty" style="aspect-ratio: {{ frame_width }} / {{ frame_height }}">No picture yet</span>
+        {% endif %}
+    </a>
+</section>
+{% endblock %}
+
 {% block content %}
 {% macro style_picker(field, hint, styles, chosen, folder, width, height) %}
         <fieldset class="form-group style-picker" aria-describedby="{{ field }}_hint">
@@ -49,7 +73,7 @@
 <form id="githubDisconnectForm" method="POST" action="{{ url_for('pages.github_disconnect', device_id=device_id) }}"></form>
 <form id="displayUnlinkForm" method="POST" action="{{ url_for('pages.display_unlink', device_id=device_id) }}"></form>
 
-<form method="POST" action="{{ url_for('pages.device_config', device_id=device_id) }}">
+<form class="settings" method="POST" action="{{ url_for('pages.device_config', device_id=device_id) }}">
     <div class="card">
         <div class="card-header">
             <h2 class="card-title">General</h2>
@@ -309,7 +333,9 @@
         </div>
     </div>
 
-    <button type="submit" class="btn-save">Save</button>
+    <div class="save-bar">
+        <button type="submit" class="btn-save">Save</button>
+    </div>
 </form>
 
 <script>

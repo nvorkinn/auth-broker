@@ -1,4 +1,5 @@
 import re
+from pathlib import Path
 from unittest.mock import MagicMock, Mock, patch
 
 import pytest
@@ -42,6 +43,17 @@ def _mock_get(json_data, status_code=200):
     response.json.return_value = json_data
     response.raise_for_status = Mock()
     return response
+
+
+REPO = Path(__file__).parents[2]
+
+
+def test_pages_show_the_logo_the_sign_in_shows(client):
+    """The header's pill is a copy of the one Authentik serves (authentik-assets/), so the two can't drift apart."""
+    logo = REPO / "broker" / "static" / "countdown-pill.svg"
+
+    assert logo.read_bytes() == (REPO / "authentik-assets" / "countdown-pill.svg").read_bytes()
+    assert 'src="/static/countdown-pill.svg" alt="Countdown"' in client.get("/pair").get_data(as_text=True)
 
 
 def test_index_redirects_to_pair_when_unpaired(client):

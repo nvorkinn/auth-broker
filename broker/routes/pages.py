@@ -362,8 +362,7 @@ def screen_view() -> ResponseReturnValue:
     """Show the screen's latest frame, and say how often the page checks for a new one (the screen's own poll rate)."""
     config = db.session.get(DeviceConfig, g.device_id)
     shown = frame_record.head(g.device_id)
-    upright = config.orientation != "horizontal"
-    width, height = (frame_image.HEIGHT, frame_image.WIDTH) if upright else (frame_image.WIDTH, frame_image.HEIGHT)
+    width, height = _frame_size(config)
     now = pace.clock()
     return render_template(
         "screen.html",
@@ -375,6 +374,12 @@ def screen_view() -> ResponseReturnValue:
         width=width,
         height=height,
     )
+
+
+def _frame_size(config: DeviceConfig) -> tuple[int, int]:
+    """Return the width and height of a screen's frame as the pages show it: upright, unless it's hung horizontally."""
+    upright = config.orientation != "horizontal"
+    return (frame_image.HEIGHT, frame_image.WIDTH) if upright else (frame_image.WIDTH, frame_image.HEIGHT)
 
 
 @bp.get("/device/screen/frame.png", defaults={"device_id": None})
@@ -414,6 +419,8 @@ def _render_device_config(device_id: str, errors: list[str] | None = None) -> st
     }
 
     device = db.session.get(Device, device_id)
+    # The header shows the screen's latest frame, as the screen's own page does.
+    frame_width, frame_height = _frame_size(config)
     # An empty weather location is prefilled with a guess from the visitor's IP, shown as one; it's
     # only stored if they save it.
     weather_suggestion = None if config.weather_location else geoip.suggest_weather_location(request.remote_addr)
@@ -421,6 +428,10 @@ def _render_device_config(device_id: str, errors: list[str] | None = None) -> st
         "device.html",
         device_id=device_id,
         display_attached=device.display_secret_hash is not None,
+        screen_label=screen_label(device),
+        has_frame=frame_record.head(device_id) is not None,
+        frame_width=frame_width,
+        frame_height=frame_height,
         screen_name=device.device_name or "",
         name_max=assignments.NAME_MAX,
         assignment=device.assignment,

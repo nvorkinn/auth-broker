@@ -100,6 +100,38 @@ def test_settings_page_links_to_the_screen(paired_client):
     assert f'href="/device/{device_id}/screen"' in html
 
 
+def test_settings_page_header_shows_the_screens_picture(paired_client, draw):
+    client, device_id, _ = paired_client
+    draw(device_id, bytes(FRAME_BYTES))
+
+    html = client.get(f"/device/{device_id}").get_data(as_text=True)
+
+    assert f'<img src="/device/{device_id}/screen/frame.png" alt="" width="480" height="800">' in html
+    assert "No picture yet" not in html
+
+
+def test_settings_page_header_before_the_first_frame_says_so(paired_client):
+    client, device_id, _ = paired_client
+
+    html = client.get(f"/device/{device_id}").get_data(as_text=True)
+
+    assert "No picture yet" in html
+    assert "/screen/frame.png" not in html
+
+
+def test_settings_page_header_lists_the_saved_settings(app, paired_client):
+    client, device_id, _ = paired_client
+    with app.app_context():
+        config = db.session.get(DeviceConfig, device_id)
+        config.style, config.language, config.clock_format = "card", "nb", "12h"
+        db.session.commit()
+
+    html = client.get(f"/device/{device_id}").get_data(as_text=True)
+
+    for chip in ("Card", "Norsk", "0 stops", "12-hour"):
+        assert f"<li>{chip}</li>" in html
+
+
 def test_frame_png_is_the_frame_upright_and_conditional(paired_client, draw):
     client, device_id, _secret = paired_client
     draw(device_id, _frame_with_black_pixel(3, 479 - 10))
