@@ -4,8 +4,13 @@
 {% block container_class %} wide{% endblock %}
 {% block heading %}{% endblock %}
 
+{% block head %}
+<link rel="stylesheet" href="{{ url_for('static', filename='vendor/driver.js/driver.css') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='config_tour.css') }}">
+{% endblock %}
+
 {% block hero %}
-<section class="hero">
+<section class="hero" data-tour="hero">
     <div>
         <p class="kicker">Your screen</p>
         <h1>{{ screen_label }}</h1>
@@ -17,6 +22,7 @@
             {# "24-hour (13:00)" without its example. #}
             <li>{{ clock_formats[config.clock_format].split(' (')[0] }}</li>
         </ul>
+        <p class="tour-start"><button type="button" id="tourStart">Take the tour ›</button></p>
     </div>
     <a class="bezel{% if frame_height > frame_width %} upright{% endif %}" href="{{ url_for('pages.screen_view', device_id=device_id) }}" aria-label="See what's on the screen">
         {% if has_frame %}
@@ -77,7 +83,7 @@
 <form class="settings" method="POST" action="{{ url_for('pages.device_config', device_id=device_id) }}">
     <div class="settings-columns">
         <div class="settings-column">
-            <div class="card">
+            <div class="card" data-tour="general">
                 <div class="card-header">
                     <h2 class="card-title">General</h2>
                 </div>
@@ -124,14 +130,14 @@
                 </div>
             </div>
 
-            <div class="card">
+            <div class="card" data-tour="style">
                 <div class="card-header">
                     <h2 class="card-title">Style</h2>
                 </div>
                 {{ style_picker("style", "How your screen draws its departures, Spotify and notice board.", styles, config.style, "styles", 360, 396) }}
             </div>
 
-            <div class="card">
+            <div class="card" data-tour="weather">
                 <div class="card-header">
                     <h2 class="card-title">Weather</h2>
                 </div>
@@ -151,7 +157,7 @@
                 </div>
             </div>
 
-            <div class="card">
+            <div class="card" data-tour="notice_board">
                 <div class="card-header">
                     <h2 class="card-title">Notice board</h2>
                 </div>
@@ -178,7 +184,7 @@
         </div>
 
         <div class="settings-column">
-            <div class="card">
+            <div class="card" data-tour="departures">
                 <div class="card-header">
                     <h2 class="card-title">Departures</h2>
                 </div>
@@ -222,7 +228,7 @@
                 </div>
             </div>
 
-            <div class="card">
+            <div class="card" data-tour="music">
                 <div class="card-header">
                     <h2 class="card-title">Music</h2>
                 </div>
@@ -264,7 +270,7 @@
                 {% endif %}
             </div>
 
-            <div class="card">
+            <div class="card" data-tour="developer">
                 <div class="card-header">
                     <h2 class="card-title">Developer</h2>
                 </div>
@@ -298,7 +304,7 @@
                 </div>
             </div>
 
-            <div class="card">
+            <div class="card" data-tour="energy">
                 <div class="card-header">
                     <h2 class="card-title">Energy</h2>
                 </div>
@@ -321,7 +327,7 @@
                 </div>
             </div>
 
-            <div class="card">
+            <div class="card" data-tour="screen">
                 <div class="card-header">
                     <h2 class="card-title">Screen</h2>
                 </div>
@@ -345,6 +351,8 @@
     </div>
 </form>
 
+<script src="{{ url_for('static', filename='vendor/driver.js/driver.js.iife.js') }}"></script>
+<script src="{{ url_for('static', filename='config_tour.js') }}" data-picture="{{ url_for('static', filename='display/tour.png') }}"></script>
 <script>
     // Apple Music: sign in to Apple with MusicKit JS, then hand the token Apple gives back to the broker.
     const appleMusicConnect = document.getElementById('appleMusicConnect');
