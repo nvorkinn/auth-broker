@@ -185,6 +185,33 @@ def test_device_config_keeps_a_saved_weather_location_over_a_suggestion(paired_c
     assert b"Suggested from your location" not in response.data
 
 
+def test_device_config_has_the_guided_tour(paired_client):
+    """The tour's script, driver.js and the sample screen it draws on are all served from here, not a CDN."""
+    client, _, _ = paired_client
+    html = client.get("/device").get_data(as_text=True)
+    assert 'src="/static/vendor/driver.js/driver.js.iife.js"' in html
+    assert 'href="/static/vendor/driver.js/driver.css"' in html
+    assert 'src="/static/config_tour.js" data-picture="/static/display/tour.png"' in html
+    assert 'id="tourStart"' in html
+    assert client.get("/static/display/tour.png").status_code == 200
+    # Each section is named for the tour, in the order the page shows them.
+    sections = re.findall(
+        r'<div class="card" data-tour="([a-z_]+)">\s*<div class="card-header">\s*<h2 class="card-title">([^<]+)', html
+    )
+    assert [name for name, _ in sections] == [
+        "general",
+        "style",
+        "weather",
+        "notice_board",
+        "departures",
+        "music",
+        "developer",
+        "energy",
+        "screen",
+    ]
+    assert [title for _, title in sections] == re.findall(r'<h2 class="card-title">([^<]+)</h2>', html)
+
+
 def test_device_config_shows_orientation_as_vertical_and_read_only(paired_client):
     client, _, _ = paired_client
     html = client.get("/device").get_data(as_text=True)

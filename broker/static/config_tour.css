@@ -1,0 +1,122 @@
+/* The guided tour's popover, in the page's e-paper look over driver.js's defaults. */
+.tour-start {
+    margin-top: 14px;
+}
+
+.tour-start button {
+    all: unset;
+    font-family: var(--mono);
+    font-size: 13px;
+    color: var(--red);
+    letter-spacing: .04em;
+    text-transform: uppercase;
+    cursor: pointer;
+    border-bottom: 1px solid transparent;
+}
+
+.tour-start button:hover, .tour-start button:focus-visible {
+    border-bottom-color: var(--red);
+}
+
+.driver-popover.tour-popover {
+    font-family: var(--body);
+    color: var(--text-main);
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 18px;
+    width: min(440px, calc(100vw - 20px));
+    max-width: none;
+    box-shadow: 0 28px 50px -26px rgba(0, 0, 0, .5), 0 1px 10px rgba(0, 0, 0, .12);
+}
+
+.driver-popover.tour-popover .driver-popover-title {
+    font-family: var(--display);
+    font-size: 22px;
+    font-weight: 700;
+    line-height: 1.2;
+}
+
+.driver-popover.tour-popover .driver-popover-description {
+    font-family: var(--body);
+    font-size: 15px;
+    line-height: 1.5;
+    color: var(--text-muted);
+    margin-top: 10px;
+}
+
+/* The sample screen, in a thin bezel like the header's, between the title and the text. */
+.tour-picture {
+    display: block;
+    width: 100%;
+    height: auto;
+    margin-top: 12px;
+    padding: 6px;
+    border-radius: 6px;
+    background: var(--bezel);
+}
+
+.tour-fade {
+    fill: #fff;
+    opacity: .72;
+}
+
+.tour-box {
+    fill: none;
+    stroke: var(--red);
+    stroke-width: 4;
+}
+
+.driver-popover.tour-popover .driver-popover-progress-text {
+    font-family: var(--mono);
+    font-size: 13px;
+    color: var(--text-muted);
+}
+
+.driver-popover.tour-popover .driver-popover-footer button {
+    font-family: var(--body);
+    font-size: 14px;
+    text-shadow: none;
+    border: 1.5px solid var(--ink);
+    border-radius: 6px;
+    padding: 6px 14px;
+    color: var(--ink);
+    background: transparent;
+}
+
+.driver-popover.tour-popover .driver-popover-footer button:hover,
+.driver-popover.tour-popover .driver-popover-footer button:focus-visible {
+    background: var(--chip);
+}
+
+.driver-popover.tour-popover .driver-popover-next-btn {
+    background: var(--ink);
+    color: #fff;
+    margin-left: 6px;
+}
+
+.driver-popover.tour-popover .driver-popover-next-btn:hover,
+.driver-popover.tour-popover .driver-popover-next-btn:focus-visible {
+    background: var(--red);
+    border-color: var(--red);
+}
+
+.driver-popover.tour-popover .driver-popover-close-btn {
+    color: var(--text-muted);
+}
+
+.driver-popover.tour-popover .driver-popover-arrow-side-left.driver-popover-arrow {
+    border-left-color: var(--bg-card);
+}
+
+.driver-popover.tour-popover .driver-popover-arrow-side-right.driver-popover-arrow {
+    border-right-color: var(--bg-card);
+}
+
+.driver-popover.tour-popover .driver-popover-arrow-side-top.driver-popover-arrow {
+    border-top-color: var(--bg-card);
+}
+
+.driver-popover.tour-popover .driver-popover-arrow-side-bottom.driver-popover-arrow {
+    border-bottom-color: var(--bg-card);
+}
