@@ -1,5 +1,5 @@
 import pytest
-from flask import g, jsonify, make_response
+from flask import Response, g, jsonify
 
 from broker import create_app
 from broker.auth import require_device_auth, require_user, require_user_id
@@ -51,8 +51,11 @@ def test_require_device_auth_forbids_a_valid_secret_for_a_role_not_allowed(app, 
         return jsonify(device_id=device_id)
 
     with app.test_request_context(headers={"Authorization": f"Bearer {secret}"}):
-        response = make_response(view())
-    assert response.status_code == 403
+        result = view()
+    assert isinstance(result, tuple)
+    response, status = result[0], result[1]
+    assert isinstance(response, Response)
+    assert status == 403
     assert response.get_json() == {"error": "forbidden"}
 
 
@@ -64,7 +67,9 @@ def test_require_device_auth_sets_device_id_and_role(app, register_device):
         return jsonify(device_id=g.device_id, role=g.role)
 
     with app.test_request_context(headers={"Authorization": f"Bearer {secret}"}):
-        assert make_response(view()).get_json() == {"device_id": device_id, "role": "display"}
+        response = view()
+        assert isinstance(response, Response)
+        assert response.get_json() == {"device_id": device_id, "role": "display"}
 
 
 def test_session_cookie_domain_comes_from_the_environment(monkeypatch, app):
@@ -78,7 +83,9 @@ def test_require_user_id_passes_the_signed_in_user_to_the_view(app):
         return jsonify(user_id=user_id)
 
     with app.test_request_context(headers={app.config["USER_HEADER"]: " user-1 "}):
-        assert make_response(view()).get_json() == {"user_id": "user-1"}
+        response = view()
+        assert isinstance(response, Response)
+        assert response.get_json() == {"user_id": "user-1"}
 
 
 def test_require_user_id_keeps_the_urls_own_arguments(app):
