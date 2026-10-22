@@ -211,6 +211,11 @@ def screen_label(device: Device) -> str:
     return f"Screen {device.device_id[:6]}"
 
 
+def _signed_in_user() -> str | ResponseReturnValue:
+    """Return the signed-in user's id, or the 401 that turns away a request that didn't come through the login."""
+    return current_user() or ("Sign in required.", 401)
+
+
 def require_user(view: View) -> View:
     """Protect browser pages that only need someone signed in.
 
@@ -219,9 +224,23 @@ def require_user(view: View) -> View:
 
     @functools.wraps(view)
     def wrapped(*args: object, **kwargs: object) -> ResponseReturnValue:
-        if current_user() is None:
-            return "Sign in required.", 401
+        user = _signed_in_user()
+        if not isinstance(user, str):
+            return user
         return view(*args, **kwargs)
+
+    return wrapped
+
+
+def require_user_id(view: View) -> View:
+    """Protect browser pages like require_user, and pass the signed-in user's id to the view as `user_id`."""
+
+    @functools.wraps(view)
+    def wrapped(*args: object, **kwargs: object) -> ResponseReturnValue:
+        user = _signed_in_user()
+        if not isinstance(user, str):
+            return user
+        return view(*args, user_id=user, **kwargs)
 
     return wrapped
 
