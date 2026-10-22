@@ -172,6 +172,19 @@ def current_user() -> str | None:
     return request.headers.get(current_app.config["USER_HEADER"], "").strip() or None
 
 
+def signed_in_user() -> str:
+    """Return the signed-in user's id, as `require_user` (or `require_paired_user`) verified it.
+
+    Only valid in a view behind one of those: it reads g.user_id back with the type current_user can't promise, and
+    raises a RuntimeError if the view lacks the decorator.
+    """
+    user = g.get("user_id")
+    if user is None:
+        message = "signed_in_user() needs a view behind @require_user"
+        raise RuntimeError(message)
+    return user
+
+
 def current_username() -> str | None:
     """Return the signed-in user's username, from the header the login proxy sets next to the user id.
 
@@ -214,13 +227,16 @@ def screen_label(device: Device) -> str:
 def require_user(view: View) -> View:
     """Protect browser pages that only need someone signed in.
 
-    Without the proxy's header the request didn't come through the login, so it's a 401.
+    Without the proxy's header the request didn't come through the login, so it's a 401. Sets g.user_id, which
+    signed_in_user returns.
     """
 
     @functools.wraps(view)
     def wrapped(*args: object, **kwargs: object) -> ResponseReturnValue:
-        if current_user() is None:
+        user = current_user()
+        if user is None:
             return "Sign in required.", 401
+        g.user_id = user
         return view(*args, **kwargs)
 
     return wrapped
@@ -230,15 +246,17 @@ def require_paired_user(view: View) -> View:
     """Protect browser pages that act on one of the signed-in user's devices.
 
     A page with a `device_id` in its URL is for that device, and 404s unless it's the user's (never admits it
-    exists); one without is for the one paired most recently. A user with none goes to /pair. Sets g.device_id,
-    and the view doesn't get the URL's device_id. Looked up on every request, so unpairing and forgetting take
-    effect at once.
+    exists); one without is for the one paired most recently. A user with none goes to /pair. Sets g.user_id (as
+    require_user does) and g.device_id, and the view doesn't get the URL's device_id. Looked up on every request, so
+    unpairing and forgetting take effect at once.
     """
 
     @functools.wraps(view)
     def wrapped(*args: object, **kwargs: object) -> ResponseReturnValue:
-        if current_user() is None:
+        user = current_user()
+        if user is None:
             return "Sign in required.", 401
+        g.user_id = user
         requested = kwargs.pop("device_id", None)
         owned = [device.device_id for device in user_devices()]
         if requested is None:
