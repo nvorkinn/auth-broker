@@ -214,14 +214,16 @@ def screen_label(device: Device) -> str:
 def require_user(view: View) -> View:
     """Protect browser pages that only need someone signed in.
 
-    Without the proxy's header the request didn't come through the login, so it's a 401.
+    Without the proxy's header the request didn't come through the login, so it's a 401. The view gets the user's
+    id as `user_id`.
     """
 
     @functools.wraps(view)
     def wrapped(*args: object, **kwargs: object) -> ResponseReturnValue:
-        if current_user() is None:
+        user = current_user()
+        if user is None:
             return "Sign in required.", 401
-        return view(*args, **kwargs)
+        return view(*args, user_id=user, **kwargs)
 
     return wrapped
 

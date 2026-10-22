@@ -10,7 +10,6 @@ from flask import Blueprint, Response, current_app, g, jsonify, redirect, render
 from redis import Redis, RedisError
 
 from broker.auth import (
-    current_user,
     paired_device_id,
     require_paired_user,
     require_user,
@@ -124,7 +123,7 @@ def about() -> ResponseReturnValue:
 
 @bp.route("/pair", methods=["GET", "POST"])
 @require_user
-def pair() -> ResponseReturnValue:
+def pair(user_id: str) -> ResponseReturnValue:
     """Pair the signed-in user with a device.
 
     A device that has just finished Wi-Fi setup sends its owner's browser here with a pairing token (?t=, or the URL
@@ -145,7 +144,7 @@ def pair() -> ResponseReturnValue:
     if retry_after is not None:
         return _too_many_attempts(retry_after)
 
-    device_id = pairing.redeem_code(request.form.get("code", "").strip().upper(), current_user())
+    device_id = pairing.redeem_code(request.form.get("code", "").strip().upper(), user_id)
     if device_id is None:
         lockout = throttle.record_failure(ip)
         current_app.logger.warning("Wrong pairing code from %s", ip)
@@ -174,7 +173,7 @@ def _render_pair(error: str | None, token: str = "", code: str = "") -> str:
 
 @bp.post("/pair/token")
 @require_user
-def pair_by_token() -> ResponseReturnValue:
+def pair_by_token(user_id: str) -> ResponseReturnValue:
     """Pair the signed-in user with the device a pairing token is for.
 
     The pairing page polls this: 200 once the user is paired, 202 while the device hasn't registered yet,
@@ -183,7 +182,7 @@ def pair_by_token() -> ResponseReturnValue:
     token = (request.get_json(silent=True) or {}).get("token", "")
     if not isinstance(token, str) or not PAIRING_TOKEN_RE.match(token):
         return jsonify(status="invalid"), 400
-    status = pairing.pair_by_token(current_user(), token)
+    status = pairing.pair_by_token(user_id, token)
     if status == "paired":
         # A paired screen's config goes in the store (all of them: this one is known here only by its token), and
         # what it shows is subscribed to.
