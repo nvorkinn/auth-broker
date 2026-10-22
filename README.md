@@ -41,10 +41,11 @@ a config is saved (`v1:sub:changed`).
 A screen generates a long random secret on first boot and keeps it. The broker stores only its SHA-256, which
 identifies the device. Two calls are all a screen needs:
 
-1. **`POST /api/devices/register`** `{"secret", "width", "height"}`, on every boot and after any 401. A new secret
-   becomes a device at once (`201 {device_id}`); a known one is a `200`. Anyone can call it, so it's throttled: 5 calls
-   a minute per IP (`429` with `Retry-After`), at most 20 unpaired screens at once (`503`), and a screen still unpaired
-   after 24 hours is dropped.
+1. **`POST /api/devices/register`** `{"secret", "width", "height", "format"}`, on every boot and after any 401.
+   `format` is the format the screen takes its frame in, `mono-1bpp-packed` or `png`; the renderer draws in it. A new
+   secret becomes a device at once (`201 {device_id}`); a known one is a `200`, which changes nothing. Anyone can call
+   it, so it's throttled: 5 calls a minute per IP (`429` with `Retry-After`), at most 20 unpaired screens at once
+   (`503`), and a screen still unpaired after 24 hours is dropped.
 2. **`POST /api/frame`** with `Authorization: Bearer <secret>` and `If-None-Match`, in a loop, sleeping for each
    answer's `Retry-After`:
 

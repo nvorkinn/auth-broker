@@ -215,7 +215,10 @@ def test_pairing_with_a_code_stores_the_config_and_queues_a_render(app, store, n
 
 def test_pairing_by_token_stores_the_config(app, store, nudges, client):
     display_secret = "display-secret-for-a-token-pairing"
-    device_id = client.post("/api/devices/register", json={"secret": display_secret, "width": 800, "height": 480})
+    device_id = client.post(
+        "/api/devices/register",
+        json={"secret": display_secret, "width": 800, "height": 480, "format": "mono-1bpp-packed"},
+    )
     device_id = device_id.get_json()["device_id"]
     with app.app_context():
         token = db.session.get_one(Device, device_id).pairing_token

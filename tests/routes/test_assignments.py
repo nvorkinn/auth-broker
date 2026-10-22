@@ -19,9 +19,9 @@ def _bearer(secret):
 
 
 def _register(client, secret=DISPLAY):
-    return client.post("/api/devices/register", json={"secret": secret, "width": 480, "height": 800}).get_json()[
-        "device_id"
-    ]
+    return client.post(
+        "/api/devices/register", json={"secret": secret, "width": 480, "height": 800, "format": "mono-1bpp-packed"}
+    ).get_json()["device_id"]
 
 
 @pytest.fixture

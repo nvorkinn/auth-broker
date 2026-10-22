@@ -58,7 +58,7 @@ def test_list_shows_device_name_when_set_and_unnamed_otherwise(app, client, regi
     with app.app_context():
         db.session.get_one(Device, named_id).device_name = "camilla"
         db.session.commit()
-    screen = {"secret": "a-screen-with-no-name-yet-at-all", "width": 800, "height": 480}
+    screen = {"secret": "a-screen-with-no-name-yet-at-all", "width": 800, "height": 480, "format": "mono-1bpp-packed"}
     unnamed_id = client.post("/api/devices/register", json=screen).get_json()["device_id"]
 
     result = cli("list")

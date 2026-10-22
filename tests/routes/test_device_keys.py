@@ -121,7 +121,9 @@ def test_pairing_again_as_the_same_owner_keeps_its_data(store, paired_client, cl
 
 def test_pairing_by_token_after_an_unpair_starts_with_nothing_from_before(app, store, client, cli):
     secret = "display-a-very-long-device-secret-value"
-    registered = client.post("/api/devices/register", json={"secret": secret, "width": 480, "height": 800})
+    registered = client.post(
+        "/api/devices/register", json={"secret": secret, "width": 480, "height": 800, "format": "mono-1bpp-packed"}
+    )
     device_id = registered.get_json()["device_id"]
     with app.app_context():
         token = db.session.get_one(Device, device_id).pairing_token

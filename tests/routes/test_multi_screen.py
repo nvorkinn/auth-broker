@@ -16,9 +16,9 @@ OTHER_SECRET = "someone-elses-secret-0123456789"
 
 
 def _pair(app, client, secret):
-    device_id = client.post("/api/devices/register", json={"secret": secret, "width": 480, "height": 800}).get_json()[
-        "device_id"
-    ]
+    device_id = client.post(
+        "/api/devices/register", json={"secret": secret, "width": 480, "height": 800, "format": "mono-1bpp-packed"}
+    ).get_json()["device_id"]
     with app.app_context():
         name_screen(device_id)
         code = pairing.issue_code(device_id)

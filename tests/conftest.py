@@ -258,7 +258,9 @@ def register_device(app, client):
     """Register a screen with the given secret and name it, returning (device_id, secret). It isn't paired."""
 
     def _register(secret: str = DEVICE_SECRET):
-        screen = client.post("/api/devices/register", json={"secret": secret, "width": 480, "height": 800})
+        screen = client.post(
+            "/api/devices/register", json={"secret": secret, "width": 480, "height": 800, "format": "mono-1bpp-packed"}
+        )
         assert screen.status_code == 201
         device_id = screen.get_json()["device_id"]
         with app.app_context():

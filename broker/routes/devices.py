@@ -7,6 +7,7 @@ from sqlalchemy.exc import IntegrityError
 
 from broker.auth import hash_secret, with_retry_after
 from broker.db import db
+from broker.models import FRAME_FORMATS, FrameFormat
 from broker.services import registration
 
 if TYPE_CHECKING:
@@ -21,9 +22,10 @@ MIN_SECRET_LENGTH = 16
 def register() -> ResponseReturnValue:
     """Give a screen its identity.
 
-    {"secret": ..., "width": ..., "height": ...}, the secret the screen generated and keeps and its size in pixels,
-    becomes a device at once (201 {device_id}); only the secret's hash is stored, and identifies the device. A repeat,
-    e.g. on every boot, is a 200. A new device's weather location is guessed from the screen's IP.
+    {"secret": ..., "width": ..., "height": ..., "format": ...}, the secret the screen generated and keeps, its size in
+    pixels and the format it takes its frame in (one of FRAME_FORMATS), becomes a device at once (201 {device_id});
+    only the secret's hash is stored, and identifies the device. A repeat, e.g. on every boot, is a 200, and changes
+    nothing. A new device's weather location is guessed from the screen's IP.
 
     Throttled per IP, every call counting, as anyone can call it.
     """
@@ -39,19 +41,21 @@ def register() -> ResponseReturnValue:
 
     body = request.get_json(silent=True) or {}
     secret = body.get("secret", "")
-    width, height = body.get("width"), body.get("height")
+    width, height, frame_format = body.get("width"), body.get("height"), body.get("format")
     if not isinstance(secret, str) or len(secret) < MIN_SECRET_LENGTH:
         return jsonify(error="secret must be a random string of at least 16 characters"), 400
     if not (_is_size(width) and _is_size(height)):
         return jsonify(error="width and height must be positive integers"), 400
+    if not _is_frame_format(frame_format):
+        return jsonify(error=f"format must be one of {', '.join(FRAME_FORMATS)}"), 400
 
     secret_hash = hash_secret(secret)
     try:
-        found = registration.register_screen(secret_hash, width, height, ip=request.remote_addr)
+        found = registration.register_screen(secret_hash, width, height, frame_format, ip=request.remote_addr)
     except IntegrityError:
         # The same secret registered by a simultaneous request that got in first: answer as for any repeat.
         db.session.rollback()
-        found = registration.register_screen(secret_hash, width, height, ip=request.remote_addr)
+        found = registration.register_screen(secret_hash, width, height, frame_format, ip=request.remote_addr)
 
     if found is None:
         return with_retry_after(jsonify(error="too many devices waiting"), 60), 503
@@ -61,3 +65,8 @@ def register() -> ResponseReturnValue:
 def _is_size(value: object) -> TypeGuard[int]:
     """Whether a reported width or height is a positive int (and not a bool, which is one to Python)."""
     return type(value) is int and value > 0
+
+
+def _is_frame_format(value: object) -> TypeGuard[FrameFormat]:
+    """Whether a reported frame format is one the renderer can draw."""
+    return value in FRAME_FORMATS
