@@ -73,7 +73,7 @@ def test_screen_page_polls_as_fast_as_the_screen_while_a_provider_asks(app, pair
     client, device_id, _secret = paired_client
     draw(device_id, bytes(FRAME_BYTES))
     with app.app_context():
-        db.session.get(DeviceConfig, device_id).developer_enabled = True
+        db.session.get_one(DeviceConfig, device_id).developer_enabled = True
         db.session.commit()
     app.extensions["redis"] = store = fakeredis.FakeRedis(decode_responses=True)
     store.set(f"v1:pace:developer:{device_id}", "20", ex=60)
@@ -122,7 +122,7 @@ def test_settings_page_header_before_the_first_frame_says_so(paired_client):
 def test_settings_page_header_lists_the_saved_settings(app, paired_client):
     client, device_id, _ = paired_client
     with app.app_context():
-        config = db.session.get(DeviceConfig, device_id)
+        config = db.session.get_one(DeviceConfig, device_id)
         config.style, config.language, config.clock_format = "card", "nb", "12h"
         db.session.commit()
 
@@ -155,7 +155,7 @@ def test_frame_png_follows_a_horizontal_screen(app, paired_client, draw):
     draw(device_id, _frame_with_black_pixel(10, 3))
     upright = client.get(f"/device/{device_id}/screen/frame.png")
     with app.app_context():
-        db.session.get(DeviceConfig, device_id).orientation = "horizontal"
+        db.session.get_one(DeviceConfig, device_id).orientation = "horizontal"
         db.session.commit()
 
     response = client.get(f"/device/{device_id}/screen/frame.png", headers={"If-None-Match": upright.headers["ETag"]})

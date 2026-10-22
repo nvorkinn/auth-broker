@@ -37,6 +37,8 @@ dev = [
     "responses",
     # Keep in step with the ruff-pre-commit rev in .pre-commit-config.yaml.
     "ruff==0.17.1",
+    # Keep in step with the ty-pre-commit rev in .pre-commit-config.yaml.
+    "ty==0.0.91",
 ]
 
 [tool.uv]
@@ -45,3 +47,7 @@ package = false
 
 [tool.uv.sources]
 countdown-api = { path = "vendor/countdown-api", editable = true }
+
+[tool.ty.src]
+# vendor/ is the countdown-api submodule: type checked by its own repository (its package still resolves, from .venv).
+exclude = ["vendor"]

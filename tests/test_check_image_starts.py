@@ -15,6 +15,8 @@ ROOT = Path(__file__).resolve().parent.parent
 COMPOSE = yaml.safe_load((ROOT / "docker-compose.yml").read_text())
 
 _spec = importlib.util.spec_from_file_location("check_image_starts", ROOT / "scripts" / "check_image_starts.py")
+assert _spec is not None
+assert _spec.loader is not None
 check_image_starts = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(check_image_starts)
 

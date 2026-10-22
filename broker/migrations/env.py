@@ -17,7 +17,7 @@ config = context.config
 
 # Only `flask db ...` configures logging here. When the app migrates itself on startup, fileConfig
 # would disable the app's own logger (it disables every logger the ini file doesn't name).
-if not config.attributes.get("app_startup"):
+if not config.attributes.get("app_startup") and config.config_file_name:
     fileConfig(config.config_file_name)
 logger = logging.getLogger("alembic.env")
 
@@ -43,7 +43,7 @@ def run_migrations_online() -> None:
     ) -> None:
         if getattr(config.cmd_opts, "autogenerate", False):
             script = directives[0]
-            if script.upgrade_ops.is_empty():
+            if script.upgrade_ops is not None and script.upgrade_ops.is_empty():
                 directives[:] = []
                 logger.info("No changes in schema detected.")
 

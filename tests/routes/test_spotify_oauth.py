@@ -58,6 +58,6 @@ def test_callback_exchanges_code_and_stores_tokens(app, paired_client):
     assert response.headers["Location"] == f"/device/{device_id}"
 
     with app.app_context():
-        token = db.session.get(SpotifyToken, device_id)
+        token = db.session.get_one(SpotifyToken, device_id)
         assert token.refresh_token == "refresh-123"
         assert token.access_token == "access-123"

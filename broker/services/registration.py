@@ -61,9 +61,9 @@ def register_screen(secret_hash: str, width: int, height: int, ip: str | None = 
 
 
 def _unpaired_screens() -> int:
-    return db.session.scalar(
+    return db.session.execute(
         select(func.count()).select_from(Device).where(Device.paired_at.is_(None), ~Device.assignment.has())
-    )
+    ).scalar_one()
 
 
 def _drop_stale_screens(now: datetime) -> list[str]:

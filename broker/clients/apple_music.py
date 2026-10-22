@@ -138,10 +138,10 @@ def recent_tracks(device_id: str) -> list[dict] | None:
     page asks to connect again).
     """
     stored = db.session.get(AppleMusicToken, device_id)
-    if stored is None or stored.token_encrypted is None:
+    if stored is None or (token := stored.token) is None:
         return None
     try:
-        songs = recently_played(stored.token)
+        songs = recently_played(token)
     except AppleMusicRefusedError:
         # The log and where it got to stay, so connecting again carries on rather than counting the same plays twice.
         stored.token = None

@@ -10,7 +10,7 @@ import fakeredis
 import pytest
 
 from broker.db import db
-from broker.models import Device, GitHubToken, SpotifyToken
+from broker.models import Device, GitHubToken, GlowmarktCredentials, SpotifyToken
 from broker.providers import music
 from broker.providers.developer import pace_key, stored_key
 from broker.providers.glow import energy_key
@@ -124,7 +124,7 @@ def test_pairing_by_token_after_an_unpair_starts_with_nothing_from_before(app, s
     registered = client.post("/api/devices/register", json={"secret": secret, "width": 480, "height": 800})
     device_id = registered.get_json()["device_id"]
     with app.app_context():
-        token = db.session.get(Device, device_id).pairing_token
+        token = db.session.get_one(Device, device_id).pairing_token
     _provide(store, device_id)  # as if from a time it was paired before
 
     assert client.post("/pair/token", json={"token": token}).status_code == 200
@@ -263,7 +263,7 @@ def test_a_redis_that_cant_be_asked_still_lets_the_glowmarkt_account_be_cleared(
 
     assert response.status_code == 302
     with app.app_context():
-        assert db.session.get(Device, device_id).glowmarkt_credentials.sign_in() is None
+        assert db.session.get_one(GlowmarktCredentials, device_id).sign_in() is None
     assert logged.warning.call_args.args == (
         "Couldn't delete a device's data from Redis (%s); it lapses by its TTL",
         "ConnectionError",

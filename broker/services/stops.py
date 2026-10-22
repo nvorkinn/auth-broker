@@ -4,7 +4,7 @@ Which source each saved id is from, what the settings page shows for it, and the
 """
 
 from concurrent.futures import ThreadPoolExecutor
-from typing import Any
+from typing import Any, Literal
 
 from flask import current_app
 
@@ -22,7 +22,7 @@ MODE_ICONS = {
 }
 
 
-def source_of(stop_id: str) -> str:
+def source_of(stop_id: str) -> Literal["tfl", "entur"]:
     """Entur's ids are NSR:StopPlace:... or NSR:Quay:...; anything else is a TfL NaPTAN id."""
     return "entur" if stop_id.startswith("NSR:") else "tfl"
 
@@ -56,7 +56,8 @@ def search(query: str) -> list[dict[str, Any]]:
 
     A query with æ, ø or å lists Norway's first, any other London's. Raises only if both searches fail.
     """
-    app = current_app._get_current_object()  # noqa: SLF001 -- Flask's only way to unwrap it for other threads
+    # Flask's only way to unwrap the proxy for other threads (SLF001), which Flask types as the app itself (ty).
+    app = current_app._get_current_object()  # noqa: SLF001 -- see above  # ty: ignore[unresolved-attribute]
 
     def run(source: str) -> list[dict[str, Any]]:
         with app.app_context():

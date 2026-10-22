@@ -166,7 +166,7 @@ def test_a_change_of_password_signs_in_afresh(app, provider, glow_api):
     add_device(app, DEVICE)
     provider.run_cycle()
     with app.app_context():
-        db.session.get(GlowmarktCredentials, DEVICE).password = "new-password"
+        db.session.get_one(GlowmarktCredentials, DEVICE).password = "new-password"
         db.session.commit()
 
     provider.run_cycle()
@@ -247,6 +247,6 @@ def test_main_runs_the_provider_on_the_read_only_database(monkeypatch):
 def test_the_provider_cant_write_to_the_database(app, provider):
     add_device(app, DEVICE)
     with provider.app.app_context():
-        db.session.get(GlowmarktCredentials, DEVICE).username = "changed"
+        db.session.get_one(GlowmarktCredentials, DEVICE).username = "changed"
         with pytest.raises(Exception, match="readonly"):
             db.session.commit()

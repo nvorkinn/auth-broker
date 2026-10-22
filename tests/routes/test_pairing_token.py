@@ -23,7 +23,7 @@ def _pair(client, token=None):
 
 def _owner(app, device_id):
     with app.app_context():
-        return db.session.get(Device, device_id).owner
+        return db.session.get_one(Device, device_id).owner
 
 
 def test_the_token_is_derived_from_the_secret_the_way_a_device_would():
@@ -33,7 +33,7 @@ def test_the_token_is_derived_from_the_secret_the_way_a_device_would():
 def test_a_device_registering_stores_its_token(app, register_device):
     device_id, _ = register_device(SECRET)
     with app.app_context():
-        assert db.session.get(Device, device_id).pairing_token == token_for_secret()
+        assert db.session.get_one(Device, device_id).pairing_token == token_for_secret()
 
 
 def test_the_token_pairs_the_user_with_a_registered_device(app, client, register_device):
@@ -116,7 +116,7 @@ def test_the_pairing_page_passes_on_a_query_token(client):
 def test_devices_registered_without_a_token_column_value_cannot_be_paired_by_token(app, client, register_device):
     device_id, _ = register_device(SECRET)
     with app.app_context():
-        db.session.get(Device, device_id).pairing_token = None
+        db.session.get_one(Device, device_id).pairing_token = None
         db.session.commit()
         assert db.session.scalar(select(Device).where(Device.pairing_token == token_for_secret())) is None
     assert _pair(client).status_code == 202

@@ -398,4 +398,6 @@ def test_a_time_in_another_zone_is_read_as_utc(app, frames_redis):
 
     with app.app_context():
         assert frame_record.head("d") == frame_record.StoredFrame(_etag(_frame(0x22)), LATER)
-        assert frame_record.head("d").rendered_at.tzinfo == UTC
+        head = frame_record.head("d")
+        assert head is not None
+        assert head.rendered_at.tzinfo == UTC

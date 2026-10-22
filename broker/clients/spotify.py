@@ -51,6 +51,10 @@ def _client_credentials() -> tuple[str, str]:
 def _store_tokens(device_id: str, payload: dict) -> None:
     expires_at = datetime.now(UTC).timestamp() + payload["expires_in"]
     refresh_token = payload.get("refresh_token") or _existing_refresh_token(device_id)
+    if refresh_token is None:
+        # Spotify sends one with a device's first tokens, and the row keeps it from then on.
+        msg = f"Spotify sent no refresh token and device {device_id} has none stored"
+        raise ValueError(msg)
 
     token = db.session.get(SpotifyToken, device_id) or SpotifyToken(device_id=device_id)
     token.refresh_token = refresh_token

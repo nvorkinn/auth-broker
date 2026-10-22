@@ -52,7 +52,7 @@ def _add_fixture_device(app) -> str:
         device.config = DeviceConfig(**settings)
         db.session.add(device)
         db.session.add(GlowmarktCredentials(device_id=device_id, username=glowmarkt["username"]))
-        db.session.get(GlowmarktCredentials, device_id).password = glowmarkt["password"]
+        db.session.get_one(GlowmarktCredentials, device_id).password = glowmarkt["password"]
         db.session.commit()
     return device_id
 
@@ -139,7 +139,7 @@ def test_a_save_queues_only_the_screens_whose_config_changed(app, store, nudges,
     client, device_id, _ = paired_client
     other_id, _ = register_device("another-very-long-device-secret")
     with app.app_context():
-        other = db.session.get(Device, other_id)
+        other = db.session.get_one(Device, other_id)
         other.paired_at = datetime.now(UTC)
         other.pairing_codes.clear()  # as pairing does: the code it registered with is spent
         db.session.commit()
@@ -185,7 +185,7 @@ def test_the_config_is_saved_even_when_redis_is_down(app, paired_client):
 
     assert response.status_code == 302
     with app.app_context():
-        assert db.session.get(DeviceConfig, device_id).style == "card"
+        assert db.session.get_one(DeviceConfig, device_id).style == "card"
     logger.warning.assert_called_once_with("Couldn't write the screens' configs to Redis (%s)", "ConnectionError")
 
 
@@ -218,7 +218,7 @@ def test_pairing_by_token_stores_the_config(app, store, nudges, client):
     device_id = client.post("/api/devices/register", json={"secret": display_secret, "width": 800, "height": 480})
     device_id = device_id.get_json()["device_id"]
     with app.app_context():
-        token = db.session.get(Device, device_id).pairing_token
+        token = db.session.get_one(Device, device_id).pairing_token
 
     assert client.post("/pair/token", json={"token": token}).status_code == 200
 
@@ -249,7 +249,7 @@ def test_a_code_that_lapses_unused_leaves_the_config_out_until_the_next_rebuild(
     with app.app_context():
         pairing.issue_code(device_id)
         config_store.publish(device_id)
-        for code in db.session.get(Device, device_id).pairing_codes:
+        for code in db.session.get_one(Device, device_id).pairing_codes:
             code.expires_at = datetime(2020, 1, 1, tzinfo=UTC)
         db.session.commit()
         assert pairing.live_code(device_id) is None
@@ -329,7 +329,7 @@ def test_a_rebuild_removes_the_configs_of_devices_that_are_gone(app, store, nudg
 def test_the_weather_backfill_rewrites_the_configs_with_the_new_weather_key(app, store, paired_client):
     _, device_id, _ = paired_client
     with app.app_context():
-        db.session.get(DeviceConfig, device_id).weather_location = "London"
+        db.session.get_one(DeviceConfig, device_id).weather_location = "London"
         db.session.commit()
     place = {"id": 2643743, "name": "London", "label": "London", "country_code": "GB", "latitude": 51.5, "longitude": 0}
 

@@ -28,7 +28,7 @@ import re
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from hashlib import blake2b
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from countdown_api import keys as store_keys
 from flask import current_app
@@ -102,7 +102,8 @@ def _redis() -> Redis:
 def _hmget(device_id: str, *fields: str) -> list[bytes | None] | None:
     """Return the record's `fields` as bytes (None for one it hasn't); None if Redis can't be asked (logged)."""
     try:
-        return _redis().hmget(key(device_id), list(fields))
+        # A client without decode_responses, so bytes; redis-py types it as either.
+        return cast("list[bytes | None]", _redis().hmget(key(device_id), list(fields)))
     except RedisError as error:
         logger.warning("Couldn't read a screen's frame from Redis (%s)", type(error).__name__)
         return None

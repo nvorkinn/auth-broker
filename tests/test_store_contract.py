@@ -68,7 +68,7 @@ def _add_example_devices(app) -> None:
         unpaired.config = DeviceConfig(**PAIRING["settings"])
         db.session.add_all([paired, unpaired])
         db.session.add(GlowmarktCredentials(device_id=CONFIG["device_id"], username=glowmarkt["username"]))
-        db.session.get(GlowmarktCredentials, CONFIG["device_id"]).password = glowmarkt["password"]
+        db.session.get_one(GlowmarktCredentials, CONFIG["device_id"]).password = glowmarkt["password"]
         db.session.commit()
 
 

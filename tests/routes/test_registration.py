@@ -76,7 +76,9 @@ def test_screens_nobody_has_paired_are_capped_and_expire(app, client, monkeypatc
     assert full.status_code == 503
     assert full.headers["Retry-After"] == "60"
     with app.app_context():
-        db.session.get(Device, first).created_at = datetime.now(UTC) - registration.UNPAIRED_TTL - timedelta(seconds=1)
+        db.session.get_one(Device, first).created_at = (
+            datetime.now(UTC) - registration.UNPAIRED_TTL - timedelta(seconds=1)
+        )
         db.session.commit()
     # The stale one is forgotten to make room, and a screen's next call is a 401 so it registers again.
     assert _register(client, "display-three-0123456789").status_code == 201
@@ -95,7 +97,9 @@ def test_a_dropped_stale_screen_leaves_nothing_in_the_store(app, client, monkeyp
     store.set(pairing_key.key(kept), "{}", ex=3600)
     assert store.hexists(render_screens.SCREENS, stale)
     with app.app_context():
-        db.session.get(Device, stale).created_at = datetime.now(UTC) - registration.UNPAIRED_TTL - timedelta(seconds=1)
+        db.session.get_one(Device, stale).created_at = (
+            datetime.now(UTC) - registration.UNPAIRED_TTL - timedelta(seconds=1)
+        )
         db.session.commit()
 
     assert _register(client, "display-three-0123456789").status_code == 201
@@ -112,7 +116,9 @@ def test_a_screen_is_dropped_from_the_store_when_the_cap_still_refuses_a_new_one
     monkeypatch.setattr(registration, "MAX_UNPAIRED_SCREENS", 1)
     stale = _register(client, "display-one-0123456789").get_json()["device_id"]
     with app.app_context():
-        db.session.get(Device, stale).created_at = datetime.now(UTC) - registration.UNPAIRED_TTL - timedelta(seconds=1)
+        db.session.get_one(Device, stale).created_at = (
+            datetime.now(UTC) - registration.UNPAIRED_TTL - timedelta(seconds=1)
+        )
         db.session.commit()
     store.set(pairing_key.key(stale), "{}", ex=3600)
 
@@ -127,7 +133,9 @@ def test_a_redis_failure_never_blocks_dropping_a_stale_screen(app, client, monke
     monkeypatch.setattr(registration, "MAX_UNPAIRED_SCREENS", 1)
     stale = _register(client, "display-one-0123456789").get_json()["device_id"]
     with app.app_context():
-        db.session.get(Device, stale).created_at = datetime.now(UTC) - registration.UNPAIRED_TTL - timedelta(seconds=1)
+        db.session.get_one(Device, stale).created_at = (
+            datetime.now(UTC) - registration.UNPAIRED_TTL - timedelta(seconds=1)
+        )
         db.session.commit()
     broken = fakeredis.FakeRedis(decode_responses=True)
     app.extensions["redis"] = broken
@@ -140,7 +148,7 @@ def test_a_redis_failure_never_blocks_dropping_a_stale_screen(app, client, monke
 def test_a_paired_screen_never_expires(app, client):
     device_id = _register(client, DISPLAY).get_json()["device_id"]
     with app.app_context():
-        device = db.session.get(Device, device_id)
+        device = db.session.get_one(Device, device_id)
         device.owner, device.paired_at = USER, datetime.now(UTC)
         device.created_at = datetime.now(UTC) - registration.UNPAIRED_TTL * 10
         db.session.commit()
@@ -254,7 +262,9 @@ def test_id_less_endpoints_reject_unknown_and_missing_secrets(client, register_d
 def test_id_less_requests_are_logged_with_the_device_id(app, client, register_device, caplog):
     device_id, secret = register_device()
     with app.app_context():
-        slug = db.session.get(Device, device_id).assignment.slug
+        assignment = db.session.get_one(Device, device_id).assignment
+        assert assignment is not None
+        slug = assignment.slug
 
     with caplog.at_level("INFO"):
         client.post("/api/frame", headers=_auth(secret))
@@ -304,7 +314,7 @@ def test_a_new_screen_gets_the_weather_location_its_ip_suggests(app, client):
     assert response.status_code == 201
     suggest.assert_called_once_with("81.2.69.1")
     with app.app_context():
-        config = db.session.get(DeviceConfig, response.get_json()["device_id"])
+        config = db.session.get_one(DeviceConfig, response.get_json()["device_id"])
         assert config.weather_location == "London"
         assert config.weather_place_id is None
 
@@ -313,20 +323,20 @@ def test_a_new_screen_whose_ip_cant_be_placed_has_no_weather_location(app, clien
     with patch("broker.services.geoip.suggest_weather_location", return_value=None):
         response = _register(client, DISPLAY)
     with app.app_context():
-        assert db.session.get(DeviceConfig, response.get_json()["device_id"]).weather_location == ""
+        assert db.session.get_one(DeviceConfig, response.get_json()["device_id"]).weather_location == ""
 
 
 def test_a_repeat_registration_leaves_the_weather_location_alone(app, client):
     device_id = _register(client, DISPLAY).get_json()["device_id"]
     with app.app_context():
-        db.session.get(DeviceConfig, device_id).weather_location = "Leeds"
+        db.session.get_one(DeviceConfig, device_id).weather_location = "Leeds"
         db.session.commit()
 
     with patch("broker.services.geoip.suggest_weather_location", return_value="London") as suggest:
         assert _register(client, DISPLAY).status_code == 200
     suggest.assert_not_called()
     with app.app_context():
-        assert db.session.get(DeviceConfig, device_id).weather_location == "Leeds"
+        assert db.session.get_one(DeviceConfig, device_id).weather_location == "Leeds"
 
 
 @pytest.mark.parametrize("by_token", [False, True])
@@ -336,7 +346,7 @@ def test_pairing_subscribes_to_the_weather_registration_gave(app, client, fake_r
 
     if by_token:
         with app.app_context():
-            token = db.session.get(Device, device_id).pairing_token
+            token = db.session.get_one(Device, device_id).pairing_token
         assert client.post("/pair/token", json={"token": token}).status_code == 200
     else:
         with app.app_context():

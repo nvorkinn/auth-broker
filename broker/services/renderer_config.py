@@ -5,6 +5,8 @@ the screen's live code while it has one (services/pairing_key.py, `v1:pairing:<d
 same way. The contract (vendor/countdown-api) is the shape pi-dashboard's renderer reads them with.
 """
 
+from typing import Literal
+
 from countdown_api.models import (
     AppleMusic,
     ConfigResponse,
@@ -22,7 +24,7 @@ from cryptography.fernet import InvalidToken
 from flask import current_app
 
 from broker.db import db
-from broker.models import Device, DeviceConfig, GlowmarktCredentials
+from broker.models import Device, DeviceConfig, GlowmarktCredentials, Style
 from broker.services import pace, pairing, stops, weather_place
 from broker.services.postcodes import postcode_country
 
@@ -107,6 +109,6 @@ def _glowmarkt_enabled(creds: GlowmarktCredentials | None) -> bool:
         return False
 
 
-def _departures_style(style: str) -> str:
+def _departures_style(style: Style) -> Literal["grouped", "hero", "card"]:
     """Return `style` as the departures' own field names it: airy was called grouped there."""
     return "grouped" if style == "airy" else style

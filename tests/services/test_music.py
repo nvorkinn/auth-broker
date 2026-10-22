@@ -57,8 +57,11 @@ def test_the_queue_is_the_last_played_and_the_ones_before(app, register_device, 
     with app.app_context(), patch("broker.clients.apple_music.recently_played", return_value=songs):
         queue = music.apple_music_queue(device_id)
 
-    assert queue["currently_playing"]["name"] == "Song 0"
-    assert [t["name"] for t in queue["queue"]] == [f"Song {i}" for i in range(1, 1 + music.EARLIER)]
+    currently_playing, earlier = queue["currently_playing"], queue["queue"]
+    assert isinstance(currently_playing, dict)
+    assert isinstance(earlier, list)
+    assert currently_playing["name"] == "Song 0"
+    assert [t["name"] for t in earlier] == [f"Song {i}" for i in range(1, 1 + music.EARLIER)]
 
 
 def test_the_queue_raises_when_apple_cant_be_reached(app, register_device, musickit):

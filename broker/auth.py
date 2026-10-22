@@ -71,7 +71,7 @@ def authenticate_device(authorization: str, roles: Collection[str] = frozenset(R
         raise DeviceAuthError(401, "unauthorized")
 
     device, role = _find_by_secret(secret)
-    if role is None:
+    if device is None or role is None:
         raise DeviceAuthError(401, "unauthorized")
     if role not in roles:
         raise DeviceAuthError(403, "forbidden")
@@ -104,7 +104,7 @@ def require_device_auth(roles: Collection[str] = frozenset(ROLES)) -> Callable[[
             return view(*args, device_id=device.device_id, **kwargs)
 
         # For the test that keeps caddy/Caddyfile from putting a device route behind the browser login.
-        wrapped.device_auth = True  # type: ignore[attr-defined]
+        wrapped.device_auth = True  # ty: ignore[unresolved-attribute] -- a marker attribute, not part of the view type
         return wrapped
 
     return decorator

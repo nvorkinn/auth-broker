@@ -52,6 +52,9 @@ class UTCDateTime(TypeDecorator):
 
 
 db = SQLAlchemy(model_class=Base)
+# What every model subclasses. db.Model is built at runtime (Base plus Flask-SQLAlchemy's table naming and binds), so
+# type checkers can't follow it as a base class; to them it is Base, which it extends.
+Model = Base if TYPE_CHECKING else db.Model
 migrate = Migrate(directory=str(Path(__file__).resolve().parent / "migrations"), render_as_batch=True)
 
 

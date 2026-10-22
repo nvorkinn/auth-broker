@@ -133,6 +133,7 @@ def test_resolve_keeps_the_saved_place_without_asking_open_meteo(app):
         patch("broker.clients.weather.search_places") as search,
     ):
         place = resolve("2643743", "london, england, united kingdom", _saved(LONDON))
+    assert place is not None
     assert (place["id"], place["label"], place["country_code"]) == (2643743, LONDON["label"], "GB")
     get.assert_not_called()
     search.assert_not_called()

@@ -100,7 +100,9 @@ def test_pair_accepts_lowercase_code(app, client, register_device):
 
 
 def _prefilled_code(response):
-    return re.search(rb'name="code"[^>]*value="([^"]*)"', response.data, re.DOTALL).group(1).decode()
+    match = re.search(rb'name="code"[^>]*value="([^"]*)"', response.data, re.DOTALL)
+    assert match is not None
+    return match[1].decode()
 
 
 def test_pair_fills_in_a_code_given_in_the_link(client):
@@ -132,7 +134,7 @@ def test_a_code_from_the_link_pairs_like_a_typed_one(app, client, register_devic
 
     assert response.status_code == 302
     with app.app_context():
-        assert db.session.get(Device, device_id).owner == "user-1"
+        assert db.session.get_one(Device, device_id).owner == "user-1"
 
 
 def test_wrong_codes_lock_out_the_ip_even_for_the_right_code(app, client, register_device):
@@ -146,7 +148,7 @@ def test_wrong_codes_lock_out_the_ip_even_for_the_right_code(app, client, regist
     assert locked.status_code == 429
     assert locked.headers["Retry-After"] == "60"
     with app.app_context():
-        assert db.session.get(Device, device_id).owner is None
+        assert db.session.get_one(Device, device_id).owner is None
 
 
 def test_device_config_requires_pairing(client):
@@ -172,7 +174,7 @@ def test_device_config_prefills_an_empty_weather_location_from_the_ip(app, paire
 
     # Only shown: nothing is stored until it's saved.
     with app.app_context():
-        assert db.session.get(DeviceConfig, device_id).weather_location == ""
+        assert db.session.get_one(DeviceConfig, device_id).weather_location == ""
 
 
 def test_device_config_keeps_a_saved_weather_location_over_a_suggestion(paired_client):
@@ -238,7 +240,7 @@ def test_device_config_groups_fields_into_sections(paired_client):
 def test_device_config_shows_vertical_even_when_another_orientation_is_stored(app, paired_client):
     client, device_id, _ = paired_client
     with app.app_context():
-        db.session.get(DeviceConfig, device_id).orientation = "horizontal"
+        db.session.get_one(DeviceConfig, device_id).orientation = "horizontal"
         db.session.commit()
     html = client.get("/device").get_data(as_text=True)
     assert re.search(r'id="orientation_vertical"[^>]*checked', html)
@@ -250,18 +252,18 @@ def test_device_config_post_persists_orientation(app, paired_client):
     response = client.post("/device", data={"interval": "15", "orientation": "horizontal"})
     assert response.status_code == 302
     with app.app_context():
-        assert db.session.get(DeviceConfig, device_id).orientation == "horizontal"
+        assert db.session.get_one(DeviceConfig, device_id).orientation == "horizontal"
 
 
 def test_device_config_post_without_orientation_keeps_the_stored_one(app, paired_client):
     client, device_id, _ = paired_client
     with app.app_context():
-        db.session.get(DeviceConfig, device_id).orientation = "horizontal"
+        db.session.get_one(DeviceConfig, device_id).orientation = "horizontal"
         db.session.commit()
     response = client.post("/device", data={"interval": "15"})
     assert response.status_code == 302
     with app.app_context():
-        assert db.session.get(DeviceConfig, device_id).orientation == "horizontal"
+        assert db.session.get_one(DeviceConfig, device_id).orientation == "horizontal"
 
 
 def test_device_config_post_rejects_an_unknown_orientation(app, paired_client):
@@ -270,7 +272,7 @@ def test_device_config_post_rejects_an_unknown_orientation(app, paired_client):
     assert response.status_code == 400
     assert b"Orientation must be one of horizontal, vertical." in response.data
     with app.app_context():
-        assert db.session.get(DeviceConfig, device_id).orientation == "vertical"
+        assert db.session.get_one(DeviceConfig, device_id).orientation == "vertical"
 
 
 def test_device_config_shows_both_clock_formats_and_defaults_to_24_hour(paired_client):
@@ -287,14 +289,14 @@ def test_device_config_shows_both_clock_formats_and_defaults_to_24_hour(paired_c
 def test_device_config_post_persists_and_shows_the_clock_format(app, paired_client, clock_format):
     client, device_id, _ = paired_client
     with app.app_context():
-        db.session.get(DeviceConfig, device_id).clock_format = "24h" if clock_format == "12h" else "12h"
+        db.session.get_one(DeviceConfig, device_id).clock_format = "24h" if clock_format == "12h" else "12h"
         db.session.commit()
 
     response = client.post("/device", data={"clock_format": clock_format})
 
     assert response.status_code == 302
     with app.app_context():
-        assert db.session.get(DeviceConfig, device_id).clock_format == clock_format
+        assert db.session.get_one(DeviceConfig, device_id).clock_format == clock_format
     html = client.get(response.headers["Location"]).get_data(as_text=True)
     assert re.search(rf'id="clock_format_{clock_format}"[^>]*checked', html)
     assert len(re.findall(r'name="clock_format"[^>]*checked', html)) == 1
@@ -303,13 +305,13 @@ def test_device_config_post_persists_and_shows_the_clock_format(app, paired_clie
 def test_device_config_post_without_clock_format_keeps_the_stored_one(app, paired_client):
     client, device_id, _ = paired_client
     with app.app_context():
-        db.session.get(DeviceConfig, device_id).clock_format = "12h"
+        db.session.get_one(DeviceConfig, device_id).clock_format = "12h"
         db.session.commit()
 
     assert client.post("/device", data={"interval": "20"}).status_code == 302
 
     with app.app_context():
-        config = db.session.get(DeviceConfig, device_id)
+        config = db.session.get_one(DeviceConfig, device_id)
         assert config.clock_format == "12h"
 
 
@@ -317,7 +319,7 @@ def test_device_config_post_without_clock_format_keeps_the_stored_one(app, paire
 def test_device_config_post_rejects_invalid_clock_formats_without_saving_anything(app, paired_client, clock_format):
     client, device_id, _ = paired_client
     with app.app_context():
-        db.session.get(DeviceConfig, device_id).clock_format = "12h"
+        db.session.get_one(DeviceConfig, device_id).clock_format = "12h"
         db.session.commit()
 
     response = client.post(
@@ -337,7 +339,7 @@ def test_device_config_post_rejects_invalid_clock_formats_without_saving_anythin
     assert b"The clock format must be one of 24h, 12h." in response.data
     assert b"Nothing was saved." in response.data
     with app.app_context():
-        config = db.session.get(DeviceConfig, device_id)
+        config = db.session.get_one(DeviceConfig, device_id)
         assert (config.clock_format, config.weather_location, config.spotify_enabled) == ("12h", "", False)
         assert config.style == "airy"
         assert db.session.get(GlowmarktCredentials, device_id) is None
@@ -351,7 +353,7 @@ def test_device_config_does_not_save_clock_format_when_another_field_is_invalid(
     assert response.status_code == 400
     assert b"Nothing was saved." in response.data
     with app.app_context():
-        assert db.session.get(DeviceConfig, device_id).clock_format == "24h"
+        assert db.session.get_one(DeviceConfig, device_id).clock_format == "24h"
 
 
 def test_device_config_post_persists_settings(app, paired_client):
@@ -368,7 +370,7 @@ def test_device_config_post_persists_settings(app, paired_client):
     assert response.status_code == 302
 
     with app.app_context():
-        config = db.session.get(DeviceConfig, device_id)
+        config = db.session.get_one(DeviceConfig, device_id)
         assert config.weather_location == "London"
         assert config.spotify_enabled is True
         assert config.tfl_stop_ids == ["940GZZLUEUS", "490000173F"]
@@ -456,7 +458,7 @@ def test_device_config_post_stores_encrypted_glowmarkt_password(app, paired_clie
     assert response.status_code == 302
 
     with app.app_context():
-        creds = db.session.get(GlowmarktCredentials, device_id)
+        creds = db.session.get_one(GlowmarktCredentials, device_id)
         assert creds.username == "someone@example.com"
         assert creds.password_encrypted not in (None, "hunter2")
 
@@ -481,7 +483,7 @@ def test_device_config_post_blank_password_keeps_existing_one(app, paired_client
     client.post("/device", data={"interval": "15", "glowmarkt_username": "someone-else@example.com"})
 
     with app.app_context():
-        creds = db.session.get(GlowmarktCredentials, device_id)
+        creds = db.session.get_one(GlowmarktCredentials, device_id)
         assert creds.username == "someone-else@example.com"
         assert creds.password_encrypted is not None
 
@@ -581,7 +583,7 @@ def test_device_config_post_saves_a_norwegian_postcode_and_language(app, paired_
     assert response.status_code == 302
 
     with app.app_context():
-        config = db.session.get(DeviceConfig, device_id)
+        config = db.session.get_one(DeviceConfig, device_id)
         assert (config.postcode, config.language) == ("0150", "nb")
 
 
@@ -592,7 +594,7 @@ def test_device_config_post_rejects_an_unknown_language(app, paired_client):
     assert b"language must be one of en, nb" in response.data
 
     with app.app_context():
-        assert db.session.get(DeviceConfig, device_id).language == "en"
+        assert db.session.get_one(DeviceConfig, device_id).language == "en"
 
 
 def test_device_page_offers_the_languages(paired_client):
@@ -608,7 +610,7 @@ def test_device_config_post_saves_normalized_postcode(app, paired_client):
     assert response.status_code == 302
 
     with app.app_context():
-        assert db.session.get(DeviceConfig, device_id).postcode == "SW1A 1AA"
+        assert db.session.get_one(DeviceConfig, device_id).postcode == "SW1A 1AA"
 
 
 def test_device_config_post_rejects_invalid_postcode_and_saves_nothing(app, paired_client):
@@ -622,7 +624,7 @@ def test_device_config_post_rejects_invalid_postcode_and_saves_nothing(app, pair
     assert b"valid UK or Norwegian postcode" in response.data
 
     with app.app_context():
-        config = db.session.get(DeviceConfig, device_id)
+        config = db.session.get_one(DeviceConfig, device_id)
         assert (config.postcode, config.weather_location) == ("SW1A 1AA", "London")
 
 
@@ -638,7 +640,7 @@ def test_device_config_post_rejects_weather_location_open_meteo_cant_find(app, p
     assert b"Nothing was saved" in response.data
     weather_location_lookup.assert_called_with("SE17 2PX", count=1)
     with app.app_context():
-        config = db.session.get(DeviceConfig, device_id)
+        config = db.session.get_one(DeviceConfig, device_id)
         assert config.weather_location == "London"
 
 
@@ -653,7 +655,7 @@ def test_device_config_post_refuses_an_unverified_weather_location_when_open_met
     assert response.status_code == 400
     assert b"try again in a minute" in response.data
     with app.app_context():
-        assert db.session.get(DeviceConfig, device_id).weather_location == ""
+        assert db.session.get_one(DeviceConfig, device_id).weather_location == ""
 
 
 def test_device_config_post_blank_weather_location_skips_the_lookup(paired_client, weather_location_lookup):
@@ -748,7 +750,7 @@ def test_unlink_screen_clears_the_display_secret(app, client, paired_client):
 
     assert response.status_code == 302
     with app.app_context():
-        assert db.session.get(Device, device_id).display_secret_hash is None
+        assert db.session.get_one(Device, device_id).display_secret_hash is None
     assert client.post("/api/frame", headers=frame_headers).status_code == 401
     assert "Unlink screen" not in client.get("/device").get_data(as_text=True)
 
@@ -767,7 +769,7 @@ def test_device_config_shows_one_style_picker_with_the_stored_style_selected(app
     # One style for every panel: no picker per panel.
     assert not re.search(r'name="(tfl|spotify|notices)_style"', html)
     with app.app_context():
-        db.session.get(DeviceConfig, device_id).style = "card"
+        db.session.get_one(DeviceConfig, device_id).style = "card"
         db.session.commit()
     html = client.get("/device").get_data(as_text=True)
     assert re.findall(r'name="style" value="(\w+)" checked', html) == ["card"]
@@ -789,17 +791,17 @@ def test_device_config_post_persists_the_style(app, paired_client):
     response = client.post("/device", data={"interval": "15", "style": "card"})
     assert response.status_code == 302
     with app.app_context():
-        assert db.session.get(DeviceConfig, device_id).style == "card"
+        assert db.session.get_one(DeviceConfig, device_id).style == "card"
 
 
 def test_device_config_post_without_a_style_keeps_the_stored_one(app, paired_client):
     client, device_id, _ = paired_client
     with app.app_context():
-        db.session.get(DeviceConfig, device_id).style = "card"
+        db.session.get_one(DeviceConfig, device_id).style = "card"
         db.session.commit()
     client.post("/device", data={"interval": "15"})
     with app.app_context():
-        assert db.session.get(DeviceConfig, device_id).style == "card"
+        assert db.session.get_one(DeviceConfig, device_id).style == "card"
 
 
 @pytest.mark.parametrize("style", ["fancy", "grouped", "classic", "boxed"])
@@ -809,7 +811,7 @@ def test_device_config_post_rejects_an_unknown_or_old_style(app, paired_client, 
     assert response.status_code == 400
     assert b"The style must be one of airy, hero, card." in response.data
     with app.app_context():
-        assert db.session.get(DeviceConfig, device_id).style == "airy"
+        assert db.session.get_one(DeviceConfig, device_id).style == "airy"
 
 
 # --- the public page about the display ------------------------------------------------------------------
@@ -843,8 +845,8 @@ def test_device_config_post_switches_the_developer_panel_and_stores_the_github_t
     client.post("/device", data={"interval": "15", "developer_enabled": "on", "github_token": " github_pat_abc "})
 
     with app.app_context():
-        assert db.session.get(DeviceConfig, device_id).developer_enabled
-        token = db.session.get(GitHubToken, device_id)
+        assert db.session.get_one(DeviceConfig, device_id).developer_enabled
+        token = db.session.get_one(GitHubToken, device_id)
         assert token.token_encrypted != "github_pat_abc"
         assert token.token == "github_pat_abc"
 
@@ -856,8 +858,8 @@ def test_device_config_post_blank_github_token_keeps_the_saved_one(app, paired_c
     client.post("/device", data={"interval": "15"})
 
     with app.app_context():
-        assert not db.session.get(DeviceConfig, device_id).developer_enabled
-        assert db.session.get(GitHubToken, device_id).token == "github_pat_abc"
+        assert not db.session.get_one(DeviceConfig, device_id).developer_enabled
+        assert db.session.get_one(GitHubToken, device_id).token == "github_pat_abc"
 
 
 def test_device_config_get_never_shows_the_github_token(paired_client):
@@ -913,7 +915,7 @@ def _give_another_screen_weather(app, register_device, location, place=None):
     """Register another screen (no one's) and give its config `location`, picked as `place` if one is given."""
     device_id, _ = register_device("another-device-secret-value-0123")
     with app.app_context():
-        config = db.session.get(DeviceConfig, device_id)
+        config = db.session.get_one(DeviceConfig, device_id)
         weather_place.store(config, place)
         config.weather_location = location
         db.session.commit()
@@ -996,7 +998,7 @@ def test_the_config_is_saved_even_when_redis_is_down(app, paired_client, fake_re
 
     assert response.status_code == 302
     with app.app_context():
-        assert db.session.get(DeviceConfig, device_id).weather_location == "London"
+        assert db.session.get_one(DeviceConfig, device_id).weather_location == "London"
 
 
 def test_a_failed_subscription_publish_logs_the_errors_type_not_its_text(
@@ -1027,7 +1029,7 @@ LONDON_ON = _place("London", 6058560, admin1="Ontario", country="Canada", countr
 
 def _weather_columns(app, device_id):
     with app.app_context():
-        config = db.session.get(DeviceConfig, device_id)
+        config = db.session.get_one(DeviceConfig, device_id)
         return (
             config.weather_location,
             config.weather_place_id,
@@ -1053,7 +1055,7 @@ def test_device_config_post_stores_the_picked_place_as_open_meteo_has_it(
     weather_location_lookup.assert_not_called()
     assert _weather_columns(app, device_id) == ("London", 6058560, "London, Ontario, Canada", "CA")
     with app.app_context():
-        config = db.session.get(DeviceConfig, device_id)
+        config = db.session.get_one(DeviceConfig, device_id)
         assert (config.weather_lat, config.weather_lon) == (1.0, 2.0)
 
 
@@ -1122,7 +1124,7 @@ def test_device_config_shows_the_saved_place_and_its_id_for_the_picker(app, pair
 def test_device_config_shows_a_location_saved_before_places_with_no_id(app, paired_client):
     client, device_id, _ = paired_client
     with app.app_context():
-        db.session.get(DeviceConfig, device_id).weather_location = "Leeds"
+        db.session.get_one(DeviceConfig, device_id).weather_location = "Leeds"
         db.session.commit()
 
     html = client.get("/device").get_data(as_text=True)

@@ -199,7 +199,7 @@ def device_config() -> ResponseReturnValue:
     """Show a screen's settings page, and save the settings posted from it."""
     device_id = g.device_id
     # A paired screen without a slug gets one now, which lists it in the pool.
-    if assignments.auto_name(db.session.get(Device, device_id)) is not None:
+    if assignments.auto_name(db.session.get_one(Device, device_id)) is not None:
         db.session.commit()
         config_store.publish(device_id)
 
@@ -230,7 +230,7 @@ def _save_device_config(device_id: str) -> ResponseReturnValue:
     raw_postcode = request.form.get("postcode", "")
     postcode = normalize_postcode(raw_postcode)
 
-    config = db.session.get(DeviceConfig, device_id)
+    config = db.session.get_one(DeviceConfig, device_id)
     choices = {field: request.form.get(field, getattr(config, field)) for field in CHOICES}
 
     place, errors = _weather_place(config)
@@ -245,7 +245,8 @@ def _save_device_config(device_id: str) -> ResponseReturnValue:
         for field, (allowed, label) in CHOICES.items()
         if choices[field] not in allowed
     ]
-    if errors:
+    # postcode is never None here (that is an error above), but saying so lets type checkers see it.
+    if errors or postcode is None:
         return _render_device_config(device_id, errors=[*errors, "Nothing was saved."]), 400
 
     weather_place.store(config, place)
@@ -257,7 +258,7 @@ def _save_device_config(device_id: str) -> ResponseReturnValue:
     for field, value in choices.items():
         setattr(config, field, value)
     if "screen_name" in request.form:
-        db.session.get(Device, device_id).device_name = screen_name
+        db.session.get_one(Device, device_id).device_name = screen_name
     glowmarkt_changed = _save_glowmarkt_credentials(device_id)
     github_changed = _save_github_token(device_id)
 
@@ -359,7 +360,7 @@ def name_screen() -> ResponseReturnValue:
 @require_paired_user
 def screen_view() -> ResponseReturnValue:
     """Show the screen's latest frame, and say how often the page checks for a new one (the screen's own poll rate)."""
-    config = db.session.get(DeviceConfig, g.device_id)
+    config = db.session.get_one(DeviceConfig, g.device_id)
     shown = frame_record.head(g.device_id)
     width, height = _frame_size(config)
     now = pace.clock()
@@ -391,9 +392,10 @@ def screen_frame() -> ResponseReturnValue:
     X-Rendered-At is when the pool first drew the picture.
     """
     frame = frame_record.read(g.device_id)
-    if frame is None:
+    # read() always has the frame itself; its absence is only possible in StoredFrame's type.
+    if frame is None or frame.frame is None:
         return jsonify(error="no frame yet"), 404
-    upright = db.session.get(DeviceConfig, g.device_id).orientation != "horizontal"
+    upright = db.session.get_one(DeviceConfig, g.device_id).orientation != "horizontal"
     resp = Response(mimetype="image/png")
     resp.set_etag(f"{frame.etag}-{'v' if upright else 'h'}")
     resp.headers["Cache-Control"] = "private, no-cache"
@@ -410,14 +412,14 @@ PAGE_ORIENTATION = "vertical"
 
 def _render_device_config(device_id: str, errors: list[str] | None = None) -> str:
     """Render a screen's settings page, with any errors from saving it."""
-    config = db.session.get(DeviceConfig, device_id)
+    config = db.session.get_one(DeviceConfig, device_id)
     creds = db.session.get(GlowmarktCredentials, device_id)
     glowmarkt = {
         "username": creds.username if creds else "",
         "has_password": bool(creds and creds.password_encrypted),
     }
 
-    device = db.session.get(Device, device_id)
+    device = db.session.get_one(Device, device_id)
     # The header shows the screen's latest frame, as the screen's own page does.
     frame_width, frame_height = _frame_size(config)
     # An empty weather location is prefilled with a guess from the visitor's IP, shown as one; it's
@@ -489,6 +491,6 @@ def display_unlink() -> ResponseReturnValue:
 
     For a screen that's lost, stolen or retired. Registering again makes it a new device.
     """
-    db.session.get(Device, g.device_id).display_secret_hash = None
+    db.session.get_one(Device, g.device_id).display_secret_hash = None
     db.session.commit()
     return redirect(url_for("pages.device_config", device_id=g.device_id))

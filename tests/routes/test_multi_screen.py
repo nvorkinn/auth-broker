@@ -42,12 +42,12 @@ def other_screen(app):
 
 def _weather(app, device_id):
     with app.app_context():
-        return db.session.get(DeviceConfig, device_id).weather_location
+        return db.session.get_one(DeviceConfig, device_id).weather_location
 
 
 def _set_weather(app, device_id, location):
     with app.app_context():
-        db.session.get(DeviceConfig, device_id).weather_location = location
+        db.session.get_one(DeviceConfig, device_id).weather_location = location
         db.session.commit()
 
 
@@ -92,8 +92,8 @@ def test_saving_one_screen_leaves_the_other_alone(app, client, two_screens):
 
     assert (response.status_code, response.headers["Location"]) == (302, f"/device/{first}")
     with app.app_context():
-        assert db.session.get(DeviceConfig, first).clock_format == "12h"
-        assert db.session.get(DeviceConfig, second).clock_format == "24h"
+        assert db.session.get_one(DeviceConfig, first).clock_format == "12h"
+        assert db.session.get_one(DeviceConfig, second).clock_format == "24h"
     assert _weather(app, second) == "Secondtown"
 
 
@@ -103,8 +103,8 @@ def test_each_screen_keeps_its_own_clock_format(app, client, two_screens, config
     assert client.post(f"/device/{first}", data={"clock_format": "12h"}).status_code == 302
 
     with app.app_context():
-        assert db.session.get(DeviceConfig, first).clock_format == "12h"
-        assert db.session.get(DeviceConfig, second).clock_format == "24h"
+        assert db.session.get_one(DeviceConfig, first).clock_format == "12h"
+        assert db.session.get_one(DeviceConfig, second).clock_format == "24h"
     for device_id, expected in [(first, "12h"), (second, "24h")]:
         page = client.get(f"/device/{device_id}").get_data(as_text=True)
         assert f'name="clock_format" value="{expected}" checked' in page
@@ -116,8 +116,8 @@ def test_disconnecting_spotify_and_unlinking_act_on_the_chosen_screen(app, clien
     with app.app_context():
         for device_id in (first, second):
             db.session.add(SpotifyToken(device_id=device_id, refresh_token="refresh"))
-        db.session.get(Device, first).display_secret_hash = "a" * 64
-        db.session.get(Device, second).display_secret_hash = "b" * 64
+        db.session.get_one(Device, first).display_secret_hash = "a" * 64
+        db.session.get_one(Device, second).display_secret_hash = "b" * 64
         db.session.commit()
 
     assert client.post(f"/device/{first}/spotify/disconnect").headers["Location"] == f"/device/{first}"
@@ -126,8 +126,8 @@ def test_disconnecting_spotify_and_unlinking_act_on_the_chosen_screen(app, clien
     with app.app_context():
         assert db.session.get(SpotifyToken, first) is None
         assert db.session.get(SpotifyToken, second) is not None
-        assert db.session.get(Device, first).display_secret_hash is None
-        assert db.session.get(Device, second).display_secret_hash == "b" * 64
+        assert db.session.get_one(Device, first).display_secret_hash is None
+        assert db.session.get_one(Device, second).display_secret_hash == "b" * 64
 
 
 def test_a_second_screen_is_named_on_its_own_page(app, client, two_screens):
@@ -136,8 +136,8 @@ def test_a_second_screen_is_named_on_its_own_page(app, client, two_screens):
     assert client.post(f"/device/{second}", data={"screen_name": "Bedroom"}).headers["Location"] == f"/device/{second}"
 
     with app.app_context():
-        assert db.session.get(Device, second).device_name == "Bedroom"
-        assert db.session.get(Device, first).device_name != "Bedroom"
+        assert db.session.get_one(Device, second).device_name == "Bedroom"
+        assert db.session.get_one(Device, first).device_name != "Bedroom"
 
 
 # --- nobody else's screen -----------------------------------------------------------------------------
@@ -159,8 +159,8 @@ def test_someone_elses_screen_is_not_found(app, client, two_screens, other_scree
 
     assert response.status_code == 404
     with app.app_context():
-        assert db.session.get(Device, other_screen).owner == "user-2"
-        assert db.session.get(DeviceConfig, other_screen).clock_format == "24h"
+        assert db.session.get_one(Device, other_screen).owner == "user-2"
+        assert db.session.get_one(DeviceConfig, other_screen).clock_format == "24h"
 
 
 def test_an_unknown_screen_is_not_found(client, two_screens):
@@ -248,7 +248,7 @@ def test_spotify_callback_refuses_a_screen_the_user_no_longer_owns(app, client, 
     first, _ = two_screens
     state = client.get(f"/auth/spotify/login?device={first}").headers["Location"].split("state=")[1].split("&")[0]
     with app.app_context():
-        db.session.get(Device, first).owner = "user-2"
+        db.session.get_one(Device, first).owner = "user-2"
         db.session.commit()
 
     response = _callback(client, state)
@@ -267,7 +267,7 @@ def test_the_users_own_header_is_what_decides_ownership(app, client, two_screens
     first, _ = two_screens
     assert USER == "user-1"
     with app.app_context():
-        assert db.session.get(Device, first).owner == USER
+        assert db.session.get_one(Device, first).owner == USER
 
 
 def test_without_a_signed_in_user_there_are_no_screens(app):

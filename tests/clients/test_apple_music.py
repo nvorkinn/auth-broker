@@ -112,8 +112,9 @@ def test_recent_tracks_logs_only_the_new_plays(app, musickit, register_device):
     with app.app_context():
         with patch("broker.clients.apple_music.recently_played", return_value=[song("3"), song("1"), song("2")]):
             tracks = apple_music.recent_tracks(device_id)
+        assert tracks is not None
         plays = db.session.query(AppleMusicPlay).all()
-        assert db.session.get(AppleMusicToken, device_id).seen_ids == ["3", "1", "2"]
+        assert db.session.get_one(AppleMusicToken, device_id).seen_ids == ["3", "1", "2"]
 
     assert len(tracks) == 3
     assert [play.song_id for play in plays] == ["3"]
@@ -126,7 +127,7 @@ def test_a_refused_token_is_cleared_but_the_log_kept(app, musickit, register_dev
     with app.app_context():
         with patch("broker.clients.apple_music.recently_played", side_effect=apple_music.AppleMusicRefusedError):
             assert apple_music.recent_tracks(device_id) is None
-        stored = db.session.get(AppleMusicToken, device_id)
+        stored = db.session.get_one(AppleMusicToken, device_id)
         assert stored.token is None
         assert stored.seen_ids == ["1"]
         assert not apple_music.linked(device_id)
@@ -171,6 +172,8 @@ def test_top_counts_the_logged_plays_over_the_time_range(app, register_device):
         tracks = apple_music.top(device_id, "tracks", "short_term", 5)
         artists = apple_music.top(device_id, "artists", "short_term", 5)
         long_tracks = apple_music.top(device_id, "tracks", "long_term", 1)
+        assert tracks is not None
+        assert long_tracks is not None
 
     assert [t["name"] for t in tracks["items"]] == ["Song 2", "Song 1", "Song 3"]
     assert artists == {"items": [{"name": "Flume"}, {"name": "Beach Bunny"}]}

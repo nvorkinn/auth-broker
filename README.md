@@ -200,11 +200,12 @@ python scripts/simulate_device.py --token    # prints the /pair URL instead
 # --secret <random string> to be the same screen across runs; pass a base URL to use the deployed broker
 ```
 
-**Tests and lint** (CI runs both on every PR, the tests split into 3 shards with coverage to Codecov):
+**Tests, lint and types** (CI runs all three on every PR, the tests split into 3 shards with coverage to Codecov):
 
 ```bash
 uv run python -m pytest --cov=broker
 ruff check . && ruff format --check .
+uv run ty check
 ```
 
 External APIs are mocked and Redis is fakeredis. The render queue's script tests also run against a real
