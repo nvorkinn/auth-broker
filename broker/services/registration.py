@@ -17,7 +17,7 @@ from datetime import UTC, datetime, timedelta
 from sqlalchemy import func, select
 
 from broker.db import db
-from broker.models import Device, DeviceConfig
+from broker.models import Device, DeviceConfig, FrameFormat
 
 from . import config_store, device_keys, frame_record, geoip, pairing
 
@@ -39,7 +39,9 @@ def _device_with(secret_hash: str) -> Device | None:
     return db.session.scalar(select(Device).where(Device.display_secret_hash == secret_hash))
 
 
-def register_screen(secret_hash: str, width: int, height: int, ip: str | None = None) -> Registered | None:
+def register_screen(
+    secret_hash: str, width: int, height: int, frame_format: FrameFormat, ip: str | None = None
+) -> Registered | None:
     """Make the screen a device at once, so its owner can pair with it and name it.
 
     A repeat of a registered secret finds its device, and leaves its config alone. Returns None when too many screens
@@ -50,7 +52,11 @@ def register_screen(secret_hash: str, width: int, height: int, ip: str | None = 
         return Registered(device_id=device.device_id)
 
     dropped = _drop_stale_screens(datetime.now(UTC))
-    device_id = None if _unpaired_screens() >= MAX_UNPAIRED_SCREENS else _new_device(secret_hash, width, height, ip)
+    device_id = (
+        None
+        if _unpaired_screens() >= MAX_UNPAIRED_SCREENS
+        else _new_device(secret_hash, width, height, frame_format, ip)
+    )
     db.session.commit()
     _forget_in_store(dropped)
     if device_id is None:
@@ -96,7 +102,7 @@ def _forget_in_store(device_ids: list[str]) -> None:
         config_store.publish(device_id)
 
 
-def _new_device(display_secret_hash: str, width: int, height: int, ip: str | None) -> str:
+def _new_device(display_secret_hash: str, width: int, height: int, frame_format: FrameFormat, ip: str | None) -> str:
     device_id = secrets.token_hex(6)
     # Only a name, with no picked place: the weather provider geocodes it by name until a save (or `flask weather
     # backfill`) picks one.
@@ -105,7 +111,7 @@ def _new_device(display_secret_hash: str, width: int, height: int, ip: str | Non
     device = Device(
         device_id=device_id,
         created_at=datetime.now(UTC),
-        config=DeviceConfig(width=width, height=height, weather_location=weather_location),
+        config=DeviceConfig(width=width, height=height, format=frame_format, weather_location=weather_location),
         pairing_token=pairing.token_for(display_secret_hash),
         display_secret_hash=display_secret_hash,
     )

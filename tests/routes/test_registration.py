@@ -30,7 +30,9 @@ def _device(app, device_id):
 
 
 def _register(client, secret):
-    return client.post("/api/devices/register", json={"secret": secret, "width": 480, "height": 800})
+    return client.post(
+        "/api/devices/register", json={"secret": secret, "width": 480, "height": 800, "format": "mono-1bpp-packed"}
+    )
 
 
 def test_register_rejects_a_non_string_secret(client):
@@ -39,7 +41,8 @@ def test_register_rejects_a_non_string_secret(client):
 
 def test_register_ignores_a_role(client):
     response = client.post(
-        "/api/devices/register", json={"role": "renderer", "secret": DISPLAY, "width": 480, "height": 800}
+        "/api/devices/register",
+        json={"role": "renderer", "secret": DISPLAY, "width": 480, "height": 800, "format": "mono-1bpp-packed"},
     )
 
     assert response.status_code == 201
@@ -166,7 +169,8 @@ def test_concurrent_registrations_never_share_a_secret(app):
     def register(secret):
         try:
             response = app.test_client().post(
-                "/api/devices/register", json={"secret": secret, "width": 480, "height": 800}
+                "/api/devices/register",
+                json={"secret": secret, "width": 480, "height": 800, "format": "mono-1bpp-packed"},
             )
             assert response.status_code in (200, 201), response.status_code
         except Exception as e:  # noqa: BLE001 -- collected and reported below
@@ -308,7 +312,7 @@ def test_a_new_screen_gets_the_weather_location_its_ip_suggests(app, client):
     with patch("broker.services.geoip.suggest_weather_location", return_value="London") as suggest:
         response = client.post(
             "/api/devices/register",
-            json={"secret": DISPLAY, "width": 480, "height": 800},
+            json={"secret": DISPLAY, "width": 480, "height": 800, "format": "mono-1bpp-packed"},
             environ_base={"REMOTE_ADDR": "81.2.69.1"},
         )
     assert response.status_code == 201

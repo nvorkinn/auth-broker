@@ -49,7 +49,7 @@ def build(config: DeviceConfig, *, pairing_code: str | None) -> ConfigResponse:
         clock_format=config.clock_format,
         language=config.language,
         timezone=timezone(country, stop_ids),
-        screen=Screen(orientation=config.orientation, width=config.width, height=config.height),
+        screen=Screen(orientation=config.orientation, width=config.width, height=config.height, format=config.format),
         # The key is what the weather is subscribed under, so it's what the renderer reads (v1:weather:<key>).
         weather=Weather(location=config.weather_location, key=weather_place.weather_key(config)),
         style=config.style,

@@ -41,7 +41,9 @@ def test_the_per_screen_routes_are_gone(client, register_device):
 
 def test_register_creates_device(client):
     secret = "a-very-long-device-secret-value"
-    response = client.post("/api/devices/register", json={"secret": secret, "width": 480, "height": 800})
+    response = client.post(
+        "/api/devices/register", json={"secret": secret, "width": 480, "height": 800, "format": "mono-1bpp-packed"}
+    )
     assert response.status_code == 201
     assert "device_id" in response.get_json()
 
@@ -87,7 +89,7 @@ def test_the_config_returns_defaults(app, register_device):
         "language": "en",
         "timezone": "Europe/London",
         "style": "airy",
-        "screen": {"orientation": "vertical", "width": 480, "height": 800},
+        "screen": {"orientation": "vertical", "width": 480, "height": 800, "format": "mono-1bpp-packed"},
         "weather": {"location": "", "key": None},
         "notice_board": {"postcode": None, "country": None, "style": "airy"},
         "tfl": {"stop_ids": [], "style": "grouped"},
@@ -350,13 +352,14 @@ def test_the_config_returns_the_saved_orientation(app, client, register_device):
     assert response.get_json()["screen"]["orientation"] == "horizontal"
 
 
-def test_register_stores_the_size_it_is_given(app, client):
+def test_register_stores_the_size_and_format_it_is_given(app, client):
     response = client.post(
-        "/api/devices/register", json={"secret": "display-secret-0123456789", "width": 1080, "height": 1920}
+        "/api/devices/register",
+        json={"secret": "display-secret-0123456789", "width": 1080, "height": 1920, "format": "mono-1bpp-packed"},
     )
     with app.app_context():
         config = db.session.get_one(DeviceConfig, response.get_json()["device_id"])
-        assert (config.width, config.height) == (1080, 1920)
+        assert (config.width, config.height, config.format) == (1080, 1920, "mono-1bpp-packed")
 
 
 @pytest.mark.parametrize(
@@ -372,8 +375,33 @@ def test_register_stores_the_size_it_is_given(app, client):
     ],
 )
 def test_register_rejects_a_missing_or_bad_screen_size(client, extra):
-    response = client.post("/api/devices/register", json={"secret": "display-secret-0123456789", **extra})
+    response = client.post(
+        "/api/devices/register", json={"secret": "display-secret-0123456789", "format": "mono-1bpp-packed", **extra}
+    )
     assert response.status_code == 400
+
+
+@pytest.mark.parametrize("frame_format", ["mono-1bpp-packed", "png"])
+def test_the_config_sends_the_frame_format_the_screen_registered_with(app, client, frame_format):
+    response = client.post(
+        "/api/devices/register",
+        json={"secret": "display-secret-0123456789", "width": 800, "height": 480, "format": frame_format},
+    )
+    assert response.status_code == 201
+    screen = _config(app, response.get_json()["device_id"]).get_json()["screen"]
+    assert screen == {"orientation": "vertical", "width": 800, "height": 480, "format": frame_format}
+
+
+@pytest.mark.parametrize(
+    "extra", [{}, {"format": None}, {"format": ""}, {"format": "PNG"}, {"format": "1bpp"}, {"format": ["png"]}]
+)
+def test_register_rejects_a_missing_or_unknown_frame_format(app, client, extra):
+    secret = "display-secret-0123456789"
+    response = client.post("/api/devices/register", json={"secret": secret, "width": 480, "height": 800, **extra})
+    assert response.status_code == 400
+    assert response.get_json() == {"error": "format must be one of mono-1bpp-packed, png"}
+    with app.app_context():
+        assert db.session.scalar(select(func.count()).select_from(Device)) == 0
 
 
 @pytest.mark.parametrize(("style", "departures_style"), [("airy", "grouped"), ("hero", "hero"), ("card", "card")])

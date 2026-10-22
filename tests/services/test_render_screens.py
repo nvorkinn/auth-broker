@@ -159,7 +159,8 @@ def test_a_new_screen_is_listed_under_its_id_while_it_has_a_code_and_no_name(app
 
 def test_registering_a_screen_gives_it_a_code_the_pool_draws(app, store, client):
     device_id = client.post(
-        "/api/devices/register", json={"secret": "display-secret-for-a-new-screen", "width": 480, "height": 800}
+        "/api/devices/register",
+        json={"secret": "display-secret-for-a-new-screen", "width": 480, "height": 800, "format": "mono-1bpp-packed"},
     ).get_json()["device_id"]
 
     assert store.hgetall(SCREENS) == {device_id: device_id}
@@ -169,9 +170,9 @@ def test_registering_a_screen_gives_it_a_code_the_pool_draws(app, store, client)
 
 def test_an_unpaired_screens_poll_brings_back_a_lapsed_code(app, store, client):
     secret = "display-secret-for-a-waiting-screen"
-    device_id = client.post("/api/devices/register", json={"secret": secret, "width": 480, "height": 800}).get_json()[
-        "device_id"
-    ]
+    device_id = client.post(
+        "/api/devices/register", json={"secret": secret, "width": 480, "height": 800, "format": "mono-1bpp-packed"}
+    ).get_json()["device_id"]
     with app.app_context():
         first = pairing.live_code(device_id)
         for code in db.session.scalars(db.select(PairingCode)):
@@ -269,9 +270,9 @@ def test_redis_down_is_logged_by_type_and_not_raised(app):
 
 def test_pairing_names_the_screen_and_lists_and_draws_it_at_once(app, store, client):
     display = "display-secret-for-naming-a-screen"
-    device_id = client.post("/api/devices/register", json={"secret": display, "width": 480, "height": 800}).get_json()[
-        "device_id"
-    ]
+    device_id = client.post(
+        "/api/devices/register", json={"secret": display, "width": 480, "height": 800, "format": "mono-1bpp-packed"}
+    ).get_json()["device_id"]
     with app.app_context():
         token = db.session.get_one(Device, device_id).pairing_token
     # Not paired yet, but it shows a code to pair with by hand: listed under its id, as naming it will make it.

@@ -64,8 +64,11 @@ type Orientation = Literal["horizontal", "vertical"]
 type ClockFormat = Literal["12h", "24h"]
 type Language = Literal["en", "nb"]
 type Style = Literal["airy", "hero", "card"]
+type FrameFormat = Literal["mono-1bpp-packed", "png"]
 
 ORIENTATIONS = ("horizontal", "vertical")
+# What a screen may report at registration, not a setting the config page shows.
+FRAME_FORMATS: tuple[FrameFormat, ...] = ("mono-1bpp-packed", "png")
 CLOCK_FORMATS = {"24h": "24-hour (13:00)", "12h": "12-hour (1:00 PM)"}
 # The store contract's languages, each with its name in itself for the config page.
 LANGUAGES = {"en": "English", "nb": "Norsk"}
@@ -116,6 +119,9 @@ class DeviceConfig(Model):
     # The screen's size in pixels as it reported at registration; 480x800 after `devices unpair --config`.
     width: Mapped[int] = mapped_column(Integer, server_default=text("480"))
     height: Mapped[int] = mapped_column(Integer, server_default=text("800"))
+    # The format the screen takes its frame in, one of FRAME_FORMATS, as it reported at registration;
+    # mono-1bpp-packed (the e-paper's 800x480 1-bit buffer) after `devices unpair --config`.
+    format: Mapped[FrameFormat] = mapped_column(String, server_default=text("'mono-1bpp-packed'"))
 
     device: Mapped[Device] = relationship(back_populates="config")
 

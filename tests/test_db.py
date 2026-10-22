@@ -631,7 +631,7 @@ def test_0021_keeps_existing_weather_locations_and_leaves_their_place_to_the_bac
         assert "weather_place_id" not in {column["name"] for column in inspect(db.engine).get_columns("device_config")}
         with db.engine.begin() as conn:
             _insert_device(conn, "old", weather_location="Tromsø", postcode="9008")
-        upgrade(revision="0021")
+        upgrade()
 
         config = db.session.get_one(DeviceConfig, "old")
         assert (config.weather_location, config.postcode) == ("Tromsø", "9008")
@@ -695,3 +695,14 @@ def test_0023_downgrade_gives_each_named_screen_a_pending_assignment(app, regist
             ).one()
         assert tuple(row) == (slug, "pending", None, "")
         upgrade()
+
+
+def test_0025_backfills_existing_screens_with_the_mono_1bpp_packed_frame_format(app, register_device):
+    device_id, _ = register_device()
+    with app.app_context():
+        downgrade(revision="0024")
+        assert "format" not in {column["name"] for column in inspect(db.engine).get_columns("device_config")}
+        upgrade()
+
+        config = db.session.get_one(DeviceConfig, device_id)
+        assert (config.width, config.height, config.format) == (480, 800, "mono-1bpp-packed")

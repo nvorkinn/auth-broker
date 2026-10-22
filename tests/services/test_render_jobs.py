@@ -353,7 +353,13 @@ def test_using_the_code_queues_the_screen_after_deleting_its_key(app, store, pai
 
 def test_pairing_by_token_queues_the_screen(app, store, client):
     device_id = client.post(
-        "/api/devices/register", json={"secret": "display-secret-for-a-token-pairing", "width": 800, "height": 480}
+        "/api/devices/register",
+        json={
+            "secret": "display-secret-for-a-token-pairing",
+            "width": 800,
+            "height": 480,
+            "format": "mono-1bpp-packed",
+        },
     ).get_json()["device_id"]
     _pool(store, device_id)
     with app.app_context():
