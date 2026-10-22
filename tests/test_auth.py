@@ -1,7 +1,8 @@
+import pytest
 from flask import g, jsonify
 
 from broker import create_app
-from broker.auth import require_device_auth
+from broker.auth import require_device_auth, require_user, require_user_id
 
 
 def test_require_device_auth_rejects_missing_header(client, register_device):
@@ -69,3 +70,50 @@ def test_require_device_auth_sets_device_id_and_role(app, register_device):
 def test_session_cookie_domain_comes_from_the_environment(monkeypatch, app):
     monkeypatch.setenv("SESSION_COOKIE_DOMAIN", ".example.com")
     assert create_app().config["SESSION_COOKIE_DOMAIN"] == ".example.com"
+
+
+def test_require_user_id_passes_the_signed_in_user_to_the_view(app):
+    @require_user_id
+    def view(user_id):
+        return jsonify(user_id=user_id)
+
+    with app.test_request_context(headers={app.config["USER_HEADER"]: " user-1 "}):
+        assert view().get_json() == {"user_id": "user-1"}
+
+
+def test_require_user_id_keeps_the_urls_own_arguments(app):
+    @require_user_id
+    def view(name, user_id):
+        return f"{user_id}/{name}"
+
+    with app.test_request_context(headers={app.config["USER_HEADER"]: "user-1"}):
+        assert view(name="project") == "user-1/project"
+
+
+@pytest.mark.parametrize("headers", [{}, {"X-Authentik-Uid": ""}, {"X-Authentik-Uid": "  "}])
+def test_require_user_id_turns_away_a_request_without_the_login_header(app, headers):
+    @require_user_id
+    def view(user_id):
+        raise AssertionError
+
+    with app.test_request_context(headers=headers):
+        assert view() == ("Sign in required.", 401)
+
+
+def test_require_user_lets_the_view_run_without_the_users_id(app):
+    @require_user
+    def view():
+        return "ok"
+
+    with app.test_request_context(headers={app.config["USER_HEADER"]: "user-1"}):
+        assert view() == "ok"
+
+
+@pytest.mark.parametrize("headers", [{}, {"X-Authentik-Uid": "  "}])
+def test_require_user_turns_away_a_request_without_the_login_header(app, headers):
+    @require_user
+    def view():
+        raise AssertionError
+
+    with app.test_request_context(headers=headers):
+        assert view() == ("Sign in required.", 401)

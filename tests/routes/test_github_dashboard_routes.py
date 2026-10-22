@@ -269,3 +269,33 @@ def test_auto_merge_rechecks_ownership_and_calls_github(client, dashboard):
     assert response.json == {"auto_merge": True, "merged": False}
     dashboard.set_auto_merge.assert_called_once_with(repo, 7, enabled=True)
     dashboard.close.assert_called_once()
+
+
+def test_a_view_that_uses_the_user_acts_as_the_signed_in_user(client, dashboard):
+    dashboard.repositories.return_value = []
+    with patch("broker.routes.github_dashboard.github_app.token", return_value="ghu_user") as token:
+        assert client.get("/github/repositories").status_code == 200
+    token.assert_called_once_with("user-1")
+
+
+def test_the_callback_connects_the_signed_in_user(client, dashboard):
+    assert client.get("/github").status_code == 200
+    with client.session_transaction() as session:
+        session["github_app_state"] = "state"
+    with patch("broker.routes.github_dashboard.github_app.connect") as connect:
+        response = client.get("/github/callback", query_string={"state": "state", "code": "abc"})
+    assert response.status_code == 302
+    connect.assert_called_once_with("user-1", "abc")
+
+
+def test_views_that_do_not_use_the_user_run_without_its_id(client, dashboard):
+    with patch("broker.routes.github_dashboard.github_app.authorize_url", return_value="https://github.com/login"):
+        response = client.get("/github/connect")
+    assert response.status_code == 302
+    assert response.headers["Location"] == "https://github.com/login"
+
+
+def test_the_privacy_check_applies_to_views_with_and_without_the_user_id(client, dashboard):
+    other = {"X-Authentik-Uid": "someone-else"}
+    for path in ("/github/connect", "/github/changes", "/github/repositories", "/github/callback"):
+        assert client.get(path, headers=other).status_code == 403
