@@ -72,7 +72,7 @@ def device(app, register_device):
     def _make(*, enabled=True, token="github_pat_abc", secret="a-very-long-device-secret-1"):  # noqa: S107
         device_id, _ = register_device(secret)
         with app.app_context():
-            db.session.get(DeviceConfig, device_id).developer_enabled = enabled
+            db.session.get_one(DeviceConfig, device_id).developer_enabled = enabled
             if token is not None:
                 row = GitHubToken(device_id=device_id)
                 row.token = token
@@ -326,7 +326,7 @@ def test_a_device_switched_off_stops_the_fast_polls(app, provider, store, device
     device_id = device()
     _run(provider)
     with app.app_context():
-        db.session.get(DeviceConfig, device_id).developer_enabled = False
+        db.session.get_one(DeviceConfig, device_id).developer_enabled = False
         db.session.commit()
 
     _run(provider)
@@ -338,7 +338,7 @@ def test_the_provider_cant_write_to_the_database(provider, device):
     device_id = device()
 
     with provider.app.app_context():
-        db.session.get(DeviceConfig, device_id).developer_enabled = False
+        db.session.get_one(DeviceConfig, device_id).developer_enabled = False
         with pytest.raises(OperationalError, match="readonly"):
             db.session.commit()
 

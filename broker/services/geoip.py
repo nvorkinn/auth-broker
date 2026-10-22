@@ -71,7 +71,9 @@ def _biggest_place_near(places: list[Place], latitude: float, longitude: float) 
         if abs(p.latitude - latitude) <= max_degrees
         and _distance_km(latitude, longitude, p.latitude, p.longitude) <= NEARBY_KM
     ]
-    return max(nearby, key=lambda p: p.population, default=None)
+    if not nearby:
+        return None
+    return max(nearby, key=lambda p: p.population)
 
 
 def suggest_weather_location(ip: str | None) -> str | None:
@@ -89,11 +91,15 @@ def suggest_weather_location(ip: str | None) -> str | None:
     if not isinstance(record, dict):
         return None
 
-    location = record.get("location") or {}
-    latitude, longitude = location.get("latitude"), location.get("longitude")
-    if latitude is not None and longitude is not None:
-        place = _biggest_place_near(data.places, latitude, longitude)
-        if place is not None:
-            return place.name
+    location = record.get("location")
+    if isinstance(location, dict):
+        latitude, longitude = location.get("latitude"), location.get("longitude")
+        if isinstance(latitude, int | float) and isinstance(longitude, int | float):
+            place = _biggest_place_near(data.places, latitude, longitude)
+            if place is not None:
+                return place.name
     # Somewhere with no town of 15,000 people nearby: the database's own name for it will do.
-    return (record.get("city") or {}).get("names", {}).get("en") or None
+    city = record.get("city")
+    names = city.get("names") if isinstance(city, dict) else None
+    name = names.get("en") if isinstance(names, dict) else None
+    return name if isinstance(name, str) and name else None

@@ -19,6 +19,12 @@ GRANT = {
 }
 
 
+def _body(call):
+    """Return the form a call to GitHub sent."""
+    assert isinstance(call.request.body, str)
+    return call.request.body
+
+
 @pytest.fixture
 def ctx(app):
     app.config.update(
@@ -49,12 +55,12 @@ def test_sign_in_goes_to_github_with_the_client_and_state(ctx):
 def test_connecting_keeps_both_tokens_encrypted(ctx):
     grant = responses.post(github_app.TOKEN_URL, json=GRANT)
     github_app.connect("user-1", "the-code")
-    assert parse_qs(grant.calls[0].request.body) == {
+    assert parse_qs(_body(grant.calls[0])) == {
         "client_id": ["Iv1.client"],
         "client_secret": ["shh"],
         "code": ["the-code"],
     }
-    row = db.session.get(GitHubAppToken, "user-1")
+    row = db.session.get_one(GitHubAppToken, "user-1")
     assert "ghu_new" not in row.access_token_encrypted
     assert (row.access_token, row.refresh_token) == ("ghu_new", "ghr_new")
     assert github_app.connected("user-1")
@@ -79,7 +85,7 @@ def test_a_token_about_to_expire_is_renewed_once_under_a_lock(ctx):
     stored(timedelta(minutes=2))
     renewal = responses.post(github_app.TOKEN_URL, json=GRANT)
     assert github_app.token("user-1") == "ghu_new"
-    assert parse_qs(renewal.calls[0].request.body)["refresh_token"] == ["ghr_old"]
+    assert parse_qs(_body(renewal.calls[0]))["refresh_token"] == ["ghr_old"]
     assert github_app.token("user-1") == "ghu_new"
     assert len(renewal.calls) == 1
     assert not ctx.extensions["redis"].exists(github_app.RENEW_LOCK)

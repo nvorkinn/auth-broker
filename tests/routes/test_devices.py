@@ -15,7 +15,9 @@ from broker.services import pairing, renderer_config
 def _config(app, device_id):
     """Return the device's config as the render pool reads it, wrapped like a test client's response."""
     with app.app_context():
-        body = renderer_config.build(db.session.get(DeviceConfig, device_id), pairing_code=None).model_dump(mode="json")
+        body = renderer_config.build(db.session.get_one(DeviceConfig, device_id), pairing_code=None).model_dump(
+            mode="json"
+        )
     return SimpleNamespace(status_code=200, data=json.dumps(body).encode(), get_json=lambda: body)
 
 
@@ -166,7 +168,7 @@ def test_the_config_sends_the_slug_as_the_key_of_a_location_with_no_place_picked
 
 def _set_config(app, device_id, **values):
     with app.app_context():
-        config = db.session.get(DeviceConfig, device_id)
+        config = db.session.get_one(DeviceConfig, device_id)
         for key, value in values.items():
             setattr(config, key, value)
         db.session.commit()
@@ -298,7 +300,7 @@ def test_pairing_spends_the_code(app, client, register_device):
 
     with app.app_context():
         assert pairing.live_code(device_id) is None
-        assert db.session.get(Device, device_id).paired_at
+        assert db.session.get_one(Device, device_id).paired_at
         assert db.session.scalar(select(func.count()).where(PairingCode.device_id == device_id)) == 0
 
 
@@ -309,13 +311,13 @@ def test_a_failed_pairing_attempt_does_not_mark_the_device_paired(app, client, r
     client.post("/pair", data={"code": "WRONG1"})
 
     with app.app_context():
-        assert db.session.get(Device, device_id).paired_at is None
+        assert db.session.get_one(Device, device_id).paired_at is None
 
 
 def test_the_config_is_valid_with_no_location_postcode_or_stops(app, client, register_device):
     device_id, _secret = register_device()
     with app.app_context():
-        config = db.session.get(DeviceConfig, device_id)
+        config = db.session.get_one(DeviceConfig, device_id)
         config.weather_location, config.postcode, config.tfl_stop_ids = "", "", []
         db.session.commit()
 
@@ -331,7 +333,7 @@ def test_the_config_is_valid_with_no_location_postcode_or_stops(app, client, reg
 def test_the_config_returns_the_saved_postcode(app, client, register_device):
     device_id, _secret = register_device()
     with app.app_context():
-        db.session.get(DeviceConfig, device_id).postcode = "SW1A 1AA"
+        db.session.get_one(DeviceConfig, device_id).postcode = "SW1A 1AA"
         db.session.commit()
 
     response = _config(app, device_id)
@@ -341,7 +343,7 @@ def test_the_config_returns_the_saved_postcode(app, client, register_device):
 def test_the_config_returns_the_saved_orientation(app, client, register_device):
     device_id, _secret = register_device()
     with app.app_context():
-        db.session.get(DeviceConfig, device_id).orientation = "horizontal"
+        db.session.get_one(DeviceConfig, device_id).orientation = "horizontal"
         db.session.commit()
 
     response = _config(app, device_id)
@@ -353,7 +355,7 @@ def test_register_stores_the_size_it_is_given(app, client):
         "/api/devices/register", json={"secret": "display-secret-0123456789", "width": 1080, "height": 1920}
     )
     with app.app_context():
-        config = db.session.get(DeviceConfig, response.get_json()["device_id"])
+        config = db.session.get_one(DeviceConfig, response.get_json()["device_id"])
         assert (config.width, config.height) == (1080, 1920)
 
 
@@ -379,7 +381,7 @@ def test_the_config_returns_the_saved_style_for_every_panel(app, client, registe
     """The one style, and each panel's own for renderers that predate it: airy is grouped to the departures."""
     device_id, _secret = register_device()
     with app.app_context():
-        db.session.get(DeviceConfig, device_id).style = style
+        db.session.get_one(DeviceConfig, device_id).style = style
         db.session.commit()
 
     config = _config(app, device_id).get_json()

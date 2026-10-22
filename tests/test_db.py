@@ -262,13 +262,13 @@ def test_a_legacy_db_keeps_its_data(adopt):
     )
 
     with legacy_app.app_context():
-        device = db.session.get(Device, "d")
+        device = db.session.get_one(Device, "d")
         assert (device.created_at, device.paired_at, device.device_name) == (
             datetime(2026, 1, 1, tzinfo=UTC),
             datetime(2026, 1, 2, tzinfo=UTC),
             "kitchen",
         )
-        config = db.session.get(DeviceConfig, "d")
+        config = db.session.get_one(DeviceConfig, "d")
         assert (config.tfl_stop_ids, config.spotify_enabled) == (["S1"], True)
         assert config.clock_format == "24h"
         # Its frame went with the frames table (0023): the render pool draws it again.
@@ -299,9 +299,9 @@ def test_adopting_an_early_legacy_db_marks_existing_devices_paired(adopt):
     )
 
     with legacy_app.app_context():
-        assert db.session.get(Device, "paired").paired_at == datetime(2026, 1, 1, tzinfo=UTC)
-        assert db.session.get(Device, "mid-pairing").paired_at is None
-        assert db.session.get(Device, "paired").device_name is None
+        assert db.session.get_one(Device, "paired").paired_at == datetime(2026, 1, 1, tzinfo=UTC)
+        assert db.session.get_one(Device, "mid-pairing").paired_at is None
+        assert db.session.get_one(Device, "paired").device_name is None
 
 
 def test_adopting_an_early_legacy_db_defaults_the_postcode(adopt):
@@ -310,7 +310,7 @@ def test_adopting_an_early_legacy_db_defaults_the_postcode(adopt):
     with legacy_app.app_context():
         db.session.add(DeviceConfig(device_id="d"))
         db.session.commit()
-        assert db.session.get(DeviceConfig, "d").postcode == ""
+        assert db.session.get_one(DeviceConfig, "d").postcode == ""
 
 
 def test_a_legacy_db_with_paired_at_but_no_device_name_gets_device_name(adopt):
@@ -321,7 +321,7 @@ def test_a_legacy_db_with_paired_at_but_no_device_name_gets_device_name(adopt):
     )
 
     with legacy_app.app_context():
-        device = db.session.get(Device, "d")
+        device = db.session.get_one(Device, "d")
         assert (device.paired_at, device.device_name) == (None, None)
 
 
@@ -331,7 +331,7 @@ def test_starting_twice_leaves_an_adopted_db_alone(adopt, monkeypatch):
 
     assert _ddl(again) == _ddl(legacy_app)
     with again.app_context():
-        assert db.session.get(Device, "d").paired_at is None
+        assert db.session.get_one(Device, "d").paired_at is None
         db.session.remove()
         db.engine.dispose()
 
@@ -366,18 +366,18 @@ def test_0002_converts_every_string_timestamp_shape_to_utc(app):
     with app.app_context():
         upgrade()
 
-        offset = db.session.get(Device, "offset")
+        offset = db.session.get_one(Device, "offset")
         assert offset.created_at == datetime(2026, 3, 1, 12, 0, 0, 123456, tzinfo=UTC)
         assert offset.paired_at == datetime(2026, 3, 1, 12, 30, tzinfo=UTC)  # +01:00 moved to UTC
-        zulu = db.session.get(Device, "zulu")
+        zulu = db.session.get_one(Device, "zulu")
         assert (zulu.created_at, zulu.paired_at) == (datetime(2026, 3, 2, 8, tzinfo=UTC), None)
-        date_only = db.session.get(Device, "date-only")
+        date_only = db.session.get_one(Device, "date-only")
         assert date_only.created_at == datetime(2026, 1, 1, tzinfo=UTC)
         assert date_only.paired_at == datetime(2026, 1, 1, 9, 15, tzinfo=UTC)  # no zone: taken as UTC
 
-        assert db.session.get(PairingCode, "ABC234").expires_at == datetime(2026, 3, 2, 8, 10, tzinfo=UTC)
-        assert db.session.get(SpotifyToken, "offset").expires_at == 1793865600.5
-        assert db.session.get(SpotifyToken, "zulu").expires_at is None
+        assert db.session.get_one(PairingCode, "ABC234").expires_at == datetime(2026, 3, 2, 8, 10, tzinfo=UTC)
+        assert db.session.get_one(SpotifyToken, "offset").expires_at == 1793865600.5
+        assert db.session.get_one(SpotifyToken, "zulu").expires_at is None
 
 
 def test_0002_converted_timestamps_compare_correctly_in_queries(app):
@@ -464,7 +464,7 @@ def test_0004_downgrade_and_upgrade_keep_devices(app, register_device):
     with app.app_context():
         _downgrade("0003")
         upgrade()
-        assert db.session.get(Device, device_id).display_secret_hash is None  # the column went away and back
+        assert db.session.get_one(Device, device_id).display_secret_hash is None  # the column went away and back
 
 
 def test_0008_backfills_existing_devices_with_a_480_by_800_screen(app):
@@ -478,14 +478,14 @@ def test_0008_backfills_existing_devices_with_a_480_by_800_screen(app):
             conn.exec_driver_sql("INSERT INTO device_config (device_id) VALUES ('old-pi')")
         upgrade()
 
-        config = db.session.get(DeviceConfig, "old-pi")
+        config = db.session.get_one(DeviceConfig, "old-pi")
         assert (config.width, config.height) == (480, 800)
 
 
 def test_0012_backfills_clock_format_and_keeps_existing_settings(app, register_device):
     device_id, _ = register_device()
     with app.app_context():
-        config = db.session.get(DeviceConfig, device_id)
+        config = db.session.get_one(DeviceConfig, device_id)
         config.weather_location, config.style = "London", "card"
         db.session.commit()
         db.session.remove()
@@ -494,7 +494,7 @@ def test_0012_backfills_clock_format_and_keeps_existing_settings(app, register_d
         assert "clock_format" not in {column["name"] for column in inspect(db.engine).get_columns("device_config")}
         upgrade()
 
-        config = db.session.get(DeviceConfig, device_id)
+        config = db.session.get_one(DeviceConfig, device_id)
         assert config.clock_format == "24h"
         assert (config.weather_location, config.style) == ("London", "card")
 
@@ -509,7 +509,7 @@ def test_clock_format_defaults_to_24_hour_for_orm_and_raw_inserts(app):
         db.session.commit()
 
         for device_id in ("orm", "raw"):
-            assert db.session.get(DeviceConfig, device_id).clock_format == "24h"
+            assert db.session.get_one(DeviceConfig, device_id).clock_format == "24h"
         column = next(
             column for column in inspect(db.engine).get_columns("device_config") if column["name"] == "clock_format"
         )
@@ -519,7 +519,7 @@ def test_clock_format_defaults_to_24_hour_for_orm_and_raw_inserts(app):
 def test_0013_backfills_english_and_keeps_existing_settings(app, register_device):
     device_id, _ = register_device()
     with app.app_context():
-        config = db.session.get(DeviceConfig, device_id)
+        config = db.session.get_one(DeviceConfig, device_id)
         config.clock_format, config.tfl_stop_ids = "12h", ["940GZZLUKNG", "NSR:Quay:7333"]
         db.session.commit()
         db.session.remove()
@@ -528,7 +528,7 @@ def test_0013_backfills_english_and_keeps_existing_settings(app, register_device
         assert "language" not in {column["name"] for column in inspect(db.engine).get_columns("device_config")}
         upgrade()
 
-        config = db.session.get(DeviceConfig, device_id)
+        config = db.session.get_one(DeviceConfig, device_id)
         assert config.language == "en"
         assert (config.clock_format, config.tfl_stop_ids) == ("12h", ["940GZZLUKNG", "NSR:Quay:7333"])
 
@@ -597,7 +597,7 @@ def test_0017_gives_each_device_the_style_of_its_departures(app):
 def test_0017_downgrade_gives_every_panel_the_one_style(app, register_device):
     airy, _ = register_device()
     with app.app_context():
-        db.session.get(DeviceConfig, airy).style = "airy"
+        db.session.get_one(DeviceConfig, airy).style = "airy"
         db.session.commit()
         db.session.remove()
 
@@ -633,7 +633,7 @@ def test_0021_keeps_existing_weather_locations_and_leaves_their_place_to_the_bac
             _insert_device(conn, "old", weather_location="Tromsø", postcode="9008")
         upgrade(revision="0021")
 
-        config = db.session.get(DeviceConfig, "old")
+        config = db.session.get_one(DeviceConfig, "old")
         assert (config.weather_location, config.postcode) == ("Tromsø", "9008")
         assert (config.weather_place_id, config.weather_place_name, config.weather_lat) == (None, None, None)
 
@@ -661,7 +661,8 @@ def test_0023_keeps_each_screen_and_its_name_and_drops_the_rest(app):
             )
         upgrade()
 
-        device = db.session.get(Device, "named")
+        device = db.session.get_one(Device, "named")
+        assert device.assignment is not None
         assert (device.display_secret_hash, device.assignment.slug) == ("display-named", "nvorkinn-kitchen")
         # A forgotten device's assignment was only waiting for the orchestrator to remove its renderer.
         assert db.session.scalars(select(text("slug")).select_from(text("renderer_assignments"))).all() == [
@@ -681,7 +682,9 @@ def test_0023_keeps_each_screen_and_its_name_and_drops_the_rest(app):
 def test_0023_downgrade_gives_each_named_screen_a_pending_assignment(app, register_device):
     device_id, _ = register_device()
     with app.app_context():
-        slug = db.session.get(Device, device_id).assignment.slug
+        assignment = db.session.get_one(Device, device_id).assignment
+        assert assignment is not None
+        slug = assignment.slug
         db.session.remove()
 
         downgrade(revision="0022")

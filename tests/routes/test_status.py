@@ -25,7 +25,7 @@ def _poll(client, device_id, secret, path="/api/frame"):
 
 def _last_seen(app, device_id):
     with app.app_context():
-        return db.session.get(Device, device_id).last_seen_at
+        return db.session.get_one(Device, device_id).last_seen_at
 
 
 def test_status_is_off_without_a_token(client):
@@ -56,12 +56,14 @@ def test_status_lists_every_device(app, client, register_device):
     _poll(client, paired_id, paired_secret)
     new_id, _ = register_device("another-very-long-device-secret")
     with app.app_context():
-        config = db.session.get(DeviceConfig, paired_id)
+        config = db.session.get_one(DeviceConfig, paired_id)
         config.weather_location, config.postcode = "London", "SW1A 1AA"
-        db.session.get(Device, paired_id).device_name = "camilla"
+        db.session.get_one(Device, paired_id).device_name = "camilla"
         db.session.commit()
-        paired = db.session.get(Device, paired_id)
+        paired = db.session.get_one(Device, paired_id)
         created_at, paired_at, last_seen_at = paired.created_at, paired.paired_at, paired.last_seen_at
+    assert paired_at is not None
+    assert last_seen_at is not None
 
     response = _status(client)
 
@@ -87,7 +89,7 @@ def test_status_lists_every_device(app, client, register_device):
 def test_status_lists_a_device_without_config(app, client, register_device):
     device_id, _ = register_device()
     with app.app_context():
-        db.session.delete(db.session.get(DeviceConfig, device_id))
+        db.session.delete(db.session.get_one(DeviceConfig, device_id))
         db.session.commit()
 
     assert device_id in _status(client).get_json()

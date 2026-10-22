@@ -62,6 +62,9 @@ def is_quiet(assignment: RendererAssignment, now: datetime) -> bool:
 
     The assignment must have a device.
     """
+    if assignment.device is None:
+        msg = f"assignment {assignment.slug} has no device"
+        raise ValueError(msg)
     return screen_is_quiet(assignment.device, now, named_at=assignment.created_at)
 
 

@@ -5,6 +5,11 @@ repos:
       - id: ruff-check
         args: [--fix]
       - id: ruff-format
+  # The whole project at once (not just the files committed), against the uv project's dependencies.
+  - repo: https://github.com/astral-sh/ty-pre-commit
+    rev: v0.0.91
+    hooks:
+      - id: ty
   # These run only on commits that touch .tf files, and need terraform and tflint installed.
   - repo: https://github.com/antonbabenko/pre-commit-terraform
     rev: v1.109.2

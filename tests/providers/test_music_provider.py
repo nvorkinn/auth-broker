@@ -97,10 +97,12 @@ class FakeSpotify:
         if self.top_429 is not None:
             return _response({"error": {"status": 429}}, 429, self.top_429)
         type_ = url.removeprefix(f"{SPOTIFY_API}/me/top/")
+        assert params is not None
         return _response(TOP["spotify"][params["time_range"]][type_])
 
     def post(self, url, data=None, auth=None, timeout=None):  # noqa: ARG002
         assert url == spotify_client.TOKEN_URL
+        assert data is not None
         self.refreshes.append(data["refresh_token"])
         if data["refresh_token"] in self.revoked:
             return _response({"error": "invalid_grant"}, 400)
@@ -165,7 +167,7 @@ def device(app, register_device):
     def _make(*, spotify=True, apple_music=False, linked=True, refresh_token="refresh", expires_in=3600):  # noqa: S107
         device_id, _ = register_device(f"a-very-long-device-secret-{refresh_token}")
         with app.app_context():
-            config = db.session.get(DeviceConfig, device_id)
+            config = db.session.get_one(DeviceConfig, device_id)
             config.spotify_enabled = spotify
             config.apple_music_enabled = apple_music
             if linked:
@@ -384,7 +386,7 @@ def test_apple_musics_new_plays_are_logged_once_each(app, store, device, musicki
     _run(provider, apple_songs=[three, three, one])
     assert _plays(app, device_id) == ["2", "1", "3", "3"]
     with app.app_context():
-        assert db.session.get(AppleMusicToken, device_id).seen_ids == ["3", "3", "1"]
+        assert db.session.get_one(AppleMusicToken, device_id).seen_ids == ["3", "3", "1"]
 
     now[0] += TOP_INTERVAL_S
     _run(provider, apple_songs=[three, three, one])
@@ -439,7 +441,7 @@ def test_a_partial_top_fetch_doesnt_replace_a_full_one(app, store, device, music
     _run(provider)
     assert _stored(store, top_key(device_id)) == TOP
     with app.app_context():
-        db.session.get(SpotifyToken, device_id).expires_at = 0
+        db.session.get_one(SpotifyToken, device_id).expires_at = 0
         db.session.commit()
 
     now[0] += TOP_INTERVAL_S
@@ -457,9 +459,10 @@ def test_refreshed_tokens_are_stored_for_the_next_calls(app, provider, device):
 
     assert fake.refreshes == ["old-refresh"]  # once: the top lists' calls use the refreshed token
     with app.app_context():
-        token = db.session.get(SpotifyToken, device_id)
+        token = db.session.get_one(SpotifyToken, device_id)
         assert token.access_token == "new-for-old-refresh"
         assert token.refresh_token == "old-refresh"  # Spotify sent no new one, so the old one is kept
+        assert token.expires_at is not None
         assert token.expires_at > time.time() + 3000
 
 
@@ -488,7 +491,7 @@ def test_switching_a_service_on_fetches_its_top_lists_at_once(app, provider, sto
     device_id = device()
     _run(provider)
     with app.app_context():
-        db.session.get(DeviceConfig, device_id).apple_music_enabled = True
+        db.session.get_one(DeviceConfig, device_id).apple_music_enabled = True
         db.session.commit()
 
     _run(provider)
@@ -508,7 +511,7 @@ def test_a_failed_top_fetch_is_tried_again_next_cycle(app, store, clock, device)
             return _response({"error": "server error"}, 500)
         return original(url, **kwargs)
 
-    failing.get = get
+    failing.get = get  # ty: ignore[invalid-assignment] -- a plain function for the method, as monkeypatching does
     _run(provider, failing)
     assert store.get(top_key(device_id)) is None
 
@@ -756,7 +759,7 @@ def test_a_device_no_longer_wanted_stops_the_burst(app, provider, clock, store, 
     _run(provider)
     assert provider.interval_s() == BURST_INTERVAL_S
     with app.app_context():
-        db.session.get(DeviceConfig, device_id).spotify_enabled = False
+        db.session.get_one(DeviceConfig, device_id).spotify_enabled = False
         db.session.commit()
     clock.advance(BURST_INTERVAL_S)
 

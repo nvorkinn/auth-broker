@@ -107,7 +107,7 @@ def test_only_a_newly_listed_screen_is_queued(app, store):
 def test_a_screen_without_a_slug_is_not_listed(app, store, paired_client):
     _client, device_id, _ = paired_client
     with app.app_context():
-        db.session.delete(db.session.get(Device, device_id).assignment)
+        db.session.delete(db.session.get_one(Device, device_id).assignment)
         db.session.commit()
 
         render_screens.write()
@@ -217,7 +217,7 @@ def test_a_quiet_screen_is_left_out_until_it_is_back(app, store):
         assert store.hgetall(SCREENS) == {"0f9e8d7c6b5a": "nvorkinn-hall"}
 
         # Seen again: listed at the next write.
-        db.session.get(Device, "a1b2c3d4e5f6").display_last_seen_at = now
+        db.session.get_one(Device, "a1b2c3d4e5f6").display_last_seen_at = now
         db.session.commit()
         render_screens.write()
 
@@ -273,7 +273,7 @@ def test_pairing_names_the_screen_and_lists_and_draws_it_at_once(app, store, cli
         "device_id"
     ]
     with app.app_context():
-        token = db.session.get(Device, device_id).pairing_token
+        token = db.session.get_one(Device, device_id).pairing_token
     # Not paired yet, but it shows a code to pair with by hand: listed under its id, as naming it will make it.
     assert store.hgetall(SCREENS) == {device_id: device_id}
 

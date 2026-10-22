@@ -102,6 +102,7 @@ def test_search_places_raises_when_open_meteo_cant_be_asked(app, failure):
 def test_get_place_looks_the_id_up(app):
     with app.app_context(), patch("broker.clients.weather.requests.get", return_value=_response(LONDON)) as get:
         place = get_place(2643743)
+    assert place is not None
 
     get.assert_called_once_with(
         "https://geocoding-api.open-meteo.com/v1/get",

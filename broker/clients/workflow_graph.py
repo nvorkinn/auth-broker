@@ -149,7 +149,9 @@ def _owner(jobs: list[WorkflowJob], name: str) -> WorkflowJob | None:
         if job.names is not None and name in job.names:
             return job
     candidates = [job for job in jobs if job.names is None and job.pattern.match(name)]
-    return max(candidates, key=lambda job: len(job.pattern.pattern), default=None)
+    if not candidates:
+        return None
+    return max(candidates, key=lambda job: len(job.pattern.pattern))
 
 
 def _node(key: str, name: str, needs: list[str], runs: list[dict], size: int | None) -> dict:

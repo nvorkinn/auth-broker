@@ -1,6 +1,7 @@
 """The notice board's postcode: a UK or a Norwegian one, in canonical form, and which country it's in."""
 
 import re
+from typing import Literal
 
 # UK postcode shape: outward code (e.g. SW1A, N1, EC2V) then inward code (digit + two letters).
 UK_POSTCODE_RE = re.compile(r"^([A-Z]{1,2}[0-9][A-Z0-9]?)([0-9][A-Z]{2})$")
@@ -22,7 +23,7 @@ def normalize_postcode(value: str) -> str | None:
     return f"{match[1]} {match[2]}" if match else None
 
 
-def postcode_country(postcode: str) -> str | None:
+def postcode_country(postcode: str) -> Literal["GB", "NO"] | None:
     """Return the country of a normalized postcode: "NO", "GB", or None for none."""
     if not postcode:
         return None

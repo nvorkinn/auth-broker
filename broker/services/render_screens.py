@@ -80,7 +80,7 @@ def write() -> int:
             if gone:
                 pipe.hdel(SCREENS, *gone)
             if changed:
-                pipe.hset(SCREENS, mapping=changed)
+                pipe.hset(SCREENS, mapping={**changed})
             pipe.execute()
     except RedisError as error:
         logger.warning("Couldn't write the render pool's screens to Redis (%s)", type(error).__name__)

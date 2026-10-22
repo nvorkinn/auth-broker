@@ -87,6 +87,7 @@ def test_a_matrix_include_that_fits_no_combination_is_one_of_its_own_and_exclude
 
     combos = workflow_graph._combinations(matrix)
 
+    assert combos is not None
     assert len(combos) == 4
     assert {"python": "3.15", "os": "linux"} in combos
     assert {"python": "3.13", "os": "mac"} not in combos

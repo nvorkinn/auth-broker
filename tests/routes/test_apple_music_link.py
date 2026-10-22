@@ -28,7 +28,7 @@ def test_connect_stores_the_token_encrypted_and_disconnect_forgets_it_and_the_pl
 
     assert client.post("/device/apple-music/connect", data={"music_user_token": " mut "}).status_code == 302
     with app.app_context():
-        stored = db.session.get(AppleMusicToken, device_id)
+        stored = db.session.get_one(AppleMusicToken, device_id)
         assert stored.token_encrypted != "mut"
         assert stored.token == "mut"
     assert b"Connected" in client.get("/device").data
@@ -58,7 +58,7 @@ def test_the_config_page_switches_both_services_on_and_sends_both(app, paired_cl
     client.post("/device", data={"interval": "20", "spotify_enabled": "on", "apple_music_enabled": "on"})
 
     with app.app_context():
-        config = db.session.get(DeviceConfig, device_id)
+        config = db.session.get_one(DeviceConfig, device_id)
         assert (config.spotify_enabled, config.apple_music_enabled) == (True, True)
     config = config_of(device_id)
     assert config["spotify"]["enabled"]

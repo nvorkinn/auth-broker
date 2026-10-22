@@ -697,7 +697,7 @@ def store(app):
 
 def _developer_panel(app, device_id, *, on=True):
     with app.app_context():
-        db.session.get(DeviceConfig, device_id).developer_enabled = on
+        db.session.get_one(DeviceConfig, device_id).developer_enabled = on
         db.session.commit()
 
 

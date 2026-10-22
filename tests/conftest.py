@@ -249,7 +249,7 @@ def cli(app):
 
 def name_screen(device_id: str) -> None:
     """Give a registered screen its stable name, as pairing does, so the render pool can list it (app context)."""
-    assignments.auto_name(db.session.get(Device, device_id))
+    assignments.auto_name(db.session.get_one(Device, device_id))
     db.session.commit()
 
 
@@ -287,7 +287,7 @@ def config_of(app):
 
     def _config_of(device_id: str) -> dict:
         with app.app_context():
-            config = db.session.get(DeviceConfig, device_id)
+            config = db.session.get_one(DeviceConfig, device_id)
             return renderer_config.build(config, pairing_code=None).model_dump(mode="json")
 
     return _config_of

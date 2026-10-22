@@ -34,7 +34,7 @@ def paired(app, client):
 
 def _assignment(app, device_id):
     with app.app_context():
-        return db.session.get(Device, device_id).assignment
+        return db.session.get_one(Device, device_id).assignment
 
 
 # --- its stable name, at pairing --------------------------------------------------------------------------------------
@@ -63,7 +63,7 @@ def test_pairing_by_code_and_the_owner_command_name_the_screen_too(app, client, 
 
 def test_a_screen_paired_before_automatic_names_gets_one_on_its_settings_page(app, client, paired):
     with app.app_context():
-        db.session.delete(db.session.get(Device, paired).assignment)
+        db.session.delete(db.session.get_one(Device, paired).assignment)
         db.session.commit()
 
     assert client.get("/device").status_code == 200
@@ -73,7 +73,7 @@ def test_a_screen_paired_before_automatic_names_gets_one_on_its_settings_page(ap
 
 def test_naming_again_changes_nothing(app, paired):
     with app.app_context():
-        assert assignments.auto_name(db.session.get(Device, paired)) is None
+        assert assignments.auto_name(db.session.get_one(Device, paired)) is None
     assert _assignment(app, paired).slug == paired
 
 
@@ -102,8 +102,9 @@ def test_the_owner_names_and_renames_the_screen_on_its_settings_page(app, client
     client.post("/device", data={"screen_name": "Hall"})
 
     with app.app_context():
-        device = db.session.get(Device, paired)
+        device = db.session.get_one(Device, paired)
         assert device.device_name == "Hall"
+        assert device.assignment is not None
         assert device.assignment.slug == paired  # the stable name never moves
 
 
@@ -111,12 +112,12 @@ def test_a_blank_name_clears_it_and_a_save_without_one_keeps_it(app, client, pai
     client.post("/device", data={"screen_name": "Hall"})
     client.post("/device", data={"style": "card"})  # a form without the field
     with app.app_context():
-        assert db.session.get(Device, paired).device_name == "Hall"
+        assert db.session.get_one(Device, paired).device_name == "Hall"
 
     client.post("/device", data={"screen_name": "   "})
 
     with app.app_context():
-        assert db.session.get(Device, paired).device_name is None
+        assert db.session.get_one(Device, paired).device_name is None
 
 
 def test_a_name_too_long_is_refused_and_nothing_is_saved(app, client, paired):
@@ -125,12 +126,14 @@ def test_a_name_too_long_is_refused_and_nothing_is_saved(app, client, paired):
     assert response.status_code == 400
     assert b"at most 40 characters" in response.data
     with app.app_context():
-        assert db.session.get(Device, paired).device_name is None
+        assert db.session.get_one(Device, paired).device_name is None
 
 
 def test_a_screen_named_by_a_slug_before_keeps_it_as_its_name(app, client, paired):
     with app.app_context():
-        db.session.get(Device, paired).assignment.slug = f"{USERNAME}-lisa"
+        assignment = db.session.get_one(Device, paired).assignment
+        assert assignment is not None
+        assignment.slug = f"{USERNAME}-lisa"
         db.session.commit()
 
     assert f">{USERNAME}-lisa</a>" in client.get("/device").data.decode()

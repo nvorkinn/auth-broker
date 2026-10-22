@@ -14,7 +14,7 @@ import hmac
 import logging
 import time
 from datetime import UTC, datetime, timedelta
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 from urllib.parse import urlencode
 
 import requests
@@ -41,6 +41,8 @@ RENEW_WAIT_S = 30
 CHANGES = "v1:github:changes"
 # Enough for a few minutes of a busy CI run; a dashboard further behind is told to read everything.
 CHANGES_KEPT = 2000
+# A read of the feed: each entry's ID and fields.
+type StreamEntries = list[tuple[str, dict[str, str]]]
 
 
 class NotConnectedError(github.DashboardError):
@@ -176,22 +178,25 @@ def record(changes: list[dict[str, str]]) -> None:
     """Append changes to the feed the dashboard reads."""
     redis: Redis = current_app.extensions["redis"]
     for change in changes:
-        redis.xadd(CHANGES, change, maxlen=CHANGES_KEPT, approximate=True)
+        redis.xadd(CHANGES, {**change}, maxlen=CHANGES_KEPT, approximate=True)
 
 
 def changes_after(after: str | None) -> dict:
     """Return changes since the feed entry `after`, the newest entry's ID, and whether some were lost."""
     redis: Redis = current_app.extensions["redis"]
-    newest = redis.xrevrange(CHANGES, count=1)
+    # The app's client decodes responses, so str; redis-py types them as either, or as None.
+    newest = cast("StreamEntries", redis.xrevrange(CHANGES, count=1))
     last = newest[0][0] if newest else "0-0"
     if after is None:
         return {"last": last, "changes": [], "reset": False}
-    oldest = redis.xrange(CHANGES, count=1)
+    oldest = cast("StreamEntries", redis.xrange(CHANGES, count=1))
     # Trimmed past `after`, or emptied (a Redis restart) so that `after` is ahead of everything.
     reset = (bool(oldest) and _stream_id(oldest[0][0]) > _stream_id(after) and after != "0-0") or (
         _stream_id(after) > _stream_id(last)
     )
-    entries = redis.xrange(CHANGES, min=f"({after}", max="+", count=CHANGES_KEPT) if not reset else []
+    entries = (
+        cast("StreamEntries", redis.xrange(CHANGES, min=f"({after}", max="+", count=CHANGES_KEPT)) if not reset else []
+    )
     return {"last": last, "changes": [fields for _, fields in entries], "reset": reset}
 
 

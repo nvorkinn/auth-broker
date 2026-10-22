@@ -78,6 +78,7 @@ def test_the_stored_cover_is_the_one_the_renderer_reads(service):
     url = art_url(PLAYER[service]["currently_playing"])
 
     assert url == COVERS[service]["url"]
+    assert url is not None
     assert art_key(url) == COVERS[service]["key"]
 
 

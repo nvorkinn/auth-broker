@@ -69,15 +69,20 @@ def _access(status, query=b"", sent=5):
             self.access_log = logging.getLogger("test.access")
 
     records = []
-    handler = logging.Handler()
-    handler.emit = records.append
+
+    class Records(logging.Handler):
+        def emit(self, record):
+            records.append(record)
+
+    handler = Records()
     handler.setLevel(logging.DEBUG)
     logging.getLogger("test.access").addHandler(handler)
     logging.getLogger("test.access").setLevel(logging.DEBUG)
     try:
         req = SimpleNamespace(method="GET", path="/auth/spotify/callback", query=query.decode())
         resp = SimpleNamespace(status=f"{status} X", sent=sent)
-        Logger().access(resp, req, {"REMOTE_ADDR": "1.2.3.4"}, timedelta(milliseconds=12.34))
+        # Stand-ins with only the fields access() reads.
+        Logger().access(resp, req, {"REMOTE_ADDR": "1.2.3.4"}, timedelta(milliseconds=12.34))  # ty: ignore[invalid-argument-type]
     finally:
         logging.getLogger("test.access").removeHandler(handler)
     [record] = records

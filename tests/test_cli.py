@@ -17,7 +17,7 @@ def _headers(secret):
 def _shown(app, device_id):
     """Return what the render pool draws the screen from: its config, with its live pairing code if it has one."""
     with app.app_context():
-        config = db.session.get(DeviceConfig, device_id)
+        config = db.session.get_one(DeviceConfig, device_id)
         return renderer_config.build(config, pairing_code=pairing.live_code(device_id)).model_dump(mode="json")
 
 
@@ -56,7 +56,7 @@ def test_list_with_no_devices(cli):
 def test_list_shows_device_name_when_set_and_unnamed_otherwise(app, client, register_device, cli):
     named_id, _secret = register_device()
     with app.app_context():
-        db.session.get(Device, named_id).device_name = "camilla"
+        db.session.get_one(Device, named_id).device_name = "camilla"
         db.session.commit()
     screen = {"secret": "a-screen-with-no-name-yet-at-all", "width": 800, "height": 480}
     unnamed_id = client.post("/api/devices/register", json=screen).get_json()["device_id"]
@@ -72,7 +72,7 @@ def test_list_shows_device_name_when_set_and_unnamed_otherwise(app, client, regi
 def test_unpair_brings_the_device_back_to_showing_a_code_but_keeps_its_settings(app, client, register_device, cli):
     device_id, _secret = _paired_device(app, client, register_device)
     with app.app_context():
-        config = db.session.get(DeviceConfig, device_id)
+        config = db.session.get_one(DeviceConfig, device_id)
         config.weather_location = "London"
         config.clock_format = "12h"
         db.session.commit()
@@ -91,7 +91,7 @@ def test_unpair_brings_the_device_back_to_showing_a_code_but_keeps_its_settings(
 def test_unpair_with_config_also_resets_settings_and_linked_accounts(app, client, register_device, cli):
     device_id, _secret = _paired_device(app, client, register_device)
     with app.app_context():
-        config = db.session.get(DeviceConfig, device_id)
+        config = db.session.get_one(DeviceConfig, device_id)
         config.weather_location, config.tfl_stop_ids = "London", ["940GZZLUKNG"]
         config.clock_format = "12h"
         db.session.add(SpotifyToken(device_id=device_id, refresh_token="r"))
@@ -132,13 +132,13 @@ def test_forget_leaves_other_devices_alone(app, client, register_device, cli):
 
     assert client.post("/api/frame", headers=_headers(kept_secret)).status_code == 404  # known, with no frame yet
     with app.app_context():
-        assert db.session.get(Device, kept).assignment is not None
+        assert db.session.get_one(Device, kept).assignment is not None
 
 
 def test_code_hands_an_already_paired_device_to_another_user(app, client, register_device, cli):
     device_id, _secret = _paired_device(app, client, register_device)
     with app.app_context():
-        db.session.get(DeviceConfig, device_id).clock_format = "12h"
+        db.session.get_one(DeviceConfig, device_id).clock_format = "12h"
         db.session.commit()
 
     result = cli("code", device_id)
@@ -201,7 +201,7 @@ def _backfill(app):
 def _set_locations(app, locations):
     with app.app_context():
         for device_id, location in locations.items():
-            db.session.get(DeviceConfig, device_id).weather_location = location
+            db.session.get_one(DeviceConfig, device_id).weather_location = location
         db.session.commit()
 
 
@@ -224,7 +224,7 @@ def test_weather_backfill_gives_each_free_text_location_a_place(app, register_de
     assert "1 given a place, 1 not found, 0 not checked." in result.output
     assert sorted(call.args[0] for call in search.call_args_list) == ["Nowhere", "london"]
     with app.app_context():
-        config = db.session.get(DeviceConfig, london)
+        config = db.session.get_one(DeviceConfig, london)
         # weather_location itself is left as it was.
         assert (config.weather_location, config.weather_place_id, config.weather_country_code) == (
             "london",
@@ -232,8 +232,8 @@ def test_weather_backfill_gives_each_free_text_location_a_place(app, register_de
             "GB",
         )
         assert (config.weather_lat, config.weather_lon) == (51.50853, -0.12574)
-        assert db.session.get(DeviceConfig, nowhere).weather_place_id is None
-        assert db.session.get(DeviceConfig, blank).weather_place_id is None
+        assert db.session.get_one(DeviceConfig, nowhere).weather_place_id is None
+        assert db.session.get_one(DeviceConfig, blank).weather_place_id is None
 
 
 def test_weather_backfill_is_safe_to_run_again(app, register_device):
@@ -268,7 +268,7 @@ def test_weather_backfill_rewrites_the_subscriptions_even_with_nothing_to_backfi
     """With every place picked already, it still rewrites the subscriptions under the current keys."""
     device_id, _ = register_device()
     with app.app_context():
-        weather_place.store(db.session.get(DeviceConfig, device_id), LONDON)
+        weather_place.store(db.session.get_one(DeviceConfig, device_id), LONDON)
         db.session.commit()
     fake_redis.sets["v1:sub:weather"] = {"London"}  # a key no config has
 
@@ -291,7 +291,7 @@ def test_weather_backfill_skips_and_reports_what_open_meteo_couldnt_be_asked_abo
     assert f"{device_id}: couldn't ask Open-Meteo about 'London'; skipped." in result.output
     assert "run it again later" in result.output
     with app.app_context():
-        assert db.session.get(DeviceConfig, device_id).weather_place_id is None
+        assert db.session.get_one(DeviceConfig, device_id).weather_place_id is None
 
 
 # --- flask redis ----------------------------------------------------------------------------------------------------

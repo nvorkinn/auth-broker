@@ -269,7 +269,7 @@ def test_a_rebuild_queues_only_the_screens_whose_copy_changed(app, store, paired
     other_id, _ = register_device("another-very-long-device-secret")
     _pool(store, device_id, other_id)
     with app.app_context():
-        db.session.get(Device, other_id).paired_at = datetime.now(UTC)
+        db.session.get_one(Device, other_id).paired_at = datetime.now(UTC)
         db.session.commit()
         config_store.publish_all()
     assert other_id in _take_jobs(store)
@@ -286,7 +286,8 @@ def test_a_save_of_a_screen_the_pool_doesnt_draw_queues_nothing(app, store, pair
     # A screen unseen for a day isn't in the pool's list (services/render_screens.py).
     long_ago = datetime.now(UTC) - assignments.SUSPEND_AFTER - timedelta(hours=1)
     with app.app_context():
-        device = db.session.get(Device, device_id)
+        device = db.session.get_one(Device, device_id)
+        assert device.assignment is not None
         device.display_last_seen_at = device.created_at = device.assignment.created_at = long_ago
         db.session.commit()
         render_screens.write()
@@ -357,7 +358,7 @@ def test_pairing_by_token_queues_the_screen(app, store, client):
     _pool(store, device_id)
     with app.app_context():
         pairing.issue_code(device_id)
-        token = db.session.get(Device, device_id).pairing_token
+        token = db.session.get_one(Device, device_id).pairing_token
     _take_jobs(store)
 
     assert client.post("/pair/token", json={"token": token}).status_code == 200

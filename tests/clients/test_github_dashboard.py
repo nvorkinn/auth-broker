@@ -10,6 +10,20 @@ import responses
 from broker.clients import github
 
 ROOT = github.API_URL
+
+
+def _url(call):
+    """Return the URL a call to the API went to, which a sent request always has."""
+    assert call.request.url is not None
+    return call.request.url
+
+
+def _json_body(call):
+    """Return the JSON a call to the API sent."""
+    assert isinstance(call.request.body, str | bytes)
+    return json.loads(call.request.body)
+
+
 REPO = {
     "full_name": "alice/project",
     "owner": {"login": "alice"},
@@ -92,7 +106,7 @@ def test_discovery_paginates_and_excludes_other_owners_and_archives(api):
         json=[REPO | {"archived": True}, REPO | {"owner": {"login": "org"}}],
     )
     assert len(api.repositories()) == 100
-    assert "page=2" in responses.calls[-1].request.url
+    assert "page=2" in _url(responses.calls[-1])
     assert responses.calls[0].request.headers["Authorization"] == "Bearer test-pat"
 
 
@@ -284,7 +298,7 @@ def test_project_rechecks_known_runs_that_the_status_lists_missed(api):
     result = api.project(REPO, [1, 7, 8, 9])
     # Run 8 finished since the last look, so it stays as the latest finished release.
     assert [run["id"] for run in result["workflows"]] == [1, 7, 8]
-    assert sorted(call.request.url.split("/")[-1] for call in responses.calls) == ["7", "8", "9"]
+    assert sorted(_url(call).split("/")[-1] for call in responses.calls) == ["7", "8", "9"]
 
 
 def test_the_latest_finished_release_is_kept_after_the_ongoing_ones(api):
@@ -337,7 +351,7 @@ def test_a_finished_workflow_has_its_outcome_and_no_approval_lookup(api):
     result = api.workflow(REPO, run)
     assert (result["conclusion"], result["finished_at"]) == ("failure", "2026-10-20T02:00:00Z")
     assert result["pending_deployments"] == []
-    assert not any("pending_deployments" in call.request.url for call in responses.calls)
+    assert not any("pending_deployments" in _url(call) for call in responses.calls)
 
 
 @responses.activate
@@ -418,8 +432,7 @@ def test_waiting_workflow_includes_unstarted_nodes_edges_and_job_steps(api):
     assert result["jobs"][0]["steps"][0]["name"] == "Compile"
     assert result["pending_deployments"] == [{"id": 10, "name": "production", "can_approve": True, "wait_timer": 0}]
     assert any(
-        "/contents/.github/workflows/release.yml" in call.request.url and "ref=abc" in call.request.url
-        for call in responses.calls
+        "/contents/.github/workflows/release.yml" in _url(call) and "ref=abc" in _url(call) for call in responses.calls
     )
 
 
@@ -436,7 +449,7 @@ def test_approve_rechecks_run_and_only_approves_selected_environment(api):
     )
     responses.post(f"{path}/pending_deployments", json=[{"id": 7}])
     api.approve_deployment(REPO, 4, 10)
-    payload = json.loads(responses.calls[-1].request.body)
+    payload = _json_body(responses.calls[-1])
     assert payload["environment_ids"] == [10]
     assert payload["state"] == "approved"
 
@@ -502,8 +515,8 @@ def test_publish_includes_prereleases_ignores_drafts_and_generates_notes(api):
     responses.post(f"{path}/releases/generate-notes", json={"name": "v1.21.0", "body": "Generated changes"})
     responses.post(f"{path}/releases", json={"tag_name": "v1.21.0"}, status=201)
     assert api.publish_release(REPO)["tag_name"] == "v1.21.0"
-    notes = json.loads(responses.calls[-2].request.body)
-    release = json.loads(responses.calls[-1].request.body)
+    notes = _json_body(responses.calls[-2])
+    release = _json_body(responses.calls[-1])
     assert notes == {"tag_name": "v1.21.0", "target_commitish": "main", "previous_tag_name": "v1.20.0-rc.1"}
     assert release["body"] == "Generated changes"
     assert release["draft"] is False
@@ -605,7 +618,7 @@ def test_a_clean_pr_with_finished_checks_is_merged_at_its_checked_head(api):
     api.pull = Mock(return_value={"checks": [{"pending": False, "state": "success"}]})
     merge = responses.put(f"{ROOT}/repos/alice/project/pulls/7/merge", json={"merged": True})
     assert api.set_auto_merge(MERGE_REPO, 7, enabled=True) == {"auto_merge": False, "merged": True}
-    assert json.loads(merge.calls[0].request.body) == {"merge_method": "merge", "sha": "abc"}
+    assert _json_body(merge.calls[0]) == {"merge_method": "merge", "sha": "abc"}
 
 
 @pytest.mark.parametrize("check", [{"pending": True, "state": "in_progress"}, {"pending": False, "state": "failure"}])

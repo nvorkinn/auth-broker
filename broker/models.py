@@ -7,15 +7,16 @@ Timestamps are timezone-aware UTC datetimes (see UTCDateTime).
 """
 
 from datetime import datetime  # noqa: TC003 -- SQLAlchemy resolves the Mapped[...] annotations at runtime
+from typing import Literal
 
 from sqlalchemy import JSON, Boolean, Float, ForeignKey, Integer, String, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .crypto import decrypt, encrypt
-from .db import UTCDateTime, db
+from .db import Model, UTCDateTime
 
 
-class Device(db.Model):
+class Device(Model):
     """A screen, known by its secret, and who it is paired with."""
 
     __tablename__ = "devices"
@@ -46,7 +47,7 @@ class Device(db.Model):
     assignment: Mapped[RendererAssignment | None] = relationship(back_populates="device", cascade="all, delete-orphan")
 
 
-class PairingCode(db.Model):
+class PairingCode(Model):
     """A code a device shows so its owner can pair with it, until it expires."""
 
     __tablename__ = "pairing_codes"
@@ -57,6 +58,12 @@ class PairingCode(db.Model):
 
     device: Mapped[Device] = relationship(back_populates="pairing_codes")
 
+
+# The values the store contract allows for each setting below, which the columns hold (the config page checks them).
+type Orientation = Literal["horizontal", "vertical"]
+type ClockFormat = Literal["12h", "24h"]
+type Language = Literal["en", "nb"]
+type Style = Literal["airy", "hero", "card"]
 
 ORIENTATIONS = ("horizontal", "vertical")
 CLOCK_FORMATS = {"24h": "24-hour (13:00)", "12h": "12-hour (1:00 PM)"}
@@ -71,17 +78,17 @@ STYLES = {
 }
 
 
-class DeviceConfig(db.Model):
+class DeviceConfig(Model):
     """A device's settings, as its owner sets them on the config page."""
 
     __tablename__ = "device_config"
 
     device_id: Mapped[str] = mapped_column(ForeignKey("devices.device_id"), primary_key=True)
-    clock_format: Mapped[str] = mapped_column(String, default="24h", server_default=text("'24h'"))
+    clock_format: Mapped[ClockFormat] = mapped_column(String, default="24h", server_default=text("'24h'"))
     # The screen's language, one of LANGUAGES.
-    language: Mapped[str] = mapped_column(String, default="en", server_default=text("'en'"))
+    language: Mapped[Language] = mapped_column(String, default="en", server_default=text("'en'"))
     # How every panel is drawn, one of STYLES.
-    style: Mapped[str] = mapped_column(String, default="airy", server_default=text("'airy'"))
+    style: Mapped[Style] = mapped_column(String, default="airy", server_default=text("'airy'"))
     # The weather's town or city by name, as the render pool is sent it: the name of the place below, or, with no
     # place, the text typed (`flask weather backfill` gives it one).
     weather_location: Mapped[str] = mapped_column(String, default="", server_default=text("''"))
@@ -105,7 +112,7 @@ class DeviceConfig(db.Model):
     # id says which (services/stops.py).
     tfl_stop_ids: Mapped[list[str]] = mapped_column(JSON, default=list, server_default=text("'[]'"))
     # How the screen is mounted, one of ORIENTATIONS.
-    orientation: Mapped[str] = mapped_column(String, default="vertical", server_default=text("'vertical'"))
+    orientation: Mapped[Orientation] = mapped_column(String, default="vertical", server_default=text("'vertical'"))
     # The screen's size in pixels as it reported at registration; 480x800 after `devices unpair --config`.
     width: Mapped[int] = mapped_column(Integer, server_default=text("480"))
     height: Mapped[int] = mapped_column(Integer, server_default=text("800"))
@@ -113,7 +120,7 @@ class DeviceConfig(db.Model):
     device: Mapped[Device] = relationship(back_populates="config")
 
 
-class SpotifyToken(db.Model):
+class SpotifyToken(Model):
     """The Spotify account linked to a device: its OAuth tokens."""
 
     __tablename__ = "spotify_tokens"
@@ -125,7 +132,7 @@ class SpotifyToken(db.Model):
     expires_at: Mapped[float | None] = mapped_column(Float)
 
 
-class GlowmarktCredentials(db.Model):
+class GlowmarktCredentials(Model):
     """The Glowmarkt account linked to a device, its password encrypted at rest."""
 
     __tablename__ = "glowmarkt_credentials"
@@ -156,7 +163,7 @@ class GlowmarktCredentials(db.Model):
         return (username, password) if password.strip() else None
 
 
-class GitHubToken(db.Model):
+class GitHubToken(Model):
     """The GitHub token the owner gave for a device's developer panel, encrypted at rest.
 
     A read-only fine-grained personal access token, used only by the developer provider.
@@ -177,7 +184,7 @@ class GitHubToken(db.Model):
         self.token_encrypted = encrypt(plaintext)
 
 
-class GitHubAppToken(db.Model):
+class GitHubAppToken(Model):
     """The GitHub dashboard's sign-in through its GitHub App: tokens acting as the dashboard's user, encrypted at rest.
 
     GitHub issues the access token for 8 hours and the refresh token for 6 months; services/github_app.py renews both
@@ -212,7 +219,7 @@ class GitHubAppToken(db.Model):
         self.refresh_token_encrypted = encrypt(plaintext)
 
 
-class AppleMusicToken(db.Model):
+class AppleMusicToken(Model):
     """The Apple Music account linked to a device: its Music User Token, encrypted at rest.
 
     MusicKit JS gets the token on the config page when the listener signs in to Apple; it lasts about six months and
@@ -237,7 +244,7 @@ class AppleMusicToken(db.Model):
         self.token_encrypted = encrypt(plaintext) if plaintext else None
 
 
-class AppleMusicPlay(db.Model):
+class AppleMusicPlay(Model):
     """One play of a song seen in a device's Apple Music history, which the top lists are counted from."""
 
     __tablename__ = "apple_music_plays"
@@ -252,7 +259,7 @@ class AppleMusicPlay(db.Model):
     track: Mapped[dict] = mapped_column(JSON)
 
 
-class RendererAssignment(db.Model):
+class RendererAssignment(Model):
     """A screen's slug, under which the render pool draws it (services/assignments.py).
 
     Created when the screen is paired; the slug never changes, and goes with the device.

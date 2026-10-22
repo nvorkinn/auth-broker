@@ -40,7 +40,7 @@ def _record(lat, lon, city=None):
 @pytest.fixture
 def geodata(monkeypatch):
     records = {}
-    monkeypatch.setattr(geoip, "_load", lambda _directory: GeoData(FakeReader(records), PLACES))
+    monkeypatch.setattr(geoip, "_load", lambda _directory: GeoData(FakeReader(records), PLACES))  # ty: ignore[invalid-argument-type] -- a stand-in Reader
     return records
 
 
@@ -78,6 +78,8 @@ def test_no_suggestion_without_the_data(app, tmp_path):
 def _fetch_geodata():
     path = Path(__file__).resolve().parents[2] / "scripts" / "fetch_geodata.py"
     spec = importlib.util.spec_from_file_location("fetch_geodata", path)
+    assert spec is not None
+    assert spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module

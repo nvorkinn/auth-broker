@@ -82,7 +82,7 @@ def wanted_devices() -> list[Wanted]:
         .where(DeviceConfig.developer_enabled)
         .order_by(DeviceConfig.device_id)
     ).all()
-    return [Wanted(device_id, token and token.token) for device_id, token in rows]
+    return [Wanted(device_id, token.token if token else None) for device_id, token in rows]
 
 
 def release_shown(snapshot: dict) -> bool:

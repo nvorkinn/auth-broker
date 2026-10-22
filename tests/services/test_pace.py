@@ -271,7 +271,7 @@ def screen(app, register_device):
 
     def _set(*, developer: bool = False, spotify: bool = False) -> str:
         with app.app_context():
-            config = db.session.get(DeviceConfig, device_id)
+            config = db.session.get_one(DeviceConfig, device_id)
             config.developer_enabled = developer
             config.spotify_enabled = spotify
             db.session.commit()
@@ -289,7 +289,7 @@ def test_the_developer_panel_has_the_key_the_developer_provider_writes(app, scre
     device_id = screen(developer=True)
 
     with app.app_context():
-        keys = pace.hint_keys(db.session.get(DeviceConfig, device_id))
+        keys = pace.hint_keys(db.session.get_one(DeviceConfig, device_id))
 
     assert keys == [developer.pace_key(device_id)] == [f"v1:pace:developer:{device_id}"]
 
@@ -298,7 +298,7 @@ def test_the_music_area_has_the_key_the_music_provider_writes(app, screen):
     device_id = screen(spotify=True)
 
     with app.app_context():
-        keys = pace.hint_keys(db.session.get(DeviceConfig, device_id))
+        keys = pace.hint_keys(db.session.get_one(DeviceConfig, device_id))
 
     assert keys == [music.pace_key(device_id)] == [f"v1:pace:spotify:{device_id}"]
 
@@ -307,7 +307,7 @@ def test_both_panels_have_both_keys(app, screen):
     device_id = screen(developer=True, spotify=True)
 
     with app.app_context():
-        keys = pace.hint_keys(db.session.get(DeviceConfig, device_id))
+        keys = pace.hint_keys(db.session.get_one(DeviceConfig, device_id))
 
     assert keys == [f"v1:pace:developer:{device_id}", f"v1:pace:spotify:{device_id}"]
 
@@ -317,7 +317,7 @@ def test_a_screen_without_bursty_panels_has_no_keys_and_asks_redis_nothing(app, 
     app.extensions["redis"] = untouched = Mock()
 
     with app.app_context():
-        assert pace.hint_keys(db.session.get(DeviceConfig, device_id)) == []
+        assert pace.hint_keys(db.session.get_one(DeviceConfig, device_id)) == []
         assert pace.hint_keys(None) == []
     assert _hints(app, device_id) == []
     assert untouched.mock_calls == []

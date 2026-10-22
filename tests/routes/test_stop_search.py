@@ -112,6 +112,7 @@ def _search_westmoreland_road(client, query):
 
     def fake_get(self, url, params=None, timeout=None, headers=None):
         if "Search" in url:
+            assert params is not None
             searched.append(params["query"])
             found = params["query"].lower() == "westmoreland road"  # TfL ignores case
             return _mock_get({"matches": [{"id": "490G00022401"}] if found else []})

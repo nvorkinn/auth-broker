@@ -1,6 +1,6 @@
 """A screen's registration (its frames are routes/frames.py's)."""
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, TypeGuard
 
 from flask import Blueprint, current_app, jsonify, request
 from sqlalchemy.exc import IntegrityError
@@ -42,7 +42,7 @@ def register() -> ResponseReturnValue:
     width, height = body.get("width"), body.get("height")
     if not isinstance(secret, str) or len(secret) < MIN_SECRET_LENGTH:
         return jsonify(error="secret must be a random string of at least 16 characters"), 400
-    if not all(type(size) is int and size > 0 for size in (width, height)):
+    if not (_is_size(width) and _is_size(height)):
         return jsonify(error="width and height must be positive integers"), 400
 
     secret_hash = hash_secret(secret)
@@ -56,3 +56,8 @@ def register() -> ResponseReturnValue:
     if found is None:
         return with_retry_after(jsonify(error="too many devices waiting"), 60), 503
     return jsonify(device_id=found.device_id), 201 if found.created else 200
+
+
+def _is_size(value: object) -> TypeGuard[int]:
+    """Whether a reported width or height is a positive int (and not a bool, which is one to Python)."""
+    return type(value) is int and value > 0

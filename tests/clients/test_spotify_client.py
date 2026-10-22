@@ -126,7 +126,7 @@ def test_get_queue_refreshes_expired_token(app, paired_client):
         assert refresh.call_args.kwargs["data"]["grant_type"] == "refresh_token"
         assert refresh.call_args.kwargs["data"]["refresh_token"] == "old-refresh"
         assert mocked.call_args.kwargs["headers"] == {"Authorization": "Bearer new-access"}
-        row = db.session.get(SpotifyToken, device_id)
+        row = db.session.get_one(SpotifyToken, device_id)
         assert row.access_token == "new-access"
         # Spotify didn't rotate the refresh token in this response - the old one must survive.
         assert row.refresh_token == "old-refresh"

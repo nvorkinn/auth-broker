@@ -36,6 +36,7 @@ def test_resolve_stops_names_stations_and_platforms(app):
     }
 
     def fake_post(self, url, json=None, headers=None, timeout=None):
+        assert json is not None
         return _response(stop_places if "StopPlaces" in json["query"] else quays)
 
     with app.app_context(), patch("broker.clients.entur.requests.Session.post", fake_post):

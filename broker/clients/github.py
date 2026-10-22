@@ -13,9 +13,10 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 from http import HTTPStatus
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 import requests
+import requests.adapters
 from redis import RedisError
 
 from broker.clients import workflow_graph
@@ -359,7 +360,7 @@ class Dashboard:
 
     def get(self, path: str, **params: str | int) -> dict:
         """Read a JSON object, refusing an unexpected upstream response shape."""
-        data = json.loads(self.read(path, **params))
+        data = json.loads(self.read(path, raw=False, **params))
         if not isinstance(data, dict):
             msg = "GitHub returned an unexpected response shape."
             raise DashboardError(msg)
@@ -370,7 +371,7 @@ class Dashboard:
         found = []
         page = 1
         while True:
-            data = json.loads(self.read(path, **params, per_page=PAGE_SIZE, page=page))
+            data = json.loads(self.read(path, raw=False, **params, per_page=PAGE_SIZE, page=page))
             batch = data[key] if key else data
             if not isinstance(batch, list):
                 msg = "GitHub returned an unexpected list response."
@@ -554,6 +555,7 @@ class Dashboard:
     def workflow(self, repo: dict, run: dict) -> dict:
         """Draw dependencies from the workflow at the run's commit, retaining every returned job and step."""
         path = f"/repos/{repo['full_name']}"
+        # One result type for all three: their union, so each is cast back to what its call returns.
         jobs, text, pending_deployments = _parallel(
             [
                 lambda: self.pages(f"{path}/actions/runs/{run['id']}/attempts/{run['run_attempt']}/jobs", "jobs"),
@@ -561,6 +563,7 @@ class Dashboard:
                 lambda: self.pending_deployments(repo, run["id"]) if run["status"] != "completed" else [],
             ]
         )
+        jobs, text = cast("list[dict]", jobs), cast("str", text)
         try:
             definitions = workflow_graph.workflow_jobs(text)
         except ValueError as error:

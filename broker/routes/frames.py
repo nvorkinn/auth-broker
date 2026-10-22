@@ -5,7 +5,7 @@ import logging
 import os
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, TypeGuard
 
 import requests
 from flask import Blueprint, Response, jsonify, request
@@ -79,7 +79,7 @@ def _log_lines(logs: list, device_id: str, received_at: datetime) -> bytes:
     report it was written: the report arrived just after its newest line.
     """
     entries = [entry if isinstance(entry, dict) else {"_msg": str(entry)} for entry in logs]
-    uptimes = [e["uptime_ms"] for e in entries if _is_number(e.get("uptime_ms"))]
+    uptimes = [uptime for e in entries if _is_number(uptime := e.get("uptime_ms"))]
     newest = max(uptimes, default=0)
     records = []
     for entry in entries:
@@ -89,7 +89,7 @@ def _log_lines(logs: list, device_id: str, received_at: datetime) -> bytes:
     return "\n".join(json.dumps(record) for record in records).encode()
 
 
-def _is_number(value: object) -> bool:
+def _is_number(value: object) -> TypeGuard[int | float]:
     return isinstance(value, int | float) and not isinstance(value, bool)
 
 
@@ -112,7 +112,7 @@ def _forward(url: str, **request_kwargs: object) -> None:
     _executor.submit(_post, url, request_kwargs)
 
 
-def _post(url: str, request_kwargs: dict[str, object]) -> None:
+def _post(url: str, request_kwargs: dict[str, Any]) -> None:
     # Best-effort: a destination that's down or unhappy must never fail or slow a screen's poll.
     try:
         requests.post(url, timeout=FORWARD_TIMEOUT, **request_kwargs).raise_for_status()
@@ -136,7 +136,7 @@ def _frame_response(device_id: str) -> ResponseReturnValue:
     if frame is None:
         # The record went, or changed, since its etag was read: serve it whole as it is now, if there is one.
         latest = frame_record.read(device_id)
-        if latest is None:
+        if latest is None or latest.frame is None:
             return _no_frame(sleep_s)
         resp.set_etag(latest.etag)
         frame = latest.frame

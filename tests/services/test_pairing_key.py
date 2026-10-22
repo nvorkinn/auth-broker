@@ -129,7 +129,7 @@ def test_pairing_by_token_drops_the_code_and_its_key(app, store, client):
     device_id = device_id.get_json()["device_id"]
     with app.app_context():
         pairing.issue_code(device_id)  # as `flask devices code` would have, before its owner's browser paired it
-        token = db.session.get(Device, device_id).pairing_token
+        token = db.session.get_one(Device, device_id).pairing_token
 
     assert client.post("/pair/token", json={"token": token}).status_code == 200
 
@@ -145,7 +145,7 @@ def test_pairing_by_token_again_as_the_same_owner_drops_the_code(app, store, cli
     device_id = client.post("/api/devices/register", json={"secret": display_secret, "width": 800, "height": 480})
     device_id = device_id.get_json()["device_id"]
     with app.app_context():
-        token = db.session.get(Device, device_id).pairing_token
+        token = db.session.get_one(Device, device_id).pairing_token
     client.post("/pair/token", json={"token": token})
     with app.app_context():
         pairing.issue_code(device_id)

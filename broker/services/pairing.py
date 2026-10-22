@@ -146,7 +146,7 @@ def redeem_code(code: str, user: str) -> str | None:
     device_id = pairing_code.device_id
     # By itself first, so a second redeem of the same code racing this one fails at the commit rather than pairing too.
     db.session.delete(pairing_code)
-    previous = _pair(db.session.get(Device, device_id), user)  # and the device's other codes
+    previous = _pair(db.session.get_one(Device, device_id), user)  # and the device's other codes
     db.session.commit()
     _after_pairing(device_id, previous, user)
     return device_id
