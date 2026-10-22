@@ -10,8 +10,8 @@ from flask import Blueprint, Response, current_app, g, jsonify, redirect, render
 from redis import Redis, RedisError
 
 from broker.auth import (
-    current_user,
     paired_device_id,
+    require_current_user,
     require_paired_user,
     require_user,
     screen_label,
@@ -145,7 +145,7 @@ def pair() -> ResponseReturnValue:
     if retry_after is not None:
         return _too_many_attempts(retry_after)
 
-    device_id = pairing.redeem_code(request.form.get("code", "").strip().upper(), current_user())
+    device_id = pairing.redeem_code(request.form.get("code", "").strip().upper(), require_current_user())
     if device_id is None:
         lockout = throttle.record_failure(ip)
         current_app.logger.warning("Wrong pairing code from %s", ip)
@@ -183,7 +183,7 @@ def pair_by_token() -> ResponseReturnValue:
     token = (request.get_json(silent=True) or {}).get("token", "")
     if not isinstance(token, str) or not PAIRING_TOKEN_RE.match(token):
         return jsonify(status="invalid"), 400
-    status = pairing.pair_by_token(current_user(), token)
+    status = pairing.pair_by_token(require_current_user(), token)
     if status == "paired":
         # A paired screen's config goes in the store (all of them: this one is known here only by its token), and
         # what it shows is subscribed to.

@@ -7,14 +7,13 @@ from collections.abc import Callable, Collection
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
-from flask import current_app, g, jsonify, redirect, request, url_for
+from flask import Response, abort, current_app, g, jsonify, redirect, request, url_for
 from sqlalchemy import select
 
 from .db import db
 from .models import Device
 
 if TYPE_CHECKING:
-    from flask import Response
     from flask.typing import ResponseReturnValue
 
 # A Flask view function, as the decorators here take and return it.
@@ -170,6 +169,18 @@ def current_user() -> str | None:
     The broker trusts it because only the proxy can reach it (see caddy/Caddyfile).
     """
     return request.headers.get(current_app.config["USER_HEADER"], "").strip() or None
+
+
+def require_current_user() -> str:
+    """Return the signed-in user's id, or turn the request away with a 401 if there is none.
+
+    For a view that needs the id as a `str`: current_user can't promise one, though behind require_user it
+    always has. The 401 is the one require_user answers.
+    """
+    user = current_user()
+    if user is None:
+        abort(Response("Sign in required.", 401))
+    return user
 
 
 def current_username() -> str | None:

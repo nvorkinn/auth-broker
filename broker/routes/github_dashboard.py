@@ -11,7 +11,7 @@ from urllib.parse import urlencode
 import requests
 from flask import Blueprint, Response, current_app, jsonify, redirect, render_template, request, session
 
-from broker.auth import View, current_user, require_user
+from broker.auth import View, current_user, require_current_user, require_user
 from broker.clients import github
 from broker.services import github_app
 
@@ -55,7 +55,7 @@ def dashboard_view(view: Callable[..., ResponseReturnValue]) -> View:
 
 def _dashboard() -> github.Dashboard:
     """Open the GitHub client as the user, through the GitHub App they've connected."""
-    return github.Dashboard(github_app.token(current_user()), current_app.extensions["redis"])
+    return github.Dashboard(github_app.token(require_current_user()), current_app.extensions["redis"])
 
 
 @bp.errorhandler(json.JSONDecodeError)
@@ -94,7 +94,7 @@ def index() -> ResponseReturnValue:
     return render_template(
         "github_dashboard.html",
         csrf=session["github_dashboard_csrf"],
-        connect=not github_app.connected(current_user()),
+        connect=not github_app.connected(require_current_user()),
         webhooks=bool(current_app.config["GITHUB_APP_WEBHOOK_SECRET"]),
     )
 
@@ -119,7 +119,7 @@ def callback() -> ResponseReturnValue:
     code = request.args.get("code", "")
     if not code:
         return jsonify(error="GitHub sign-in was cancelled."), 400
-    github_app.connect(current_user(), code)
+    github_app.connect(require_current_user(), code)
     return redirect("/github")
 
 
