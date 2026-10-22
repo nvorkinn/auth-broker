@@ -12,7 +12,7 @@ from redis import Redis, RedisError
 from broker.auth import (
     paired_device_id,
     require_paired_user,
-    require_user,
+    require_user_id,
     screen_label,
     user_devices,
 )
@@ -122,7 +122,7 @@ def about() -> ResponseReturnValue:
 
 
 @bp.route("/pair", methods=["GET", "POST"])
-@require_user
+@require_user_id
 def pair(user_id: str) -> ResponseReturnValue:
     """Pair the signed-in user with a device.
 
@@ -172,7 +172,7 @@ def _render_pair(error: str | None, token: str = "", code: str = "") -> str:
 
 
 @bp.post("/pair/token")
-@require_user
+@require_user_id
 def pair_by_token(user_id: str) -> ResponseReturnValue:
     """Pair the signed-in user with the device a pairing token is for.
 

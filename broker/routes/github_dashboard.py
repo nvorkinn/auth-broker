@@ -11,7 +11,7 @@ from urllib.parse import urlencode
 import requests
 from flask import Blueprint, Response, current_app, jsonify, redirect, render_template, request, session
 
-from broker.auth import View, require_user
+from broker.auth import View, require_user_id
 from broker.clients import github
 from broker.services import github_app
 
@@ -29,26 +29,42 @@ SECTIONS = {"all", "pulls", "workflows"}
 STREAM_ID = re.compile(r"^\d{1,20}-\d{1,20}$")
 
 
+def _serve(view: Callable[..., ResponseReturnValue], user_id: str, kwargs: dict[str, str]) -> ResponseReturnValue:
+    """Run a dashboard view, unless the dashboard isn't set up or this isn't its one allowed user."""
+    config = current_app.config
+    if not github_app.configured() or not config["GITHUB_DASHBOARD_USER_ID"]:
+        return jsonify(error="The GitHub dashboard is not configured."), 503
+    if user_id != config["GITHUB_DASHBOARD_USER_ID"]:
+        return jsonify(error="This dashboard is private."), 403
+    if any(not REPO_PART.fullmatch(value) or value in {".", ".."} for value in kwargs.values()):
+        return jsonify(error="Invalid repository name."), 400
+    try:
+        return view(**kwargs)
+    except requests.RequestException as error:
+        return _upstream_error(error)
+    except github.DashboardError as error:
+        current_app.logger.warning("GitHub dashboard operation refused: %s", error)
+        return jsonify(error=error.public_message), 409
+
+
 def dashboard_view(view: Callable[..., ResponseReturnValue]) -> View:
     """Fail closed unless the dashboard is configured and this is its one allowed Authentik user."""
 
     @functools.wraps(view)
-    @require_user
+    @require_user_id
     def wrapped(*, user_id: str, **kwargs: str) -> ResponseReturnValue:
-        config = current_app.config
-        if not github_app.configured() or not config["GITHUB_DASHBOARD_USER_ID"]:
-            return jsonify(error="The GitHub dashboard is not configured."), 503
-        if user_id != config["GITHUB_DASHBOARD_USER_ID"]:
-            return jsonify(error="This dashboard is private."), 403
-        if any(not REPO_PART.fullmatch(value) or value in {".", ".."} for value in kwargs.values()):
-            return jsonify(error="Invalid repository name."), 400
-        try:
-            return view(user_id=user_id, **kwargs)
-        except requests.RequestException as error:
-            return _upstream_error(error)
-        except github.DashboardError as error:
-            current_app.logger.warning("GitHub dashboard operation refused: %s", error)
-            return jsonify(error=error.public_message), 409
+        return _serve(view, user_id, kwargs)
+
+    return wrapped
+
+
+def dashboard_user_view(view: Callable[..., ResponseReturnValue]) -> View:
+    """Guard a dashboard view like dashboard_view, and pass it the user's id as `user_id`."""
+
+    @functools.wraps(view)
+    @require_user_id
+    def wrapped(*, user_id: str, **kwargs: str) -> ResponseReturnValue:
+        return _serve(functools.partial(view, user_id=user_id), user_id, kwargs)
 
     return wrapped
 
@@ -86,7 +102,7 @@ def private_response(response: Response) -> Response:
 
 @bp.get("")
 @bp.get("/")
-@dashboard_view
+@dashboard_user_view
 def index(user_id: str) -> ResponseReturnValue:
     """Serve the dashboard without placing the user's GitHub token in the browser."""
     if "github_dashboard_csrf" not in session:
@@ -101,7 +117,7 @@ def index(user_id: str) -> ResponseReturnValue:
 
 @bp.get("/connect")
 @dashboard_view
-def connect(user_id: str) -> ResponseReturnValue:  # noqa: ARG001
+def connect() -> ResponseReturnValue:
     """Send the user to sign in to the GitHub App."""
     state = secrets.token_urlsafe(32)
     session["github_app_state"] = state
@@ -109,7 +125,7 @@ def connect(user_id: str) -> ResponseReturnValue:  # noqa: ARG001
 
 
 @bp.get("/callback")
-@dashboard_view
+@dashboard_user_view
 def callback(user_id: str) -> ResponseReturnValue:
     """Finish the sign-in GitHub sent the user back from, if this session started it."""
     expected = session.pop("github_app_state", "")
@@ -125,7 +141,7 @@ def callback(user_id: str) -> ResponseReturnValue:
 
 @bp.get("/changes")
 @dashboard_view
-def changes(user_id: str) -> ResponseReturnValue:  # noqa: ARG001
+def changes() -> ResponseReturnValue:
     """Return what the webhook saw change since the feed entry `after`, read from Redis without calling GitHub."""
     after = request.args.get("after")
     if after is not None and not STREAM_ID.fullmatch(after):
@@ -134,7 +150,7 @@ def changes(user_id: str) -> ResponseReturnValue:  # noqa: ARG001
 
 
 @bp.get("/repositories")
-@dashboard_view
+@dashboard_user_view
 def repositories(user_id: str) -> ResponseReturnValue:
     """Discover every owned repository the App can reach."""
     api = _dashboard(user_id)
@@ -145,7 +161,7 @@ def repositories(user_id: str) -> ResponseReturnValue:
 
 
 @bp.get("/repositories/<owner>/<name>")
-@dashboard_view
+@dashboard_user_view
 def project(owner: str, name: str, user_id: str) -> ResponseReturnValue:
     """Read a project's PRs and release runs, or only one of the two."""
     known = request.args.get("runs", "").split(",") if request.args.get("runs") else []
@@ -162,7 +178,7 @@ def project(owner: str, name: str, user_id: str) -> ResponseReturnValue:
 
 
 @bp.get("/repositories/<owner>/<name>/runs/<run_id>")
-@dashboard_view
+@dashboard_user_view
 def run(owner: str, name: str, run_id: str, user_id: str) -> ResponseReturnValue:
     """Read one release run's current state, for quick polling and the Refresh button on a running workflow."""
     if not run_id.isascii() or not run_id.isdecimal() or int(run_id) <= 0:
@@ -178,7 +194,7 @@ def run(owner: str, name: str, run_id: str, user_id: str) -> ResponseReturnValue
 
 
 @bp.get("/repositories/<owner>/<name>/pulls/<number>")
-@dashboard_view
+@dashboard_user_view
 def pull(owner: str, name: str, number: str, user_id: str) -> ResponseReturnValue:
     """Read one open PR's checks and mergeability, for quick polling while it is busy."""
     if not number.isascii() or not number.isdecimal() or int(number) <= 0:
@@ -195,7 +211,7 @@ def pull(owner: str, name: str, number: str, user_id: str) -> ResponseReturnValu
 
 
 @bp.get("/repositories/<owner>/<name>/pulls/<number>/files")
-@dashboard_view
+@dashboard_user_view
 def pull_files(owner: str, name: str, number: str, user_id: str) -> ResponseReturnValue:
     """List a PR's changed files and patches, read when its Files changed list is opened."""
     if not number.isascii() or not number.isdecimal() or int(number) <= 0:
@@ -209,7 +225,7 @@ def pull_files(owner: str, name: str, number: str, user_id: str) -> ResponseRetu
 
 
 @bp.post("/repositories/<owner>/<name>/pulls/<number>/auto-merge")
-@dashboard_view
+@dashboard_user_view
 def auto_merge(owner: str, name: str, number: str, user_id: str) -> ResponseReturnValue:
     """Turn a PR's auto-merge on or off, for a request carrying the session's CSRF token."""
     if not _valid_csrf():
@@ -228,7 +244,7 @@ def auto_merge(owner: str, name: str, number: str, user_id: str) -> ResponseRetu
 
 
 @bp.post("/repositories/<owner>/<name>/release")
-@dashboard_view
+@dashboard_user_view
 def release(owner: str, name: str, user_id: str) -> ResponseReturnValue:
     """Publish the next minor release immediately, for a request carrying the session's CSRF token."""
     if not _valid_csrf():
@@ -250,7 +266,7 @@ def _valid_csrf() -> bool:
 
 
 @bp.post("/repositories/<owner>/<name>/runs/<run_id>/approve")
-@dashboard_view
+@dashboard_user_view
 def approve(owner: str, name: str, run_id: str, user_id: str) -> ResponseReturnValue:
     """Release one pending environment without bypassing GitHub's reviewer restrictions."""
     if not _valid_csrf():
