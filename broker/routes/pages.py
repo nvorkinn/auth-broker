@@ -368,7 +368,7 @@ def screen_view() -> ResponseReturnValue:
         "screen.html",
         device_id=g.device_id,
         has_frame=shown is not None,
-        turned=_frame_turned(config),
+        frame_portrait=_frame_portrait(config),
         rendered_at=shown.rendered_at if shown else None,
         # As often as the screen polls, right now.
         interval=pace.poll_interval_s(now, pace.screen_hints(g.device_id, now)),
@@ -377,13 +377,13 @@ def screen_view() -> ResponseReturnValue:
     )
 
 
-def _frame_turned(config: DeviceConfig) -> bool:
-    """Whether the page turns the picture upright: a png frame of an upright screen is served as the panel has it."""
+def _frame_portrait(config: DeviceConfig) -> bool:
+    """Whether the page turns the picture to portrait: a portrait screen's png frame is served as the panel has it."""
     return config.format == "png" and config.orientation != "horizontal"
 
 
 def _frame_size(config: DeviceConfig) -> tuple[int, int]:
-    """Return the width and height of a screen's frame as the pages show it: upright, unless it's hung horizontally."""
+    """Return the width and height of a screen's frame as the pages show it: portrait, unless the screen's landscape."""
     long, short = max(config.width, config.height), min(config.width, config.height)
     return (short, long) if config.orientation != "horizontal" else (long, short)
 
@@ -392,7 +392,7 @@ def _frame_size(config: DeviceConfig) -> tuple[int, int]:
 @bp.get("/device/<device_id>/screen/frame.png")
 @require_paired_user
 def screen_frame() -> ResponseReturnValue:
-    """Serve the frame the screen is served as a PNG, the right way up for how the screen is hung.
+    """Serve the frame the screen is served as a PNG, in portrait or landscape as the screen is.
 
     Conditional on the frame's ETag and the orientation, so a page polling it only downloads a frame that changed.
     X-Rendered-At is when the pool first drew the picture.
@@ -402,14 +402,14 @@ def screen_frame() -> ResponseReturnValue:
     if frame is None or frame.frame is None:
         return jsonify(error="no frame yet"), 404
     config = db.session.get_one(DeviceConfig, g.device_id)
-    upright = config.orientation != "horizontal"
+    portrait = config.orientation != "horizontal"
     resp = Response(mimetype="image/png")
-    resp.set_etag(f"{frame.etag}-{'v' if upright else 'h'}")
+    resp.set_etag(f"{frame.etag}-{'v' if portrait else 'h'}")
     resp.headers["Cache-Control"] = "private, no-cache"
     resp.headers["X-Rendered-At"] = frame.rendered_at.isoformat(timespec="seconds")
     resp = resp.make_conditional(request)
     if resp.status_code == HTTPStatus.OK:  # a 304 needs no picture
-        resp.set_data(frame_image.preview(frame.frame, config.format, upright=upright))
+        resp.set_data(frame_image.preview(frame.frame, config.format, portrait=portrait))
     return resp
 
 
@@ -440,7 +440,7 @@ def _render_device_config(device_id: str, errors: list[str] | None = None) -> st
         has_frame=frame_record.head(device_id) is not None,
         frame_width=frame_width,
         frame_height=frame_height,
-        frame_turned=_frame_turned(config),
+        frame_portrait=_frame_portrait(config),
         screen_name=device.device_name or "",
         name_max=assignments.NAME_MAX,
         assignment=device.assignment,

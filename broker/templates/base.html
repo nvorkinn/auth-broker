@@ -178,7 +178,7 @@
             text-decoration: none;
         }
 
-        .bezel.upright {
+        .bezel.portrait {
             width: 220px;
         }
 
@@ -189,7 +189,7 @@
             background: #fff;
         }
 
-        /* A screen's picture. A png frame of an upright screen comes as the landscape panel has it, turned a quarter
+        /* A screen's picture. A png frame of a portrait screen comes as the landscape panel has it, turned a quarter
            anticlockwise, so it's turned back a quarter clockwise into the portrait box (--frame-w x --frame-h). */
         .frame {
             display: block;
@@ -201,7 +201,7 @@
             display: none;
         }
 
-        .frame-turned {
+        .frame-portrait {
             aspect-ratio: var(--frame-w) / var(--frame-h);
         }
 
@@ -212,7 +212,7 @@
             background: #fff;
         }
 
-        .frame-turned .frame-picture {
+        .frame-portrait .frame-picture {
             position: absolute;
             top: 50%;
             left: 50%;
@@ -247,7 +247,7 @@
                 transform: none;
             }
 
-            .bezel.upright {
+            .bezel.portrait {
                 width: 180px;
             }
         }

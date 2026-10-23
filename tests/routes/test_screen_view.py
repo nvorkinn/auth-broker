@@ -40,16 +40,17 @@ def _black_pixels(png: bytes) -> tuple[tuple[int, int], list[tuple[int, int]]]:
 
 
 def test_a_landscape_frame_is_drawn_as_is():
-    size, black = _black_pixels(frame_image.to_png(_frame_with_black_pixel(10, 3), upright=False))
+    size, black = _black_pixels(frame_image.to_png(_frame_with_black_pixel(10, 3), portrait=False))
 
     assert size == (800, 480)
     assert black == [(10, 3)]
 
 
-def test_an_upright_frame_is_turned_back_to_portrait():
+def test_a_portrait_frame_is_turned_back_a_quarter_clockwise():
     # The render turned the portrait picture a quarter anticlockwise: portrait (x, y) is at landscape (y, 479 - x).
     portrait_x, portrait_y = 10, 3
-    size, black = _black_pixels(frame_image.to_png(_frame_with_black_pixel(portrait_y, 479 - portrait_x), upright=True))
+    frame = _frame_with_black_pixel(portrait_y, 479 - portrait_x)
+    size, black = _black_pixels(frame_image.to_png(frame, portrait=True))
 
     assert size == (480, 800)
     assert black == [(portrait_x, portrait_y)]
@@ -65,19 +66,19 @@ def _make_png_screen(app, device_id, width, height, orientation="vertical"):
         db.session.commit()
 
 
-def test_a_png_frame_is_served_as_it_is_whichever_way_its_hung():
-    # The page turns an upright one back (the frame-turned style); the broker never decodes it.
-    assert frame_image.preview(PNG_FRAME, "png", upright=True) == PNG_FRAME
-    assert frame_image.preview(PNG_FRAME, "png", upright=False) == PNG_FRAME
+def test_a_png_frame_is_served_as_it_is_in_portrait_or_landscape():
+    # The page turns a portrait one back (the frame-portrait style); the broker never decodes it.
+    assert frame_image.preview(PNG_FRAME, "png", portrait=True) == PNG_FRAME
+    assert frame_image.preview(PNG_FRAME, "png", portrait=False) == PNG_FRAME
 
 
 def test_a_mono_frame_is_previewed_as_before():
     frame = _frame_with_black_pixel(10, 3)
 
-    assert frame_image.preview(frame, "mono-1bpp-packed", upright=True) == frame_image.to_png(frame, upright=True)
+    assert frame_image.preview(frame, "mono-1bpp-packed", portrait=True) == frame_image.to_png(frame, portrait=True)
 
 
-def test_an_upright_png_screen_turns_its_picture_on_the_page(app, paired_client, draw):
+def test_a_portrait_png_screen_turns_its_picture_on_the_page(app, paired_client, draw):
     client, device_id, _secret = paired_client
     _make_png_screen(app, device_id, 1872, 1404)
     draw(device_id, PNG_FRAME)
@@ -87,7 +88,7 @@ def test_an_upright_png_screen_turns_its_picture_on_the_page(app, paired_client,
     picture = client.get(f"/device/{device_id}/screen/frame.png")
 
     for html in (screen, settings):
-        assert 'class="frame frame-turned" style="--frame-w: 1404; --frame-h: 1872"' in html
+        assert 'class="frame frame-portrait" style="--frame-w: 1404; --frame-h: 1872"' in html
         assert 'width="1872" height="1404"' in html  # the picture as it comes: landscape
     assert picture.status_code == 200
     assert picture.data == PNG_FRAME
@@ -101,7 +102,7 @@ def test_a_landscape_png_screen_shows_its_picture_as_it_is(app, paired_client, d
     html = client.get(f"/device/{device_id}/screen").get_data(as_text=True)
 
     assert 'class="frame" style="--frame-w: 1872; --frame-h: 1404"' in html
-    assert 'class="frame frame-turned"' not in html
+    assert 'class="frame frame-portrait"' not in html
 
 
 def test_a_mono_screen_is_never_turned_on_the_page(paired_client, draw):
@@ -191,7 +192,7 @@ def test_settings_page_header_lists_the_saved_settings(app, paired_client):
         assert f"<li>{chip}</li>" in html
 
 
-def test_frame_png_is_the_frame_upright_and_conditional(paired_client, draw):
+def test_frame_png_is_the_frame_in_portrait_and_conditional(paired_client, draw):
     client, device_id, _secret = paired_client
     draw(device_id, _frame_with_black_pixel(3, 479 - 10))
 
@@ -209,15 +210,15 @@ def test_frame_png_is_the_frame_upright_and_conditional(paired_client, draw):
     assert "X-Rendered-At" in again.headers
 
 
-def test_frame_png_follows_a_horizontal_screen(app, paired_client, draw):
+def test_frame_png_follows_a_landscape_screen(app, paired_client, draw):
     client, device_id, _secret = paired_client
     draw(device_id, _frame_with_black_pixel(10, 3))
-    upright = client.get(f"/device/{device_id}/screen/frame.png")
+    portrait = client.get(f"/device/{device_id}/screen/frame.png")
     with app.app_context():
         db.session.get_one(DeviceConfig, device_id).orientation = "horizontal"
         db.session.commit()
 
-    response = client.get(f"/device/{device_id}/screen/frame.png", headers={"If-None-Match": upright.headers["ETag"]})
+    response = client.get(f"/device/{device_id}/screen/frame.png", headers={"If-None-Match": portrait.headers["ETag"]})
 
     assert response.status_code == 200
     assert _black_pixels(response.data) == ((800, 480), [(10, 3)])
