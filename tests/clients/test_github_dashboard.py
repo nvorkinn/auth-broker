@@ -1,5 +1,4 @@
 import json
-import threading
 from unittest.mock import Mock
 
 import fakeredis
@@ -174,8 +173,6 @@ def test_pull_files_are_cut_at_the_shown_maximum(api):
 def test_a_closed_pull_request_reads_as_none_and_is_left_out(api):
     api.get = Mock(return_value={"state": "closed"})
     assert api.pull("/repos/alice/project", 7) is None
-    api.pages = Mock(return_value=[{"number": 7}])
-    assert api.pulls("/repos/alice/project") == []
 
 
 @responses.activate
@@ -222,8 +219,6 @@ def _release_runs(workflows=({"id": 1, "name": "Release"},), **runs):
     """Stand in for Dashboard.pages and .get: open PRs, the repo's workflows, and each workflow's latest runs."""
 
     def pages(path, key=None, **params):
-        if path.endswith("/pulls"):
-            return [{"number": 3}]
         return list(workflows)
 
     def get(path, **params):
@@ -238,7 +233,7 @@ def test_release_runs_are_read_once_per_release_workflow(api):
         w1=[{"id": 11, "name": "Release", "status": "queued"}],
         w3=[{"id": 31, "name": "Release packages", "status": "waiting"}],
     )
-    api.pull = Mock(return_value={"refresh": False})
+    api.pulls = Mock(return_value=[{"refresh": False}])
     api.workflow = Mock(side_effect=lambda _repo, run: run)
     result = api.project(REPO)
     assert [run["id"] for run in result["workflows"]] == [11, 31]
@@ -264,36 +259,212 @@ def test_unfinished_releases_come_first_then_the_latest_finished_one(api):
 
 def test_project_reads_only_the_section_asked_for(api):
     api.pages, api.get = _release_runs(w1=[{"id": 1, "name": "Release", "status": "queued"}])
-    api.pull = Mock(return_value={"refresh": False})
+    api.pulls = Mock(return_value=[{"refresh": False}])
     api.workflow = Mock(side_effect=lambda _repo, run: run)
     pulls = api.project(REPO, section="pulls")
     assert pulls == {"pulls": [{"refresh": False}]}
+    api.pulls.assert_called_once_with("/repos/alice/project")
     api.workflow.assert_not_called()
     api.get.assert_not_called()
-    assert all(call.args[0].endswith("/pulls") for call in api.pages.call_args_list)
-    api.pages.reset_mock()
-    api.pull.reset_mock()
+    api.pages.assert_not_called()
+    api.pulls.reset_mock()
     workflows = api.project(REPO, section="workflows")
     assert workflows == {"workflows": [{"id": 1, "name": "Release", "status": "queued"}]}
-    api.pull.assert_not_called()
-    assert not any(call.args[0].endswith("/pulls") for call in api.pages.call_args_list)
+    api.pulls.assert_not_called()
 
 
-def test_project_reads_pull_requests_concurrently_and_keeps_their_order(api):
-    started = threading.Barrier(3, timeout=5)
+def _page(nodes, cursor=None):
+    """Return a GraphQL connection page: its nodes, and the cursor of the next page if there is one."""
+    return {"pageInfo": {"hasNextPage": cursor is not None, "endCursor": cursor}, "nodes": nodes}
 
-    def pull(_path, number):
-        started.wait()  # Returns only if every PR is being read at the same time.
-        return {"number": number, "refresh": False}
 
-    api.pages = Mock(return_value=[{"number": 3}, {"number": 1}, {"number": 2}])
-    api.pull = Mock(side_effect=pull)
-    assert [pr["number"] for pr in api.project(REPO, section="pulls")["pulls"]] == [3, 1, 2]
+def _graphql_pr(number, contexts=None, **fields):
+    """Return an open PR as PULLS_QUERY reads it, its head's checks in `contexts` (None if it has none)."""
+    rollup = None if contexts is None else {"contexts": contexts}
+    return {
+        "number": number,
+        "title": f"Change {number}",
+        "url": f"https://github.com/alice/project/pull/{number}",
+        "author": {"login": "bob"},
+        "isDraft": False,
+        "headRefName": "feature",
+        "baseRefName": "main",
+        "mergeable": "MERGEABLE",
+        "mergeStateStatus": "CLEAN",
+        "createdAt": "2026-10-19T08:00:00Z",
+        "body": None,
+        "headRefOid": f"sha{number}",
+        "autoMergeRequest": None,
+        "commits": {"nodes": [{"commit": {"statusCheckRollup": rollup}}]},
+    } | fields
+
+
+def _pulls_page(nodes, cursor=None):
+    return {"data": {"repository": {"pullRequests": _page(nodes, cursor)}}}
+
+
+def _run(run_id, name, status="COMPLETED", conclusion="SUCCESS", suite=1):
+    return {
+        "__typename": "CheckRun",
+        "databaseId": run_id,
+        "name": name,
+        "status": status,
+        "conclusion": conclusion,
+        "url": f"https://github.com/alice/project/runs/{run_id}",
+        "checkSuite": {"databaseId": suite},
+    }
+
+
+def _status(context, state, created_at="2026-10-19T08:00:00Z"):
+    return {
+        "__typename": "StatusContext",
+        "context": context,
+        "state": state,
+        "targetUrl": None,
+        "createdAt": created_at,
+    }
+
+
+@responses.activate
+def test_open_pulls_are_read_in_one_query_shaped_like_a_single_pull(api):
+    body = "Change.\n\nhttps://claude.ai/code/session_01Old\n\nhttps://claude.ai/code/session_01Fwmw2krp"
+    pr = _graphql_pr(
+        7,
+        _page([_run(1, "build", "IN_PROGRESS", None), _status("deploy", "SUCCESS")]),
+        mergeable="CONFLICTING",
+        mergeStateStatus="DIRTY",
+        body=body,
+        isDraft=True,
+        autoMergeRequest={"enabledAt": "2026-10-19T09:00:00Z"},
+    )
+    query = responses.post(f"{ROOT}/graphql", json=_pulls_page([pr]))
+    assert api.pulls("/repos/alice/project") == [
+        {
+            "number": 7,
+            "title": "Change 7",
+            "url": "https://github.com/alice/project/pull/7",
+            "author": "bob",
+            "draft": True,
+            "head": "feature",
+            "base": "main",
+            "mergeable": False,
+            "merge_state": "dirty",
+            "created_at": "2026-10-19T08:00:00Z",
+            "session": "session_01Fwmw2krp",
+            "sha": "sha7",
+            "auto_merge": True,
+            "checks": [
+                {
+                    "name": "build",
+                    "state": "in_progress",
+                    "pending": True,
+                    "url": "https://github.com/alice/project/runs/1",
+                },
+                {"name": "deploy", "state": "success", "pending": False, "url": None},
+            ],
+            "refresh": True,
+        }
+    ]
+    assert query.call_count == 1
+    sent = _json_body(query.calls[0])
+    assert sent["variables"] == {"owner": "alice", "name": "project", "first": github.PAGE_SIZE, "after": None}
+    assert "pullRequests(states: OPEN" in sent["query"]
+    assert "fragment checks on StatusCheckRollupContextConnection" in sent["query"]
+
+
+@pytest.mark.parametrize(
+    ("mergeable", "expected", "refresh"),
+    [("MERGEABLE", True, False), ("CONFLICTING", False, False), ("UNKNOWN", None, True)],
+)
+def test_graphql_mergeability_reads_as_rests(api, mergeable, expected, refresh):
+    api.graphql = Mock(return_value=_pulls_page([_graphql_pr(1, mergeable=mergeable)])["data"])
+    [pr] = api.pulls("/repos/alice/project")
+    assert (pr["mergeable"], pr["checks"], pr["refresh"]) == (expected, [], refresh)
+
+
+def test_a_deleted_authors_pull_reads_as_ghosts(api):
+    api.graphql = Mock(return_value=_pulls_page([_graphql_pr(1, author=None)])["data"])
+    assert api.pulls("/repos/alice/project")[0]["author"] == "ghost"
+
+
+@responses.activate
+def test_open_pulls_and_their_checks_are_paginated_in_order(api):
+    first = _graphql_pr(3, _page([_run(1, "build")], cursor="checks-2"))
+    query = responses.post(f"{ROOT}/graphql", json=_pulls_page([first, _graphql_pr(2)], cursor="pulls-2"))
+    responses.post(f"{ROOT}/graphql", json=_pulls_page([_graphql_pr(1)]))
+    more = {"repository": {"object": {"statusCheckRollup": {"contexts": _page([_run(2, "test", "QUEUED", None)])}}}}
+    responses.post(f"{ROOT}/graphql", json={"data": more})
+    pulls = api.pulls("/repos/alice/project")
+    assert [pr["number"] for pr in pulls] == [3, 2, 1]
+    assert [(check["name"], check["state"], check["pending"]) for check in pulls[0]["checks"]] == [
+        ("build", "success", False),
+        ("test", "queued", True),
+    ]
+    assert pulls[0]["refresh"] is True
+    sent = [_json_body(call)["variables"] for call in responses.calls]
+    assert [variables.get("after") for variables in sent] == [None, "pulls-2", "checks-2"]
+    assert sent[2]["sha"] == "sha3"
+    assert query.call_count == 1
+
+
+def test_a_head_that_moved_on_mid_read_keeps_the_checks_already_read(api):
+    pr = _graphql_pr(3, _page([_run(1, "build")], cursor="checks-2"))
+    api.graphql = Mock(side_effect=[_pulls_page([pr])["data"], {"repository": {"object": None}}])
+    assert [check["name"] for check in api.pulls("/repos/alice/project")[0]["checks"]] == ["build"]
+
+
+def test_only_the_latest_run_of_each_check_and_status_of_each_context_is_kept():
+    contexts = [
+        _run(5, "build", conclusion="SUCCESS"),
+        _run(3, "build", conclusion="FAILURE"),
+        # Another workflow's job of the same name is its own check.
+        _run(4, "build", conclusion="CANCELLED", suite=2),
+        _run(6, "lint", "WAITING", None),
+        _status("deploy", "SUCCESS", "2026-10-19T09:00:00Z"),
+        _status("deploy", "PENDING", "2026-10-19T08:00:00Z"),
+        _status("external", "EXPECTED"),
+        _status("legacy", "ERROR"),
+    ]
+    assert [(check["name"], check["state"], check["pending"]) for check in github._rollup_checks(contexts)] == [
+        ("build", "success", False),
+        ("build", "cancelled", False),
+        ("lint", "waiting", True),
+        ("deploy", "success", False),
+        ("external", "pending", True),
+        ("legacy", "error", False),
+    ]
+
+
+@responses.activate
+def test_a_graphql_error_is_refused_with_githubs_message(api):
+    responses.post(f"{ROOT}/graphql", json={"data": None, "errors": [{"type": "NOT_FOUND", "message": "No repo"}]})
+    with pytest.raises(github.DashboardError, match="GitHub refused: No repo"):
+        api.pulls("/repos/alice/project")
+
+
+@responses.activate
+def test_graphqls_rate_limit_waits_until_its_reset(api):
+    responses.post(
+        f"{ROOT}/graphql",
+        json={"errors": [{"type": "RATE_LIMITED", "message": "API rate limit exceeded"}]},
+        headers={"X-RateLimit-Remaining": "0", "X-RateLimit-Reset": "1300"},
+    )
+    with pytest.raises(requests.HTTPError) as error:
+        api.pulls("/repos/alice/project")
+    assert github.rate_limit_wait(error.value, now=1000) == 300
+
+
+@responses.activate
+def test_a_graphql_secondary_limit_keeps_its_retry_after(api):
+    responses.post(f"{ROOT}/graphql", status=403, headers={"Retry-After": "30"}, json={"message": "secondary"})
+    with pytest.raises(requests.HTTPError) as error:
+        api.pulls("/repos/alice/project")
+    assert github.rate_limit_wait(error.value) == 30
 
 
 def test_a_failed_part_fails_the_project_read(api):
     api.pages, api.get = _release_runs()
-    api.pull = Mock(side_effect=requests.ConnectionError("down"))
+    api.pulls = Mock(side_effect=requests.ConnectionError("down"))
     with pytest.raises(requests.ConnectionError):
         api.project(REPO)
 
@@ -348,7 +519,7 @@ def test_release_run_reads_one_release_and_nothing_else(api, status, body, found
 def test_only_release_workflows_are_drawn(api, name, shown):
     run = {"id": 7, "name": name, "status": "waiting"}
     api.pages, api.get = _release_runs(workflows=[{"id": 1, "name": name}], w1=[run])
-    api.pull = Mock(return_value={"refresh": False})
+    api.pulls = Mock(return_value=[])
     api.workflow = Mock(return_value=run)
     result = api.project(REPO)
     assert result["workflows"] == ([run] if shown else [])

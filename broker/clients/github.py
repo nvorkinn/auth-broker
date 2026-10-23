@@ -414,12 +414,115 @@ class Dashboard:
         wanted = list(sections) if section == "all" else [section]
         return dict(zip(wanted, _parallel(sections[name] for name in wanted), strict=True))
 
+    # Every open PR with its head's checks in one query, newest first like REST's list. It costs 1 (pullRequests) +
+    # 100 (commits, one per PR) + 100 (contexts, one per commit) requests = 201 / 100 = 2 points a page of 100 PRs, from
+    # GraphQL's own 5,000 points an hour. GraphQL has no ETags, so an unchanged read costs as much as a changed one.
+    PULLS_QUERY = """
+query($owner: String!, $name: String!, $first: Int!, $after: String) {
+  repository(owner: $owner, name: $name) {
+    pullRequests(states: OPEN, first: $first, after: $after, orderBy: {field: CREATED_AT, direction: DESC}) {
+      pageInfo { hasNextPage endCursor }
+      nodes {
+        number title url isDraft headRefName baseRefName mergeable mergeStateStatus createdAt body headRefOid
+        author { login }
+        autoMergeRequest { enabledAt }
+        commits(last: 1) { nodes { commit { statusCheckRollup { contexts(first: $first) { ...checks } } } } }
+      }
+    }
+  }
+}
+"""
+    # The rest of a head commit's checks, past the first page the PR query read (1 point a page).
+    CHECKS_QUERY = """
+query($owner: String!, $name: String!, $sha: GitObjectID!, $first: Int!, $after: String) {
+  repository(owner: $owner, name: $name) {
+    object(oid: $sha) { ... on Commit { statusCheckRollup { contexts(first: $first, after: $after) { ...checks } } } }
+  }
+}
+"""
+    CHECKS_FRAGMENT = """
+fragment checks on StatusCheckRollupContextConnection {
+  pageInfo { hasNextPage endCursor }
+  nodes {
+    __typename
+    ... on CheckRun { databaseId name status conclusion url checkSuite { databaseId } }
+    ... on StatusContext { context state targetUrl createdAt }
+  }
+}
+"""
+
     def pulls(self, path: str) -> list[dict]:
-        """Return every open PR with its checks, leaving out any that closed while being read."""
-        pulls = _parallel(
-            [lambda number=pr["number"]: self.pull(path, number) for pr in self.pages(f"{path}/pulls", state="open")]
-        )
-        return [pr for pr in pulls if pr is not None]
+        """Return every open PR with its checks, shaped like pull(), from GraphQL pages of PAGE_SIZE PRs."""
+        owner, name = path.removeprefix("/repos/").split("/")
+        found = []
+        after = None
+        while True:
+            data = self.graphql(self.PULLS_QUERY, owner=owner, name=name, first=PAGE_SIZE, after=after)
+            connection = data["repository"]["pullRequests"]
+            found.extend(connection["nodes"])
+            if not connection["pageInfo"]["hasNextPage"]:
+                break
+            after = connection["pageInfo"]["endCursor"]
+        return [self._graphql_pull(owner, name, pr) for pr in found]
+
+    def _graphql_pull(self, owner: str, name: str, pr: dict) -> dict:
+        """Map one PR from PULLS_QUERY to pull()'s shape, with GraphQL's enums read as REST's values."""
+        commits = pr["commits"]["nodes"]
+        rollup = commits[0]["commit"]["statusCheckRollup"] if commits else None
+        sha = pr["headRefOid"]
+        checks = _rollup_checks(self._rollup_contexts(owner, name, sha, rollup["contexts"])) if rollup else []
+        mergeable = GRAPHQL_MERGEABLE.get(pr["mergeable"])
+        return {
+            "number": pr["number"],
+            "title": pr["title"],
+            "url": pr["url"],
+            # A deleted account's PR has no author in GraphQL; REST names it ghost.
+            "author": (pr["author"] or {}).get("login", "ghost"),
+            "draft": pr["isDraft"],
+            "head": pr["headRefName"],
+            "base": pr["baseRefName"],
+            "mergeable": mergeable,
+            # GraphQL's MergeStateStatus values are REST's mergeable_state in capitals (CLEAN, DIRTY, BLOCKED, ...).
+            "merge_state": pr["mergeStateStatus"].lower(),
+            "created_at": pr["createdAt"],
+            "session": _claude_session(pr["body"]),
+            "sha": sha,
+            "auto_merge": pr["autoMergeRequest"] is not None,
+            "checks": checks,
+            "refresh": mergeable is None or any(check["pending"] for check in checks),
+        }
+
+    def _rollup_contexts(self, owner: str, name: str, sha: str, connection: dict) -> list[dict]:
+        """Return all of a head commit's rollup contexts, reading any past the first page."""
+        contexts = list(connection["nodes"])
+        while connection["pageInfo"]["hasNextPage"]:
+            variables = {"sha": sha, "first": PAGE_SIZE, "after": connection["pageInfo"]["endCursor"]}
+            commit = self.graphql(self.CHECKS_QUERY, owner=owner, name=name, **variables)["repository"]["object"]
+            # The branch moved on while being read: the PR's next read has the new head's checks.
+            if not commit or not commit.get("statusCheckRollup"):
+                break
+            connection = commit["statusCheckRollup"]["contexts"]
+            contexts.extend(connection["nodes"])
+        return contexts
+
+    def graphql(self, query: str, **variables: str | int | None) -> dict:
+        """Run a GraphQL read and return its data; GitHub reports a refused query as a 200 with `errors`."""
+        if "...checks" in query:
+            query += self.CHECKS_FRAGMENT
+        response = self.post("/graphql", {"query": query, "variables": variables})
+        body = response.json()
+        if not isinstance(body, dict):
+            msg = "GitHub returned an unexpected response shape."
+            raise DashboardError(msg)
+        if errors := body.get("errors"):
+            if any(error.get("type") == "RATE_LIMITED" for error in errors):
+                # GraphQL's hourly limit can come as a 200 with X-RateLimit-Remaining 0 and its reset: read it as the
+                # 429 it is, so rate_limit_wait (and the routes' 429) back off until then, as for REST.
+                response.status_code = HTTPStatus.TOO_MANY_REQUESTS
+                raise requests.HTTPError(response=response)
+            msg = f"GitHub refused: {errors[0].get('message', '')}"
+            raise DashboardError(msg)
+        return body["data"]
 
     def release_workflows(self, repo: dict) -> list[dict]:
         """Draw each release workflow's unfinished recent runs, then the latest finished release."""
@@ -465,7 +568,11 @@ class Dashboard:
             raise
 
     def pull(self, path: str, number: int) -> dict | None:
-        """Read mergeability and both Checks API and legacy commit-status checks for an open PR head; None if closed."""
+        """Read mergeability and both Checks API and legacy commit-status checks for an open PR head; None if closed.
+
+        REST, not pulls()'s GraphQL: the quick polls repeat this for a busy PR, and an unchanged read is three 304s,
+        which GitHub doesn't count, where a GraphQL read always costs a point.
+        """
         pr = self.get(f"{path}/pulls/{number}")
         if pr["state"] != "open":
             return None
@@ -699,6 +806,50 @@ class Dashboard:
         response = self.session.post(f"{API_URL}{path}", json=payload, timeout=TIMEOUT)
         response.raise_for_status()
         return response
+
+
+# GraphQL's MergeableState as REST's mergeable; UNKNOWN (still being worked out) is REST's null.
+GRAPHQL_MERGEABLE = {"MERGEABLE": True, "CONFLICTING": False}
+
+
+def _rollup_checks(contexts: list[dict]) -> list[dict]:
+    """Map a statusCheckRollup's contexts to pull()'s checks: check runs, then legacy commit statuses.
+
+    The rollup is what the PR page shows: the latest run of each check and the latest status of each context, as
+    REST's check-runs filter=latest and the newest of each context in /statuses. GitHub has been seen to return a
+    superseded duplicate, though, so only the newest of each is kept: a check run by its suite (one per workflow run,
+    whose re-runs stay in it) and name, newest by ID; a status by its context, newest by creation time.
+    """
+    runs: dict[tuple[int | None, str], dict] = {}
+    for run in sorted(
+        (item for item in contexts if item.get("__typename") == "CheckRun"), key=lambda run: run["databaseId"] or 0
+    ):
+        runs[(run["checkSuite"] or {}).get("databaseId"), run["name"]] = run
+    statuses: dict[str, dict] = {}
+    for status in sorted(
+        (item for item in contexts if item.get("__typename") == "StatusContext"), key=lambda status: status["createdAt"]
+    ):
+        statuses[status["context"]] = status
+    checks = [
+        {
+            "name": run["name"],
+            "state": (run["conclusion"] or run["status"]).lower(),
+            "pending": run["status"] != "COMPLETED",
+            "url": run["url"],
+        }
+        for run in runs.values()
+    ]
+    # EXPECTED is a required context that hasn't reported yet: REST's statuses have no such state, so it's pending.
+    checks.extend(
+        {
+            "name": status["context"],
+            "state": "pending" if status["state"] == "EXPECTED" else status["state"].lower(),
+            "pending": status["state"] in {"PENDING", "EXPECTED"},
+            "url": status["targetUrl"],
+        }
+        for status in statuses.values()
+    )
+    return checks
 
 
 SEMVER = re.compile(
