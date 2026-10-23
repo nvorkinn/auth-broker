@@ -89,7 +89,7 @@ def test_summary_revalidates_what_it_read_last_time():
         return response
 
     def unchanged(url, params=None, timeout=None, headers=None):
-        assert headers["If-None-Match"] == f'"{url}"'
+        assert (headers or {})["If-None-Match"] == f'"{url}"'
         return _response(None, 304)
 
     with patch("requests.Session.get", side_effect=first):

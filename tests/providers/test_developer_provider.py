@@ -195,7 +195,10 @@ def test_only_the_screens_with_a_release_are_queued(provider, store, device):
     _pool(store, busy, idle)
 
     with (
-        patch("broker.clients.github.summary", side_effect=lambda token, _cache: GITHUB if token == "busy" else IDLE_GITHUB),
+        patch(
+            "broker.clients.github.summary",
+            side_effect=lambda token, _cache: GITHUB if token == "busy" else IDLE_GITHUB,
+        ),
         patch("broker.clients.github.copilot_premium_requests", return_value=280),
         patch("broker.services.developer.ai_plans.plans", return_value=FIXTURE["plans"]),
     ):
