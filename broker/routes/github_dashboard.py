@@ -22,8 +22,6 @@ if TYPE_CHECKING:
 
 bp = Blueprint("github_dashboard", __name__, url_prefix="/github")
 REPO_PART = re.compile(r"^[A-Za-z0-9_.-]+$")
-# Runs the page showed last time, rechecked by ID; each costs a GitHub call when the status lists miss it.
-MAX_KNOWN_RUNS = 20
 # What a project read may ask for: both halves, or just the one a section's Refresh button needs.
 SECTIONS = {"all", "pulls", "workflows"}
 STREAM_ID = re.compile(r"^\d{1,20}-\d{1,20}$")
@@ -164,15 +162,12 @@ def repositories(user_id: str) -> ResponseReturnValue:
 @dashboard_user_view
 def project(owner: str, name: str, user_id: str) -> ResponseReturnValue:
     """Read a project's PRs and release runs, or only one of the two."""
-    known = request.args.get("runs", "").split(",") if request.args.get("runs") else []
-    if len(known) > MAX_KNOWN_RUNS or not all(run.isascii() and run.isdecimal() and int(run) > 0 for run in known):
-        return jsonify(error="Invalid workflow run IDs."), 400
     section = request.args.get("section", "all")
     if section not in SECTIONS:
         return jsonify(error="Invalid section."), 400
     api = _dashboard(user_id)
     try:
-        return jsonify(api.project(api.owned_repository(owner, name), [int(run) for run in known], section))
+        return jsonify(api.project(api.owned_repository(owner, name), section))
     finally:
         api.close()
 

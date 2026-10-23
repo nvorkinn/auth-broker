@@ -218,46 +218,58 @@ def test_pull_checks_include_paginated_checks_and_latest_legacy_statuses(api):
     assert [check["state"] for check in pr["checks"][-2:]] == ["success", "pending"]
 
 
-def _runs_by_status(workflows=(), **by_status):
-    """Stand in for Dashboard.pages: open PRs, the repo's workflows, and the runs GitHub lists under each status."""
+def _release_runs(workflows=({"id": 1, "name": "Release"},), **runs):
+    """Stand in for Dashboard.pages and .get: open PRs, the repo's workflows, and each workflow's latest runs."""
 
     def pages(path, key=None, **params):
         if path.endswith("/pulls"):
             return [{"number": 3}]
-        if path.endswith("/actions/workflows"):
-            return list(workflows)
-        return by_status.get(params["status"], [])
+        return list(workflows)
 
-    return Mock(side_effect=pages)
+    def get(path, **params):
+        return {"workflow_runs": runs.get(f"w{path.split('/')[-2]}", [])}
+
+    return Mock(side_effect=pages), Mock(side_effect=get)
 
 
-def test_project_reads_every_unfinished_status_and_deduplicates(api):
-    api.pages = _runs_by_status(
-        waiting=[{"id": 2, "name": "Release packages", "status": "waiting"}],
-        queued=[{"id": 1, "name": "Release", "status": "queued"}],
-        in_progress=[{"id": 1, "name": "Release", "status": "in_progress"}],
+def test_release_runs_are_read_once_per_release_workflow(api):
+    api.pages, api.get = _release_runs(
+        workflows=[{"id": 1, "name": "Release"}, {"id": 2, "name": "Tests"}, {"id": 3, "name": "Release packages"}],
+        w1=[{"id": 11, "name": "Release", "status": "queued"}],
+        w3=[{"id": 31, "name": "Release packages", "status": "waiting"}],
     )
     api.pull = Mock(return_value={"refresh": False})
     api.workflow = Mock(side_effect=lambda _repo, run: run)
     result = api.project(REPO)
-    assert sorted(run["id"] for run in result["workflows"]) == [1, 2]
-    # Lifecycle order: a run approved mid-sweep leaves "waiting" for a status that is queried later.
-    assert [call.kwargs["status"] for call in api.pages.call_args_list if "status" in call.kwargs] == [
-        "requested",
-        "pending",
-        "waiting",
-        "queued",
-        "in_progress",
-    ]
+    assert [run["id"] for run in result["workflows"]] == [11, 31]
+    assert sorted(call.args[0].split("/")[-2] for call in api.get.call_args_list) == ["1", "3"]
+    assert all(call.kwargs == {"per_page": github.RECENT_RELEASES} for call in api.get.call_args_list)
+
+
+def test_unfinished_releases_come_first_then_the_latest_finished_one(api):
+    api.pages, api.get = _release_runs(
+        workflows=[{"id": 1, "name": "Release"}, {"id": 3, "name": "Release packages"}],
+        w1=[
+            {"id": 14, "name": "Release", "status": "in_progress"},
+            {"id": 13, "name": "Release", "status": "completed"},
+            {"id": 12, "name": "Release", "status": "waiting"},
+            {"id": 11, "name": "Release", "status": "completed"},
+        ],
+        w3=[{"id": 15, "name": "Release packages", "status": "completed"}],
+    )
+    api.workflow = Mock(side_effect=lambda _repo, run: run)
+    # Run 12 still waits behind the newer 14, so both show; of the finished ones only the latest, 15, stays.
+    assert [run["id"] for run in api.project(REPO, "workflows")["workflows"]] == [14, 12, 15]
 
 
 def test_project_reads_only_the_section_asked_for(api):
-    api.pages = _runs_by_status(queued=[{"id": 1, "name": "Release", "status": "queued"}])
+    api.pages, api.get = _release_runs(w1=[{"id": 1, "name": "Release", "status": "queued"}])
     api.pull = Mock(return_value={"refresh": False})
     api.workflow = Mock(side_effect=lambda _repo, run: run)
     pulls = api.project(REPO, section="pulls")
     assert pulls == {"pulls": [{"refresh": False}]}
     api.workflow.assert_not_called()
+    api.get.assert_not_called()
     assert all(call.args[0].endswith("/pulls") for call in api.pages.call_args_list)
     api.pages.reset_mock()
     api.pull.reset_mock()
@@ -280,54 +292,10 @@ def test_project_reads_pull_requests_concurrently_and_keeps_their_order(api):
 
 
 def test_a_failed_part_fails_the_project_read(api):
-    api.pages = _runs_by_status()
+    api.pages, api.get = _release_runs()
     api.pull = Mock(side_effect=requests.ConnectionError("down"))
     with pytest.raises(requests.ConnectionError):
         api.project(REPO)
-
-
-@responses.activate
-def test_project_rechecks_known_runs_that_the_status_lists_missed(api):
-    path = f"{ROOT}/repos/alice/project"
-    api.pages = _runs_by_status(in_progress=[{"id": 1, "name": "Release", "status": "in_progress"}])
-    api.pull = Mock(return_value={"refresh": False})
-    api.workflow = Mock(side_effect=lambda _repo, run: run)
-    responses.get(f"{path}/actions/runs/7", json={"id": 7, "name": "Release", "status": "queued"})
-    responses.get(f"{path}/actions/runs/8", json={"id": 8, "name": "Release", "status": "completed"})
-    responses.get(f"{path}/actions/runs/9", status=404)
-    result = api.project(REPO, [1, 7, 8, 9])
-    # Run 8 finished since the last look, so it stays as the latest finished release.
-    assert [run["id"] for run in result["workflows"]] == [1, 7, 8]
-    assert sorted(_url(call).split("/")[-1] for call in responses.calls) == ["7", "8", "9"]
-
-
-def test_the_latest_finished_release_is_kept_after_the_ongoing_ones(api):
-    api.pages = _runs_by_status(
-        workflows=[{"id": 1, "name": "Release"}, {"id": 2, "name": "Tests"}, {"id": 3, "name": "Release packages"}],
-        in_progress=[{"id": 20, "name": "Tests", "status": "in_progress"}],
-    )
-    latest = {1: {"id": 12, "name": "Release", "status": "completed"}, 3: {"id": 15, "name": "Release packages"}}
-    api.get = Mock(side_effect=lambda path, **_: {"workflow_runs": [latest[int(path.split("/")[-2])]]})
-    api.pull = Mock(return_value={"refresh": False})
-    api.workflow = Mock(side_effect=lambda _repo, run: run)
-    result = api.project(REPO)
-    assert [run["id"] for run in result["workflows"]] == [15]
-    assert sorted(call.args[0].split("/")[-2] for call in api.get.call_args_list) == ["1", "3"]
-    assert all(call.kwargs == {"status": "completed", "per_page": 1} for call in api.get.call_args_list)
-
-
-@responses.activate
-def test_a_release_rechecked_by_id_that_just_finished_beats_the_lagging_workflow_lists(api):
-    api.pages = _runs_by_status(workflows=[{"id": 1, "name": "Release"}])
-    responses.get(
-        f"{ROOT}/repos/alice/project/actions/runs/13", json={"id": 13, "name": "Release", "status": "completed"}
-    )
-    responses.get(
-        f"{ROOT}/repos/alice/project/actions/workflows/1/runs",
-        json={"workflow_runs": [{"id": 12, "name": "Release", "status": "completed"}]},
-    )
-    api.workflow = Mock(side_effect=lambda _repo, run: run)
-    assert [run["id"] for run in api.project(REPO, [13], "workflows")["workflows"]] == [13]
 
 
 @responses.activate
@@ -379,7 +347,7 @@ def test_release_run_reads_one_release_and_nothing_else(api, status, body, found
 )
 def test_only_release_workflows_are_drawn(api, name, shown):
     run = {"id": 7, "name": name, "status": "waiting"}
-    api.pages = _runs_by_status(waiting=[run])
+    api.pages, api.get = _release_runs(workflows=[{"id": 1, "name": name}], w1=[run])
     api.pull = Mock(return_value={"refresh": False})
     api.workflow = Mock(return_value=run)
     result = api.project(REPO)

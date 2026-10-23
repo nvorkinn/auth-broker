@@ -467,14 +467,6 @@ test("approval failures are visible, explicitly retryable and never automaticall
     assert.equal(app.calls.filter(call => call.options.method === "POST").length, 2);
 });
 
-test("refreshes recheck the release runs shown last time by ID", async () => {
-    const app = await harness({ ...idle, active: true, workflows: [waitingRelease] });
-    assert.equal(app.calls.at(-1).url, "/github/repositories/alice/project");
-    await approveButtons(app)[0].listeners.click();
-    await app.tick();
-    assert.equal(app.calls.at(-1).url, "/github/repositories/alice/project?runs=7");
-});
-
 const another = { ...repo, full_name: "alice/another" };
 const memory = (saved = {}) => ({
     saved,
@@ -565,9 +557,9 @@ test("a section's Refresh reads only that section and leaves the other's schedul
     assert.equal(fullCalls(app).length, 2, "the full refresh due 60s after the first is not pushed back");
     app.advance(1);
     await app.tick();
-    assert.equal(fullCalls(app).at(-1).url, "/github/repositories/alice/project?runs=7");
+    assert.equal(fullCalls(app).at(-1).url, "/github/repositories/alice/project");
     await app.ids.get("refresh-workflows").listeners.click();
-    assert.equal(fullCalls(app).at(-1).url, "/github/repositories/alice/project?section=workflows&runs=7");
+    assert.equal(fullCalls(app).at(-1).url, "/github/repositories/alice/project?section=workflows");
 });
 
 test("a section's data is merged into the other's", async () => {

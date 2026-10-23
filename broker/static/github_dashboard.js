@@ -585,12 +585,7 @@ async function refreshProject(project) {
     project.partial = null;
     const section = partial?.section || "all";
     try {
-        // Runs shown last time are rechecked by ID, since GitHub's status lists can briefly miss one just approved.
-        const known = (project.data?.workflows || []).filter(run => !finished(run)).map(run => run.id);
-        const parts = [];
-        if (section !== "all") parts.push(`section=${section}`);
-        if (known.length && section !== "pulls") parts.push(`runs=${known.slice(0, 20).join(",")}`);
-        const sections = await api(`${projectPath(project.repo.full_name)}${parts.length ? `?${parts.join("&")}` : ""}`);
+        const sections = await api(`${projectPath(project.repo.full_name)}${section === "all" ? "" : `?section=${section}`}`);
         const data = { ...project.data, ...sections };
         project.data = data;
         project.errorText = "";
