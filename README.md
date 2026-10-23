@@ -246,7 +246,7 @@ Each change to a device's pairing also updates its config in Redis and queues a 
 ## Deploying
 
 Run the **Release** workflow from the Actions tab on `main`, picking `patch`, `minor` or `major` (or push a `v*` tag).
-It builds five images for amd64 and arm64, tagged with the release and `latest`:
+It builds five images for arm64 (the host is ARM) on an ARM runner, tagged with the release and `latest`:
 
 - `ghcr.io/nvorkinn/auth-broker` (the broker and the providers)
 - `ghcr.io/nvorkinn/auth-broker-caddy` (with `caddy/Caddyfile`)
