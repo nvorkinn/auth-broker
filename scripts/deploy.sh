@@ -135,6 +135,20 @@ else
 fi
 docker compose ps "${services[@]}"
 
+# Every release pulls new tags, so drop the older ones of what was just deployed: keep the running tag and the
+# newest other one (to roll back to), remove the rest. `docker image rm` refuses an image a container still uses,
+# and only these repositories are touched, so a deploy job running at once never loses an image it just pulled.
+IMAGES_KEPT=2
+for image in $(docker compose config --images "${services[@]}" | sort -u); do
+  repo="${image%:*}"
+  docker images "$repo" --format '{{.Repository}}:{{.Tag}}' | { grep -vxF "$image" || true; } | tail -n +"$IMAGES_KEPT" |
+    while read -r old; do
+      docker image rm "$old" >/dev/null 2>&1 && echo "Removed old image $old" || true
+    done
+done
+# Layers left untagged by the above or by re-pulled tags.
+docker image prune -f >/dev/null
+
 if [ "$service" = auth-broker ]; then
   # A check that the database came through.
   docker exec auth-broker flask --app wsgi devices list

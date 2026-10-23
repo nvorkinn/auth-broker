@@ -11,6 +11,7 @@ tag="$2"
 url="$3"
 sha256="$4"
 releases="${DEPLOY_DIR:-/opt/auth-broker}/releases"
+RELEASES_KEPT=5
 mkdir -p "$releases"
 
 # A release's deploy jobs can run at once; only one downloads.
@@ -18,6 +19,8 @@ mkdir -p "$releases"
   flock 9
   if [ "$(cat "$releases/$tag/.sha256" 2>/dev/null)" = "$sha256" ]; then
     echo "Release $tag is already on the host"
+    # Counts as the newest for the cleanup below, e.g. when rolling back to it.
+    touch "$releases/$tag"
   else
     tmp="$(mktemp -d "$releases/.incoming-XXXXXX")"
     trap 'rm -rf "$tmp"' EXIT
@@ -29,6 +32,14 @@ mkdir -p "$releases"
     mv "$tmp/deploy-$tag" "$releases/$tag"
     echo "Downloaded release $tag to $releases/$tag"
   fi
+  # Keep the newest $RELEASES_KEPT bundles. The one being deployed was just written or reused, so it's never
+  # among those removed.
+  find "$releases" -mindepth 1 -maxdepth 1 -type d -name 'v*' -printf '%T@ %p\n' | sort -rn |
+    tail -n +"$((RELEASES_KEPT + 1))" | cut -d' ' -f2- | while read -r old; do
+      [ "$old" = "$releases/$tag" ] && continue
+      rm -rf "$old"
+      echo "Removed old release $(basename "$old")"
+    done
 ) 9>"$releases/.lock"
 
 exec bash "$releases/$tag/deploy.sh" "$service" "$tag"

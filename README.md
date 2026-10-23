@@ -263,10 +263,11 @@ authentik's brand assets), then waits for approval of two sets of deploy jobs:
 | `deploy-authentik` | authentik, on the `AUTHENTIK_VERSION` pinned in the host's `.env` |
 
 An approved job SSHes into the host and runs `scripts/fetch-release.sh`, which downloads the bundle into
-`/opt/auth-broker/releases/<tag>/` (checking its SHA-256) and runs its `deploy.sh`. That decrypts the secrets, installs
-the compose file, backs up the database (`data/broker.db.bak-<tag>`) when deploying the broker, pins the service's
-`<SERVICE>_VERSION` in `/opt/auth-broker/.env` and recreates it. Redis and authentik are only recreated if their service
-changed. After `deploy-authentik`, the `terraform` job applies this tag's authentik configuration, asking for approval
+`/opt/auth-broker/releases/<tag>/` (checking its SHA-256, and keeping the newest 5 bundles) and runs its `deploy.sh`.
+That decrypts the secrets, installs the compose file, backs up the database (`data/broker.db.bak-<tag>`, the newest 5
+kept) when deploying the broker, pins the service's `<SERVICE>_VERSION` in `/opt/auth-broker/.env` and recreates it.
+Redis and authentik are only recreated if their service changed. Then it removes the service's older images, keeping
+the running one and one other to roll back to, so the host's disk doesn't fill up with a set of images per release. After `deploy-authentik`, the `terraform` job applies this tag's authentik configuration, asking for approval
 only when the plan changes something (see [terraform/README.md](terraform/README.md)).
 
 To roll back, re-run the deploy jobs of an older release's workflow run. To deploy by hand, set the versions in
