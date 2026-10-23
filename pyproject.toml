@@ -19,8 +19,6 @@ dependencies = [
     # Reads workflow files for the release graphs (broker/clients/workflow_graph.py).
     "pyyaml",
     "redis",
-    # Turns a PNG frame back upright for the screen preview (services/frame_image.py).
-    "pillow",
     # The IANA time zones for zoneinfo (the glow-provider asks Glowmarkt in each screen's), whatever the image has.
     "tzdata",
     # The store contract: the vendor/countdown-api submodule (see [tool.uv.sources]).

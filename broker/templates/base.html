@@ -182,11 +182,43 @@
             width: 220px;
         }
 
-        .bezel img, .bezel-empty {
+        .bezel-empty {
             display: block;
             width: 100%;
             height: auto;
             background: #fff;
+        }
+
+        /* A screen's picture. A png frame of an upright screen comes as the landscape panel has it, turned a quarter
+           anticlockwise, so it's turned back a quarter clockwise into the portrait box (--frame-w x --frame-h). */
+        .frame {
+            display: block;
+            position: relative;
+            container-type: inline-size;
+        }
+
+        .frame[hidden] {
+            display: none;
+        }
+
+        .frame-turned {
+            aspect-ratio: var(--frame-w) / var(--frame-h);
+        }
+
+        .frame .frame-picture {
+            display: block;
+            width: 100%;
+            height: auto;
+            background: #fff;
+        }
+
+        .frame-turned .frame-picture {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            width: calc(100cqw * var(--frame-h) / var(--frame-w));
+            height: 100cqw;
+            transform: translate(-50%, -50%) rotate(90deg);
         }
 
         .bezel-empty {

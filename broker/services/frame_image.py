@@ -1,17 +1,15 @@
-"""A screen's frame as a browser can show it: a PNG, the right way up.
+"""A screen's frame as a browser can show it: a PNG.
 
 The frame is in the screen's format (device_config.format). mono-1bpp-packed is the e-paper's own buffer (see
 routes/frames.py): 800x480 landscape, rows top to bottom, 8 pixels a byte with the leftmost in the high bit, and a set
 bit is black. png is already a PNG of the panel's landscape picture. A screen hung upright gets a portrait picture that
-the renderer turned a quarter anticlockwise to fit its landscape panel, so it is turned back here.
+the renderer turned a quarter anticlockwise to fit its landscape panel: a mono frame is turned back here, as it's
+encoded anyway; a png frame is served as it is and turned back by the page (the `frame-turned` style in base.html).
 """
 
-import io
 import struct
 import zlib
 from typing import TYPE_CHECKING
-
-from PIL import Image
 
 if TYPE_CHECKING:
     from broker.models import FrameFormat
@@ -24,17 +22,10 @@ _PIXELS = [b"".join(BLACK if byte & (0x80 >> bit) else WHITE for bit in range(8)
 
 
 def preview(frame: bytes, frame_format: FrameFormat, *, upright: bool) -> bytes:
-    """Return the frame, in `frame_format`, as a PNG, turned back to portrait when the screen is hung `upright`."""
+    """Return the frame, in `frame_format`, as a PNG: a mono one turned back to portrait when hung `upright`."""
     if frame_format == "png":
-        return _png_upright(frame) if upright else frame
+        return frame
     return to_png(frame, upright=upright)
-
-
-def _png_upright(frame: bytes) -> bytes:
-    """Turn a PNG frame back to portrait: a quarter clockwise, undoing the renderer's quarter anticlockwise."""
-    buf = io.BytesIO()
-    Image.open(io.BytesIO(frame)).transpose(Image.Transpose.ROTATE_270).save(buf, format="PNG")
-    return buf.getvalue()
 
 
 def to_png(frame: bytes, *, upright: bool) -> bytes:
