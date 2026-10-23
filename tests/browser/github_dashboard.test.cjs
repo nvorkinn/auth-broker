@@ -85,7 +85,9 @@ async function harness(initial = active, repositories = [repo], storage = null, 
     let now = 100000;
     let data = initial;
     let failure = null;
+    let redirect = false;
     const calls = [];
+    const location = { reloads: 0, reload() { this.reloads += 1; } };
     const ids = new Map(["summary", "error", "projects", "refresh", "pulls", "workflows",
         "pull-count", "workflow-count", "project-count", "refresh-pulls", "refresh-workflows", "project-picker", "pull-order"].map(id => [id, new Element("div")]));
     const intervals = [];
@@ -99,12 +101,13 @@ async function harness(initial = active, repositories = [repo], storage = null, 
         addEventListener: () => {},
     };
     const context = vm.createContext({
-        document, URL, localStorage: storage, window: { addEventListener: () => {} },
+        document, URL, location, localStorage: storage, window: { addEventListener: () => {} },
         requestAnimationFrame: callback => callback(),
         Date: class extends Date { static now() { return now; } },
         setInterval: (callback, interval) => intervals.push({ callback, interval }),
         fetch: async (url, options) => {
             calls.push({ url, options });
+            if (redirect) return { type: "opaqueredirect", ok: false, status: 0, headers: { get: () => null } };
             const error = url !== "/github/repositories" ? failure : null;
             // One run or PR is served from the project data, unless a test answers it itself.
             const item = typeof data !== "function" && !data.workflow && !data.pull
@@ -130,7 +133,8 @@ async function harness(initial = active, repositories = [repo], storage = null, 
     vm.runInContext(source, context);
     await new Promise(setImmediate);
     return {
-        calls, ids, context, document, intervals,
+        calls, ids, context, document, intervals, location,
+        setRedirect: value => { redirect = value; },
         setData: value => { data = value; },
         setFailure: value => { failure = value; },
         advance: ms => { now += ms; },
@@ -876,4 +880,22 @@ test("a feed that lost changes reads everything again", async () => {
     await app.tick();
     await app.tick();
     assert.equal(fullCalls(app).length, before + 1);
+});
+
+test("an expired sign-in stops polling and reloads the page, once the tab is shown", async () => {
+    const app = await harness(idle);
+    assert.ok(app.calls.every(call => call.options.redirect === "manual"));
+    app.setRedirect(true);
+    // A tab hidden while its request is out waits to be shown.
+    app.document.hidden = true;
+    await app.evaluate("api('/github/repositories').catch(() => {})");
+    assert.equal(app.location.reloads, 0);
+    assert.match(app.ids.get("error").textContent, /sign-in expired/);
+    assert.equal(app.ids.get("error").hidden, false);
+    const calls = app.calls.length;
+    app.document.hidden = false;
+    app.advance(60000);
+    await app.evaluate("discover()");
+    assert.equal(app.location.reloads, 1);
+    assert.equal(app.calls.length, calls);
 });
