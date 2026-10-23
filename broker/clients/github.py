@@ -64,6 +64,8 @@ MAX_PARALLEL = 8
 POOL_SIZE = 16
 # A PR's changed files shown on the dashboard; the rest are left to GitHub's own Files tab.
 MAX_FILES = 300
+# How long an answer GitHub never changes (a finished run's graph, a file at a commit) is kept without asking again.
+FIXED_TTL_S = 86400
 # Runs read per release workflow: enough for the latest one and any just before it that hasn't finished.
 RECENT_RELEASES = 5
 
@@ -335,6 +337,27 @@ class Dashboard:
                     logger.warning("GitHub dashboard ETag cache write failed", exc_info=True)
         return text
 
+    def remembered[T](self, parts: list, compute: Callable[[], T]) -> T:
+        """Return what `compute` gave for `parts` before, else compute and keep it: for answers that never change.
+
+        Unlike read(), nothing is sent to GitHub at all while it's kept. A failed compute raises and keeps nothing.
+        """
+        identity = json.dumps([self.cache_scope, *parts], sort_keys=True)
+        key = f"github-dashboard:fixed:{hashlib.sha256(identity.encode()).hexdigest()}"
+        if self.cache is not None:
+            try:
+                if (value := self.cache.get(key)) is not None:
+                    return json.loads(value)
+            except RedisError:
+                logger.warning("GitHub dashboard fixed cache read failed", exc_info=True)
+        result = compute()
+        if self.cache is not None:
+            try:
+                self.cache.set(key, json.dumps(result), ex=FIXED_TTL_S)
+            except RedisError:
+                logger.warning("GitHub dashboard fixed cache write failed", exc_info=True)
+        return result
+
     def get(self, path: str, **params: str | int) -> dict:
         """Read a JSON object, refusing an unexpected upstream response shape."""
         data = json.loads(self.read(path, raw=False, **params))
@@ -521,13 +544,26 @@ class Dashboard:
         }
 
     def workflow(self, repo: dict, run: dict) -> dict:
-        """Draw dependencies from the workflow at the run's commit, retaining every returned job and step."""
+        """Draw dependencies from the workflow at the run's commit, retaining every returned job and step.
+
+        A finished attempt never changes (a re-run is a new attempt), so its drawing is kept rather than read again.
+        """
+        if run["status"] != "completed":
+            return self._workflow(repo, run)
+        parts = ["run", repo["full_name"], run["id"], run["run_attempt"], run["updated_at"]]
+        return self.remembered(parts, lambda: self._workflow(repo, run))
+
+    def _workflow(self, repo: dict, run: dict) -> dict:
         path = f"/repos/{repo['full_name']}"
+        file = f"{path}/contents/{run['path'].split('@')[0]}"
         # One result type for all three: their union, so each is cast back to what its call returns.
         jobs, text, pending_deployments = _parallel(
             [
                 lambda: self.pages(f"{path}/actions/runs/{run['id']}/attempts/{run['run_attempt']}/jobs", "jobs"),
-                lambda: self.read(f"{path}/contents/{run['path'].split('@')[0]}", raw=True, ref=run["head_sha"]),
+                # A file at a commit never changes.
+                lambda: self.remembered(
+                    ["file", file, run["head_sha"]], lambda: self.read(file, raw=True, ref=run["head_sha"])
+                ),
                 lambda: self.pending_deployments(repo, run["id"]) if run["status"] != "completed" else [],
             ]
         )
