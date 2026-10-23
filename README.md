@@ -83,9 +83,9 @@ queues its first render. Its owner can give it a friendly name on its settings p
 
 Each screen's settings are at `/device/<id>` (and `/device` for the most recently paired one): departure stops (TfL and
 Entur), the weather place (an Open-Meteo search), a postcode for the notice board, Glowmarkt, Spotify and Apple Music,
-a GitHub token for the developer panel, language, style, clock format and name. `/device/<id>/screen` shows
-the screen's current frame. "Unlink screen" revokes the screen's secret; a replacement screen can't yet join an
-existing device, so it registers as a new one.
+a GitHub token for the developer panel, language, style, clock format and name, and on an HD screen (1872x1404) how
+the weather is drawn. `/device/<id>/screen` shows the screen's current frame. "Unlink screen" revokes the screen's
+secret; a replacement screen can't yet join an existing device, so it registers as a new one.
 
 Until a weather place is picked, the page suggests the biggest town near the visitor's IP, looked up locally in DB-IP's
 [IP to City Lite](https://db-ip.com/db/download/ip-to-city-lite) and [GeoNames](https://www.geonames.org) (both CC BY

@@ -50,8 +50,11 @@ def build(config: DeviceConfig, *, pairing_code: str | None) -> ConfigResponse:
         language=config.language,
         timezone=timezone(country, stop_ids),
         screen=Screen(orientation=config.orientation, width=config.width, height=config.height, format=config.format),
-        # The key is what the weather is subscribed under, so it's what the renderer reads (v1:weather:<key>).
-        weather=Weather(location=config.weather_location, key=weather_place.weather_key(config)),
+        # The key is what the weather is subscribed under, so it's what the renderer reads (v1:weather:<key>). The
+        # design is only drawn on an HD screen (models.is_hd_screen); other screens ignore it.
+        weather=Weather(
+            location=config.weather_location, key=weather_place.weather_key(config), design=config.weather_design
+        ),
         style=config.style,
         # The panels' own styles, for renderers that predate `style`, in the names they know.
         notice_board=NoticeBoard(postcode=config.postcode or None, country=country, style=config.style),

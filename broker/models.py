@@ -64,6 +64,7 @@ type Orientation = Literal["horizontal", "vertical"]
 type ClockFormat = Literal["12h", "24h"]
 type Language = Literal["en", "nb"]
 type Style = Literal["airy", "hero", "card"]
+type WeatherDesign = Literal["columns", "timeline", "overview", "poster"]
 type FrameFormat = Literal["mono-1bpp-packed", "png"]
 
 ORIENTATIONS = ("horizontal", "vertical")
@@ -79,6 +80,16 @@ STYLES = {
     "hero": ("Hero", "Bold headers, with the first item big"),
     "card": ("Card", "Each panel in a rounded card"),
 }
+# The store contract's weather designs, how an HD screen draws the weather (which spans its whole width there), with
+# the name and description the config page shows beside each one's picture (broker/static/weather/<design>.png).
+WEATHER_DESIGNS = {
+    "columns": ("Columns", "Readings in tiles beside the conditions"),
+    "timeline": ("Timeline", "The coming twelve hours along the bottom"),
+    "overview": ("Overview", "Now, tonight, tomorrow and the weekend at once"),
+    "poster": ("Poster", "A very big temperature, readings in a black band"),
+}
+# The HD screen's size in pixels, the one screen the weather design applies to (is_hd_screen).
+HD_SCREEN_SIZE = (1872, 1404)
 
 
 class DeviceConfig(Model):
@@ -104,6 +115,8 @@ class DeviceConfig(Model):
     weather_country_code: Mapped[str | None] = mapped_column(String)
     weather_lat: Mapped[float | None] = mapped_column(Float)
     weather_lon: Mapped[float | None] = mapped_column(Float)
+    # How the weather is drawn on an HD screen, one of WEATHER_DESIGNS; other screens ignore it.
+    weather_design: Mapped[WeatherDesign] = mapped_column(String, default="columns", server_default=text("'columns'"))
     # A UK postcode ("SW1A 1AA") or a Norwegian one ("0150"); see pages.normalize_postcode.
     postcode: Mapped[str] = mapped_column(String, default="", server_default=text("''"))
     spotify_enabled: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("0"))
@@ -124,6 +137,11 @@ class DeviceConfig(Model):
     format: Mapped[FrameFormat] = mapped_column(String, server_default=text("'mono-1bpp-packed'"))
 
     device: Mapped[Device] = relationship(back_populates="config")
+
+
+def is_hd_screen(config: DeviceConfig) -> bool:
+    """Whether the config's screen is the HD one (HD_SCREEN_SIZE), whichever way round it reported its size."""
+    return (max(config.width, config.height), min(config.width, config.height)) == HD_SCREEN_SIZE
 
 
 class SpotifyToken(Model):
