@@ -874,6 +874,22 @@ test("a feed that lost changes reads everything again", async () => {
     assert.equal(fullCalls(app).length, before + 1);
 });
 
+test("repositories are discovered every minute, or every five with the webhook, whose installation events ask at once", async () => {
+    const discoveryTimer = app => app.intervals.find(timer => timer.callback === app.evaluate("discover"));
+    assert.equal(discoveryTimer(await harness(idle)).interval, 60000);
+    let feed = { last: "1-0", changes: [], reset: false };
+    const app = await harness(url => url.startsWith("/github/changes") ? feed : idle, [repo], null, { webhooks: true });
+    assert.equal(discoveryTimer(app).interval, 300000);
+    const discoveries = () => app.calls.filter(call => call.url === "/github/repositories").length;
+    await app.tick();
+    const before = discoveries();
+    feed = { last: "2-0", changes: [{ kind: "repositories" }], reset: false };
+    app.advance(5000);
+    await app.tick();
+    await new Promise(setImmediate);
+    assert.equal(discoveries(), before + 1);
+});
+
 test("an expired sign-in stops polling and reloads the page, once the tab is shown", async () => {
     const app = await harness(idle);
     assert.ok(app.calls.every(call => call.options.redirect === "manual"));
