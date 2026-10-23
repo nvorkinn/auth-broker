@@ -922,6 +922,109 @@ def test_device_config_post_rejects_an_unknown_weather_design(app, paired_client
         assert (config.weather_design, config.style) == ("columns", "airy")
 
 
+LAYOUTS = ["classic", "masthead", "column", "lockscreen", "timeline", "board", "pages"]
+
+
+def test_device_config_shows_no_layout_picker_for_a_small_screen(paired_client):
+    client, _, _ = paired_client
+    html = client.get("/device").get_data(as_text=True)
+    assert 'name="layout"' not in html
+    assert "/static/layouts/" not in html
+
+
+def test_device_config_shows_no_layout_picker_for_an_hd_screen_hung_landscape(app, paired_client):
+    """Hung landscape it has one layout (sidebar), so there's nothing to pick."""
+    client, device_id, _ = paired_client
+    _make_hd_screen(app, device_id)
+    with app.app_context():
+        db.session.get_one(DeviceConfig, device_id).orientation = "horizontal"
+        db.session.commit()
+    html = client.get("/device").get_data(as_text=True)
+    assert 'name="weather_design"' in html
+    assert 'name="layout"' not in html
+
+
+@pytest.mark.parametrize(("width", "height"), [(1872, 1404), (1404, 1872)])
+def test_device_config_shows_the_layout_picker_for_an_hd_portrait_screen(app, paired_client, width, height):
+    """Whichever way round the screen reported its size: classic first and picked, with a picture of each."""
+    client, device_id, _ = paired_client
+    _make_hd_screen(app, device_id, width, height)
+    html = client.get("/device").get_data(as_text=True)
+    assert re.findall(r'name="layout" value="(\w+)"', html) == LAYOUTS
+    assert re.findall(r'name="layout" value="(\w+)" checked', html) == ["classic"]  # the default, stored as null
+    assert "How your HD screen arranges its panels, hung portrait." in html
+    for name in ("Classic", "Masthead", "Column", "Lock screen", "Timeline", "Route board", "Two pages"):
+        assert f'<span class="style-name">{name}</span>' in html
+    style = re.split(r'<h2 class="card-title">', html)[2]
+    assert 'name="layout"' in style
+    pictures = re.findall(r'<img src="(/static/layouts/\w+\.png)" alt="" width="351" height="468"', html)
+    assert pictures == [f"/static/layouts/{layout}.png" for layout in LAYOUTS]
+    for picture in pictures:
+        response = client.get(picture)
+        assert response.status_code == 200
+        assert response.mimetype == "image/png"
+
+
+def test_device_config_shows_the_stored_layout_selected(app, paired_client):
+    client, device_id, _ = paired_client
+    _make_hd_screen(app, device_id)
+    with app.app_context():
+        db.session.get_one(DeviceConfig, device_id).layout = "board"
+        db.session.commit()
+    html = client.get("/device").get_data(as_text=True)
+    assert re.findall(r'name="layout" value="(\w+)" checked', html) == ["board"]
+
+
+@pytest.mark.parametrize("layout", LAYOUTS)
+def test_device_config_post_persists_the_layout(app, paired_client, layout):
+    client, device_id, _ = paired_client
+    _make_hd_screen(app, device_id)
+    response = client.post("/device", data={"interval": "15", "layout": layout})
+    assert response.status_code == 302
+    with app.app_context():
+        assert db.session.get_one(DeviceConfig, device_id).layout == layout
+
+
+def test_device_config_post_with_an_empty_layout_stores_the_default(app, paired_client):
+    client, device_id, _ = paired_client
+    _make_hd_screen(app, device_id)
+    with app.app_context():
+        db.session.get_one(DeviceConfig, device_id).layout = "pages"
+        db.session.commit()
+    response = client.post("/device", data={"interval": "15", "layout": ""})
+    assert response.status_code == 302
+    with app.app_context():
+        assert db.session.get_one(DeviceConfig, device_id).layout is None
+
+
+def test_device_config_post_without_a_layout_keeps_the_stored_one(app, paired_client):
+    """A page without the picker doesn't post one; what's stored stays."""
+    client, device_id, _ = paired_client
+    with app.app_context():
+        db.session.get_one(DeviceConfig, device_id).layout = "timeline"
+        db.session.commit()
+    response = client.post("/device", data={"interval": "15", "style": "card"})
+    assert response.status_code == 302
+    with app.app_context():
+        assert db.session.get_one(DeviceConfig, device_id).layout == "timeline"
+
+
+@pytest.mark.parametrize("layout", ["fancy", "Classic", "lock screen", "default"])
+def test_device_config_post_rejects_an_unknown_layout(app, paired_client, layout):
+    client, device_id, _ = paired_client
+    _make_hd_screen(app, device_id)
+    response = client.post("/device", data={"interval": "15", "layout": layout, "style": "card"})
+    assert response.status_code == 400
+    assert (
+        b"The layout must be one of classic, masthead, column, lockscreen, timeline, board, pages, sidebar."
+        in response.data
+    )
+    assert b"Nothing was saved." in response.data
+    with app.app_context():
+        config = db.session.get_one(DeviceConfig, device_id)
+        assert (config.layout, config.style) == (None, "airy")
+
+
 # --- the public page about the display ------------------------------------------------------------------
 
 

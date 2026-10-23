@@ -39,6 +39,7 @@ erDiagram
         float weather_lat
         float weather_lon
         string weather_design "columns, timeline, overview or poster"
+        string layout "null for the screen's default, or a store contract layout"
         string postcode "UK or Norwegian"
         bool spotify_enabled
         bool apple_music_enabled

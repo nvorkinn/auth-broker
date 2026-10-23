@@ -66,6 +66,7 @@ type Language = Literal["en", "nb"]
 type Style = Literal["airy", "hero", "card"]
 type WeatherDesign = Literal["columns", "timeline", "overview", "poster"]
 type FrameFormat = Literal["mono-1bpp-packed", "png"]
+type Layout = Literal["classic", "masthead", "column", "lockscreen", "timeline", "board", "pages", "sidebar"]
 
 ORIENTATIONS = ("horizontal", "vertical")
 # What a screen may report at registration, not a setting the config page shows.
@@ -88,7 +89,22 @@ WEATHER_DESIGNS = {
     "overview": ("Overview", "Now, tonight, tomorrow and the weekend at once"),
     "poster": ("Poster", "A very big temperature, readings in a black band"),
 }
-# The HD screen's size in pixels, the one screen the weather design applies to (is_hd_screen).
+# The store contract's layouts, which layout a screen is drawn in; each size of screen has its own, and draws one it
+# doesn't have as its default. None (the column's default) is the screen's default.
+LAYOUTS: tuple[Layout, ...] = ("classic", "masthead", "column", "lockscreen", "timeline", "board", "pages", "sidebar")
+# The layouts of an HD screen hung portrait, the one screen with more than one to pick (has_layout_picker), its default
+# first, with the name and description the config page shows beside each one's picture
+# (broker/static/layouts/<layout>.png). Hung landscape it has only sidebar, so the page offers no picker there.
+HD_PORTRAIT_LAYOUTS: dict[Layout, tuple[str, str]] = {
+    "classic": ("Classic", "The weather on top, then the stops, Spotify and the notices"),
+    "masthead": ("Masthead", "The clock and the weather in a black band across the top"),
+    "column": ("Column", "The weather down a column beside the stops"),
+    "lockscreen": ("Lock screen", "A big clock over a card for each panel"),
+    "timeline": ("Timeline", "Each departure placed by its minute along a line"),
+    "board": ("Route board", "Each route once, with its next three times"),
+    "pages": ("Two pages", "The stops and the other panels take turns"),
+}
+# The HD screen's size in pixels, the one screen the weather design and the layout apply to (is_hd_screen).
 HD_SCREEN_SIZE = (1872, 1404)
 
 
@@ -117,6 +133,9 @@ class DeviceConfig(Model):
     weather_lon: Mapped[float | None] = mapped_column(Float)
     # How the weather is drawn on an HD screen, one of WEATHER_DESIGNS; other screens ignore it.
     weather_design: Mapped[WeatherDesign] = mapped_column(String, default="columns", server_default=text("'columns'"))
+    # Which layout the screen is drawn in, one of LAYOUTS; None for the screen's default (classic on an HD screen hung
+    # portrait, sidebar hung landscape).
+    layout: Mapped[Layout | None] = mapped_column(String)
     # A UK postcode ("SW1A 1AA") or a Norwegian one ("0150"); see pages.normalize_postcode.
     postcode: Mapped[str] = mapped_column(String, default="", server_default=text("''"))
     spotify_enabled: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("0"))
@@ -142,6 +161,11 @@ class DeviceConfig(Model):
 def is_hd_screen(config: DeviceConfig) -> bool:
     """Whether the config's screen is the HD one (HD_SCREEN_SIZE), whichever way round it reported its size."""
     return (max(config.width, config.height), min(config.width, config.height)) == HD_SCREEN_SIZE
+
+
+def has_layout_picker(config: DeviceConfig) -> bool:
+    """Whether the config page offers a layout: only an HD screen hung portrait has several (HD_PORTRAIT_LAYOUTS)."""
+    return is_hd_screen(config) and config.orientation == "vertical"
 
 
 class SpotifyToken(Model):

@@ -49,7 +49,15 @@ def build(config: DeviceConfig, *, pairing_code: str | None) -> ConfigResponse:
         clock_format=config.clock_format,
         language=config.language,
         timezone=timezone(country, stop_ids),
-        screen=Screen(orientation=config.orientation, width=config.width, height=config.height, format=config.format),
+        # The layout is None for the screen's default; a renderer draws a layout the screen's size doesn't have as its
+        # default too.
+        screen=Screen(
+            orientation=config.orientation,
+            width=config.width,
+            height=config.height,
+            format=config.format,
+            layout=config.layout,
+        ),
         # The key is what the weather is subscribed under, so it's what the renderer reads (v1:weather:<key>). The
         # design is only drawn on an HD screen (models.is_hd_screen); other screens ignore it.
         weather=Weather(

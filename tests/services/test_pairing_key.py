@@ -44,7 +44,7 @@ def _ask_for_code(app, device_id) -> str:
 def _as_read(value):
     """Return a stored config as the renderer reads it: the contract's model, with what the example omits filled in.
 
-    The example omits the fields the contract defaults (weather.design), which the broker writes.
+    Fills in any field the contract defaults that the example omits, which the broker writes.
     """
     return ConfigResponse.model_validate(value).model_dump(mode="json")
 
@@ -66,7 +66,8 @@ def test_the_stored_code_is_the_shape_the_renderer_reads(app, store):
     with app.app_context():
         now = datetime.now(UTC)
         device = Device(device_id=device_id, created_at=now, paired_at=now, owner="user-1")
-        device.config = DeviceConfig(**FIXTURE["settings"])
+        # The example's settings don't carry its weather design (the value's), so it's taken from the value.
+        device.config = DeviceConfig(weather_design=FIXTURE["value"]["weather"]["design"], **FIXTURE["settings"])
         db.session.add(device)
         db.session.commit()
 
@@ -88,6 +89,17 @@ def test_the_stored_code_is_the_config_with_the_code_in_it(app, store, register_
     assert _stored(store, device_id) == {**config_of(device_id), "pairing_code": code}
     # And the config's own copy still never has it: there's none while a code is live.
     assert store.get(config_store.key(device_id)) is None
+
+
+def test_the_stored_code_has_the_layout(app, store, register_device):
+    device_id, _secret = register_device()
+    with app.app_context():
+        db.session.get_one(DeviceConfig, device_id).layout = "masthead"
+        db.session.commit()
+
+    _ask_for_code(app, device_id)
+
+    assert _stored(store, device_id)["screen"]["layout"] == "masthead"
 
 
 def test_a_device_with_no_settings_has_no_key(app, store):

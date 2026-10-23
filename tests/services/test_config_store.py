@@ -61,7 +61,7 @@ def _add_fixture_device(app) -> str:
 def _as_read(value):
     """Return a stored config as the renderer reads it: the contract's model, with what the example omits filled in.
 
-    The example omits the fields the contract defaults (weather.design), which the broker writes.
+    Fills in any field the contract defaults that the example omits, which the broker writes.
     """
     return ConfigResponse.model_validate(value).model_dump(mode="json")
 
@@ -90,6 +90,19 @@ def test_the_stored_config_is_the_renderers_config_with_no_code(app, store, pair
 
     assert _stored(store, device_id) == config_of(device_id)
     assert _stored(store, device_id)["pairing_code"] is None
+
+
+def test_the_stored_config_has_the_layout_picked(app, store, paired_client, config_of):
+    client, device_id, _secret = paired_client
+    with app.app_context():
+        config = db.session.get_one(DeviceConfig, device_id)
+        config.width, config.height = 1404, 1872
+        db.session.commit()
+
+    client.post("/device", data={"layout": "lockscreen"})
+
+    assert _stored(store, device_id)["screen"]["layout"] == "lockscreen"
+    assert _stored(store, device_id) == config_of(device_id)
 
 
 def test_the_stored_config_carries_no_secret(app, store, paired_client, monkeypatch):

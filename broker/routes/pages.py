@@ -20,7 +20,9 @@ from broker.clients import apple_music, weather
 from broker.db import db
 from broker.models import (
     CLOCK_FORMATS,
+    HD_PORTRAIT_LAYOUTS,
     LANGUAGES,
+    LAYOUTS,
     ORIENTATIONS,
     STYLES,
     WEATHER_DESIGNS,
@@ -29,6 +31,7 @@ from broker.models import (
     GitHubToken,
     GlowmarktCredentials,
     SpotifyToken,
+    has_layout_picker,
     is_hd_screen,
 )
 from broker.services import (
@@ -236,6 +239,10 @@ def _save_device_config(device_id: str) -> ResponseReturnValue:
 
     config = db.session.get_one(DeviceConfig, device_id)
     choices = {field: request.form.get(field, getattr(config, field)) for field in CHOICES}
+    # Only on an HD portrait screen's page (has_layout_picker), so another screen's save keeps what's stored. Empty is
+    # the screen's default (None).
+    raw_layout = request.form.get("layout", config.layout or "")
+    layout = next((known for known in LAYOUTS if known == raw_layout), None)
 
     place, errors = _weather_place(config)
     if postcode is None:
@@ -249,6 +256,8 @@ def _save_device_config(device_id: str) -> ResponseReturnValue:
         for field, (allowed, label) in CHOICES.items()
         if choices[field] not in allowed
     ]
+    if raw_layout and layout is None:
+        errors.append(f"The layout must be one of {', '.join(LAYOUTS)}.")
     # postcode is never None here (that is an error above), but saying so lets type checkers see it.
     if errors or postcode is None:
         return _render_device_config(device_id, errors=[*errors, "Nothing was saved."]), 400
@@ -261,6 +270,7 @@ def _save_device_config(device_id: str) -> ResponseReturnValue:
     config.tfl_stop_ids = stop_ids
     for field, value in choices.items():
         setattr(config, field, value)
+    config.layout = layout
     if "screen_name" in request.form:
         db.session.get_one(Device, device_id).device_name = screen_name
     glowmarkt_changed = _save_glowmarkt_credentials(device_id)
@@ -457,6 +467,9 @@ def _render_device_config(device_id: str, errors: list[str] | None = None) -> st
         # The weather design is only an HD screen's to pick: elsewhere the weather has one way to fit its panel.
         weather_designs=WEATHER_DESIGNS,
         hd_screen=is_hd_screen(config),
+        # The layout is only an HD portrait screen's to pick: every other screen has one. None shows as the default.
+        layouts=HD_PORTRAIT_LAYOUTS if has_layout_picker(config) else None,
+        layout=config.layout or next(iter(HD_PORTRAIT_LAYOUTS)),
         page_orientation=PAGE_ORIENTATION,
         stops=stops.resolve(config.tfl_stop_ids),
         MODE_ICONS=stops.MODE_ICONS,
