@@ -39,8 +39,9 @@ if TYPE_CHECKING:
     import redis
     from flask import Flask
 
-# Pull requests and builds change slowly, but a release that starts is worth catching soon. A full poll costs about
-# 25 GitHub calls, so this uses about a sixth of a token's 5,000 an hour.
+# Pull requests and builds change slowly, but a release that starts is worth catching soon. A full poll makes about
+# 25 GitHub calls, but through the store's ETag cache only those whose answer changed count against the token's 5,000
+# an hour.
 IDLE_INTERVAL_S = 120
 # While a release shows, its jobs change by the minute (and a finished one must go once its minute is up).
 BURST_INTERVAL_S = 20
@@ -143,7 +144,7 @@ class DeveloperProvider(ProviderLoop):
             return 0
         fetched_at = datetime.fromtimestamp(now, UTC)
         try:
-            snapshot = developer.snapshot(want.token, fetched_at.date())
+            snapshot = developer.snapshot(want.token, fetched_at.date(), self.store)
         except requests.RequestException as e:
             # Its keys aren't refreshed, so they expire (and the panel says it can't connect) if this keeps up.
             if (wait := github.rate_limit_wait(e, now)) is not None:

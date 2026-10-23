@@ -28,7 +28,7 @@ def test_with_a_token_github_and_copilot_too():
     ):
         answer = developer.snapshot("github_pat_abc", TODAY)
 
-    summary.assert_called_once_with("github_pat_abc")
+    summary.assert_called_once_with("github_pat_abc", None)
     copilot.assert_called_once_with("github_pat_abc", "nvorkinn")
     assert answer["github"] == SUMMARY
     assert [plan["name"] for plan in answer["plans"]] == ["Copilot", "Claude", "Gemini"]

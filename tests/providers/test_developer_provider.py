@@ -195,7 +195,7 @@ def test_only_the_screens_with_a_release_are_queued(provider, store, device):
     _pool(store, busy, idle)
 
     with (
-        patch("broker.clients.github.summary", side_effect=lambda token: GITHUB if token == "busy" else IDLE_GITHUB),
+        patch("broker.clients.github.summary", side_effect=lambda token, _cache: GITHUB if token == "busy" else IDLE_GITHUB),
         patch("broker.clients.github.copilot_premium_requests", return_value=280),
         patch("broker.services.developer.ai_plans.plans", return_value=FIXTURE["plans"]),
     ):
@@ -305,7 +305,7 @@ def test_one_failing_device_does_not_lose_the_others(app, provider, store, devic
     broken = device(secret="a-very-long-device-secret-1", token="bad")
     fine = device(secret="a-very-long-device-secret-2", token="good")
 
-    def summary(token):
+    def summary(token, _cache):
         if token == "bad":
             msg = "401"
             raise requests.HTTPError(msg)
@@ -501,7 +501,7 @@ def test_a_rate_limited_device_does_not_hold_up_the_others(provider_app, store, 
     fine = device(secret="a-very-long-device-secret-2", token="fine")
     provider = DeveloperProvider(provider_app, store, clock=Clock())
 
-    def summary(token):
+    def summary(token, _cache):
         if token == "limited":
             raise _rate_limited(429, {"Retry-After": "300"})
         return GITHUB

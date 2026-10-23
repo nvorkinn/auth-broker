@@ -1,6 +1,8 @@
+import json
 from datetime import UTC, datetime, timedelta
 from unittest.mock import Mock, patch
 
+import fakeredis
 import pytest
 import requests
 
@@ -15,6 +17,8 @@ def _response(json_data, status_code=200):
     response.ok = status_code < 400
     response.status_code = status_code
     response.json.return_value = json_data
+    response.text = json.dumps(json_data)
+    response.headers = {}
     response.raise_for_status = Mock()
     if not response.ok:
         response.raise_for_status.side_effect = requests.HTTPError(f"{status_code}")
@@ -74,6 +78,24 @@ def test_summary():
     }
     # The stale repo's builds aren't asked about.
     assert not any("old-thing" in call.args[0] for call in get.call_args_list)
+
+
+def test_summary_revalidates_what_it_read_last_time():
+    cache = fakeredis.FakeRedis()
+
+    def first(url, params=None, timeout=None, headers=None):
+        response = _github(url, params, timeout, headers)
+        response.headers = {"ETag": f'"{url}"'}
+        return response
+
+    def unchanged(url, params=None, timeout=None, headers=None):
+        assert headers["If-None-Match"] == f'"{url}"'
+        return _response(None, 304)
+
+    with patch("requests.Session.get", side_effect=first):
+        before = github.summary("github_pat_abc", cache)
+    with patch("requests.Session.get", side_effect=unchanged):
+        assert github.summary("github_pat_abc", cache) == before
 
 
 def test_summary_sends_the_token():
@@ -297,9 +319,7 @@ def test_a_rate_limit_reading_a_release_is_raised_not_left_out():
 
 
 def test_a_rate_limit_reading_the_workflow_file_is_raised():
-    session = Mock()
-    session.get.side_effect = _limited
     run = {"path": ".github/workflows/release.yml", "head_sha": "abc"}
 
-    with pytest.raises(requests.HTTPError):
-        github._workflow_jobs(session, REPOS[0], run)
+    with patch("requests.Session.get", side_effect=_limited), pytest.raises(requests.HTTPError):
+        github._workflow_jobs(github.Dashboard("github_pat_abc"), REPOS[0], run)
