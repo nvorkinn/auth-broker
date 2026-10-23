@@ -15,6 +15,11 @@ updates:
       - "/victoria-metrics"
     schedule:
       interval: "daily"
+    ignore:
+      # The broker's Python moves with .python-version, by hand: a newer one than the tests run on goes untested, and
+      # can lack wheels (pyyaml has none for 3.15, so it built from source, slowly under QEMU).
+      - dependency-name: "python"
+        update-types: ["version-update:semver-minor", "version-update:semver-major"]
   - package-ecosystem: "docker-compose"
     directory: "/"
     schedule:

@@ -57,11 +57,12 @@ jobs:
           echo "value=$tag" >> "$GITHUB_OUTPUT"
 
   # One build per image, side by side. Each is tagged with the release tag and
-  # latest, for amd64 and arm64 (the host is ARM).
+  # latest, for arm64 only: the host is ARM, and Tests builds its own images.
+  # On an ARM runner, so nothing is emulated.
   images:
     name: image ${{ matrix.image }}
     needs: tag
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04-arm
     permissions:
       contents: read
       packages: write
@@ -100,7 +101,7 @@ jobs:
         with:
           context: ${{ matrix.context }}
           push: true
-          platforms: linux/amd64,linux/arm64
+          platforms: linux/arm64
           tags: |
             ${{ env.IMAGE }}:${{ needs.tag.outputs.value }}
             ${{ env.IMAGE }}:latest
@@ -176,7 +177,7 @@ jobs:
       # of its pending jobs.
       group: deploy-${{ matrix.service }}-${{ needs.tag.outputs.value }}
       cancel-in-progress: false
-    env: &deploy-env
+    env:
       TAG: ${{ needs.tag.outputs.value }}
       SERVICE: ${{ matrix.service }}
       DEPLOY_TARGET: ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}
@@ -195,27 +196,25 @@ jobs:
           chmod 600 ~/.ssh/id_deploy
           printf '%s\n' "$DEPLOY_SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
 
-      - name: Deploy ${{ matrix.service }}
+      - name: Deploy ${{ env.SERVICE }}
         run: ssh -i ~/.ssh/id_deploy "$DEPLOY_TARGET" bash -s -- "$SERVICE" "$TAG" "$BUNDLE_URL" "$BUNDLE_SHA256" < scripts/fetch-release.sh
 
   # authentik runs upstream's image, so this only needs the bundle and can be
   # approved while the images are still building. Same steps as deploy.
+  # authentik's configuration is the terraform job's, below.
   deploy-authentik:
-    name: ${{ matrix.environment }}
     needs: [tag, package]
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          # authentik's configuration is the terraform job's, below.
-          - environment: deploy-authentik
-            service: authentik
-    environment: ${{ matrix.environment }}
+    environment: deploy-authentik
     concurrency:
-      group: ${{ matrix.environment }}-${{ needs.tag.outputs.value }}
+      group: deploy-authentik-${{ needs.tag.outputs.value }}
       cancel-in-progress: false
-    env: *deploy-env
+    env:
+      TAG: ${{ needs.tag.outputs.value }}
+      SERVICE: authentik
+      DEPLOY_TARGET: ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}
+      BUNDLE_URL: ${{ github.server_url }}/${{ github.repository }}/releases/download/${{ needs.tag.outputs.value }}/deploy-${{ needs.tag.outputs.value }}.tar.gz
+      BUNDLE_SHA256: ${{ needs.package.outputs.sha256 }}
     steps: *deploy-steps
 
   # authentik's configuration, from this tag's terraform/, once authentik is
