@@ -322,6 +322,61 @@ def test_a_finished_workflow_has_its_outcome_and_no_approval_lookup(api):
     assert not any("pending_deployments" in _url(call) for call in responses.calls)
 
 
+FINISHED = {
+    "id": 4,
+    "run_attempt": 1,
+    "path": ".github/workflows/release.yml",
+    "head_sha": "abc",
+    "name": "Release",
+    "run_number": 9,
+    "head_branch": "v1.2.0",
+    "status": "completed",
+    "conclusion": "success",
+    "updated_at": "2026-10-20T02:00:00Z",
+    "html_url": "https://github.com/run/4",
+}
+
+
+@responses.activate
+def test_a_finished_attempt_is_drawn_once_and_a_rerun_is_drawn_again():
+    path = f"{ROOT}/repos/alice/project"
+    responses.get(f"{path}/actions/runs/4/attempts/1/jobs", json={"jobs": []})
+    responses.get(f"{path}/actions/runs/4/attempts/2/jobs", json={"jobs": []})
+    responses.get(f"{path}/contents/.github/workflows/release.yml", body="jobs:\n  build: {}\n")
+    api = github.Dashboard("test-pat", fakeredis.FakeRedis())
+    try:
+        first = api.workflow(REPO, FINISHED)
+        assert api.workflow(REPO, FINISHED) == first
+        assert len(responses.calls) == 2
+        api.workflow(REPO, FINISHED | {"run_attempt": 2, "updated_at": "2026-10-20T03:00:00Z"})
+    finally:
+        api.close()
+    # The re-run reads its own jobs, but the workflow file at the same commit is still kept.
+    assert [_url(call).split("/")[-2] for call in responses.calls] == ["1", "workflows", "2"]
+
+
+@responses.activate
+def test_a_running_workflow_is_read_every_time_but_its_file_once():
+    path = f"{ROOT}/repos/alice/project"
+    responses.get(f"{path}/actions/runs/4/attempts/1/jobs", json={"jobs": []})
+    responses.get(f"{path}/actions/runs/4/pending_deployments", json=[])
+    responses.get(f"{path}/contents/.github/workflows/release.yml", body="jobs:\n  build: {}\n")
+    running = FINISHED | {"status": "in_progress", "conclusion": None}
+    api = github.Dashboard("test-pat", fakeredis.FakeRedis())
+    try:
+        api.workflow(REPO, running)
+        api.workflow(REPO, running)
+    finally:
+        api.close()
+    assert sorted(_url(call).split("?")[0].split("/")[-1] for call in responses.calls) == [
+        "jobs",
+        "jobs",
+        "pending_deployments",
+        "pending_deployments",
+        "release.yml",
+    ]
+
+
 @responses.activate
 @pytest.mark.parametrize(
     ("status", "body", "found"),
