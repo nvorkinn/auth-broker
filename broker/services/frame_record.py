@@ -6,17 +6,17 @@ The screen is served the record (routes/frames.py), and the config page's previe
 
 The record is a Redis hash, so the small fields can be read without the frame:
 
-- `frame`: the panel's 48,000 bytes (800x480, a bit a pixel): raw bytes, so it's read with a client that doesn't
-  decode values, `app.extensions["redis_bytes"]`;
+- `frame`: the frame in the screen's format (`device_config.format`): the 800x480 panel's 48,000 bytes at a bit a
+  pixel, or a PNG. Raw bytes, so it's read with a client that doesn't decode values, `app.extensions["redis_bytes"]`;
 - `etag`: the frame's 8-byte BLAKE2b in hex, the screen's ETag;
 - `rendered_at`: when the pool first wrote this picture, ISO 8601 with its UTC offset.
 
 A screen that has the record's picture gets its 304 from `etag` alone (`head`); only one that doesn't costs reading
-the 48 KB (`frame_of`). A record that isn't what the store contract's frame_record.json pins (a field missing, an etag
-that isn't 16 hex digits, a time without its offset, a frame that isn't 48,000 bytes hashing to its etag) is no
-record. The pool gives each record a TTL of a day from its last change (`volatile-lru` may evict it before then), and
-writes it again at its next render; meanwhile, as after a Redis restart, the screen is told there's no frame yet and
-asks again shortly, keeping the picture it has. The broker deletes a device's record when it forgets the device, or
+the frame (`frame_of`). A record that isn't what the store contract's frame_record.json pins (a field missing, an etag
+that isn't 16 hex digits, a time without its offset, a frame that doesn't hash to its etag) is no record. The pool
+gives each record a TTL of a day from its last change (`volatile-lru` may evict it before then), and writes it again
+at its next render; meanwhile, as after a Redis restart, the screen is told there's no frame yet and asks again
+shortly, keeping the picture it has. The broker deletes a device's record when it forgets the device, or
 unpairs it with its config (`forget`).
 
 Nothing logged says what a frame shows. A Redis that can't be asked is logged by the error's type, and counts as no
@@ -42,7 +42,7 @@ logger = logging.getLogger(__name__)
 PREFIX = store_keys.FRAME_PREFIX
 # The hash's fields.
 FRAME, ETAG, RENDERED_AT = "frame", "etag", "rendered_at"
-# 1-bit packed 800x480.
+# The size of a mono-1bpp-packed frame: 800x480 at a bit a pixel.
 FRAME_BYTES = 800 * 480 // 8
 _ETAG = re.compile(r"[0-9a-f]{16}")
 
@@ -123,4 +123,5 @@ def _stored(etag: bytes | None, rendered_at: bytes | None) -> StoredFrame | None
 
 
 def _is_frame(frame: bytes | None, etag: str) -> bool:
-    return frame is not None and len(frame) == FRAME_BYTES and blake2b(frame, digest_size=8).hexdigest() == etag
+    # The hash alone: the frame's size depends on its format.
+    return frame is not None and blake2b(frame, digest_size=8).hexdigest() == etag

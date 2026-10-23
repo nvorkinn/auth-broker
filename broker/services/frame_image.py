@@ -1,12 +1,20 @@
-"""A screen's frame as a browser can show it: the panel's raw 1-bit buffer turned into a PNG.
+"""A screen's frame as a browser can show it: a PNG, the right way up.
 
-The buffer is the e-paper's own (see routes/frames.py): 800x480 landscape, rows top to bottom, 8 pixels a byte with
-the leftmost in the high bit, and a set bit is black. A screen hung upright gets a portrait picture that the renderer
-turned a quarter anticlockwise to fit that buffer, so it is turned back here.
+The frame is in the screen's format (device_config.format). mono-1bpp-packed is the e-paper's own buffer (see
+routes/frames.py): 800x480 landscape, rows top to bottom, 8 pixels a byte with the leftmost in the high bit, and a set
+bit is black. png is already a PNG of the panel's landscape picture. A screen hung upright gets a portrait picture that
+the renderer turned a quarter anticlockwise to fit its landscape panel, so it is turned back here.
 """
 
+import io
 import struct
 import zlib
+from typing import TYPE_CHECKING
+
+from PIL import Image
+
+if TYPE_CHECKING:
+    from broker.models import FrameFormat
 
 WIDTH, HEIGHT = 800, 480
 BLACK, WHITE = b"\x00", b"\xff"
@@ -15,8 +23,22 @@ BLACK, WHITE = b"\x00", b"\xff"
 _PIXELS = [b"".join(BLACK if byte & (0x80 >> bit) else WHITE for bit in range(8)) for byte in range(256)]
 
 
+def preview(frame: bytes, frame_format: FrameFormat, *, upright: bool) -> bytes:
+    """Return the frame, in `frame_format`, as a PNG, turned back to portrait when the screen is hung `upright`."""
+    if frame_format == "png":
+        return _png_upright(frame) if upright else frame
+    return to_png(frame, upright=upright)
+
+
+def _png_upright(frame: bytes) -> bytes:
+    """Turn a PNG frame back to portrait: a quarter clockwise, undoing the renderer's quarter anticlockwise."""
+    buf = io.BytesIO()
+    Image.open(io.BytesIO(frame)).transpose(Image.Transpose.ROTATE_270).save(buf, format="PNG")
+    return buf.getvalue()
+
+
 def to_png(frame: bytes, *, upright: bool) -> bytes:
-    """Return the frame as an 8-bit greyscale PNG, turned back to portrait when the screen is hung `upright`."""
+    """Return a mono-1bpp-packed frame as an 8-bit greyscale PNG, turned back to portrait when hung `upright`."""
     pixels = b"".join(_PIXELS[byte] for byte in frame)
     if upright:
         # The renderer put portrait pixel (x, y) at landscape (y, 479 - x), so portrait row y is landscape

@@ -131,7 +131,7 @@ def _frame_response(device_id: str) -> ResponseReturnValue:
     # make_conditional only looks at GET and HEAD, so a POST answers its 304 itself.
     if request.if_none_match.contains_weak(shown.etag):
         return Response(status=304, headers={"ETag": resp.headers["ETag"], "Retry-After": resp.headers["Retry-After"]})
-    # Only now the 48 KB, so a 304 never reads it.
+    # Only now the frame itself, so a 304 never reads it.
     frame = frame_record.frame_of(device_id, shown.etag)
     if frame is None:
         # The record went, or changed, since its etag was read: serve it whole as it is now, if there is one.

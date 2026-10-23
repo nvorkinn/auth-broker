@@ -1,7 +1,9 @@
+import io
 import struct
 import zlib
 
 import fakeredis
+from PIL import Image
 
 from broker.db import db
 from broker.models import DeviceConfig
@@ -53,6 +55,59 @@ def test_an_upright_frame_is_turned_back_to_portrait():
 
     assert size == (480, 800)
     assert black == [(portrait_x, portrait_y)]
+
+
+def _png_with_black_pixel(size: tuple[int, int], x: int, y: int) -> bytes:
+    image = Image.new("L", size, 255)
+    image.putpixel((x, y), 0)
+    buf = io.BytesIO()
+    image.save(buf, format="PNG")
+    return buf.getvalue()
+
+
+def _png_black_pixels(png: bytes) -> tuple[tuple[int, int], list[tuple[int, int]]]:
+    image = Image.open(io.BytesIO(png)).convert("L")
+    width, height = image.size
+    return image.size, [(x, y) for y in range(height) for x in range(width) if image.getpixel((x, y)) == 0]
+
+
+def test_a_landscape_png_frame_is_shown_as_is():
+    png = _png_with_black_pixel((30, 20), 10, 3)
+
+    assert frame_image.preview(png, "png", upright=False) == png
+
+
+def test_an_upright_png_frame_is_turned_back_to_portrait():
+    # As for the mono buffer: portrait (x, y) is at landscape (y, landscape height - 1 - x).
+    portrait_x, portrait_y = 10, 3
+    png = _png_with_black_pixel((30, 20), portrait_y, 19 - portrait_x)
+
+    size, black = _png_black_pixels(frame_image.preview(png, "png", upright=True))
+
+    assert size == (20, 30)
+    assert black == [(portrait_x, portrait_y)]
+
+
+def test_a_mono_frame_is_previewed_as_before():
+    frame = _frame_with_black_pixel(10, 3)
+
+    assert frame_image.preview(frame, "mono-1bpp-packed", upright=True) == frame_image.to_png(frame, upright=True)
+
+
+def test_screen_page_sizes_the_picture_by_the_screens_own_size(app, paired_client, draw):
+    client, device_id, _secret = paired_client
+    with app.app_context():
+        config = db.session.get_one(DeviceConfig, device_id)
+        config.width, config.height, config.format = 1872, 1404, "png"
+        db.session.commit()
+    draw(device_id, _png_with_black_pixel((1872, 1404), 0, 0))
+
+    html = client.get(f"/device/{device_id}/screen").get_data(as_text=True)
+    picture = client.get(f"/device/{device_id}/screen/frame.png")
+
+    assert 'width="1404" height="1872"' in html
+    assert picture.status_code == 200
+    assert Image.open(io.BytesIO(picture.data)).size == (1404, 1872)
 
 
 def test_screen_page_shows_the_picture_and_polls_at_the_screens_interval(app, paired_client, draw):

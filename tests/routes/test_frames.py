@@ -121,6 +121,19 @@ def test_a_poll_returns_the_stored_frame(client, register_device):
     assert response.headers["ETag"] == f'"{_etag(frame)}"'
 
 
+def test_a_poll_returns_a_frame_of_any_size(client, register_device):
+    # A png screen's frame is a PNG of whatever size; the etag alone vouches for it.
+    device_id, secret = register_device()
+    frame = b"\x89PNG\r\n\x1a\n" + bytes(range(256)) * 10
+    _put(client, device_id, frame)
+
+    response = _bare_poll(client, device_id, secret)
+
+    assert response.status_code == 200
+    assert response.data == frame
+    assert response.headers["ETag"] == f'"{_etag(frame)}"'
+
+
 def test_a_poll_returns_the_latest_frame_after_an_update(client, register_device):
     device_id, secret = register_device()
     _put(client, device_id, _frame(0x00))

@@ -378,8 +378,8 @@ def screen_view() -> ResponseReturnValue:
 
 def _frame_size(config: DeviceConfig) -> tuple[int, int]:
     """Return the width and height of a screen's frame as the pages show it: upright, unless it's hung horizontally."""
-    upright = config.orientation != "horizontal"
-    return (frame_image.HEIGHT, frame_image.WIDTH) if upright else (frame_image.WIDTH, frame_image.HEIGHT)
+    long, short = max(config.width, config.height), min(config.width, config.height)
+    return (short, long) if config.orientation != "horizontal" else (long, short)
 
 
 @bp.get("/device/screen/frame.png", defaults={"device_id": None})
@@ -395,14 +395,15 @@ def screen_frame() -> ResponseReturnValue:
     # read() always has the frame itself; its absence is only possible in StoredFrame's type.
     if frame is None or frame.frame is None:
         return jsonify(error="no frame yet"), 404
-    upright = db.session.get_one(DeviceConfig, g.device_id).orientation != "horizontal"
+    config = db.session.get_one(DeviceConfig, g.device_id)
+    upright = config.orientation != "horizontal"
     resp = Response(mimetype="image/png")
     resp.set_etag(f"{frame.etag}-{'v' if upright else 'h'}")
     resp.headers["Cache-Control"] = "private, no-cache"
     resp.headers["X-Rendered-At"] = frame.rendered_at.isoformat(timespec="seconds")
     resp = resp.make_conditional(request)
     if resp.status_code == HTTPStatus.OK:  # a 304 needs no picture
-        resp.set_data(frame_image.to_png(frame.frame, upright=upright))
+        resp.set_data(frame_image.preview(frame.frame, config.format, upright=upright))
     return resp
 
 
