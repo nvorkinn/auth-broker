@@ -37,7 +37,7 @@
 {% endblock %}
 
 {% block content %}
-{% macro style_picker(field, hint, styles, chosen, folder, width, height, legend="Style") %}
+{% macro style_picker(field, hint, styles, chosen, folder, width, height, legend="Style", prefix="") %}
         <fieldset class="form-group style-picker" aria-describedby="{{ field }}_hint">
             <legend class="form-legend">{{ legend }}</legend>
             <p id="{{ field }}_hint" class="form-hint">{{ hint }}</p>
@@ -47,7 +47,7 @@
                     {% for style, (name, description) in styles.items() %}
                         <label class="style-option">
                             <input type="radio" id="{{ field }}_{{ style }}" name="{{ field }}" value="{{ style }}" {% if chosen == style %}checked{% endif %}>
-                            <img src="{{ url_for('static', filename=folder ~ '/' ~ style ~ '.png') }}" alt="" width="{{ width }}" height="{{ height }}" style="max-width: {{ width }}px">
+                            <img src="{{ url_for('static', filename=folder ~ '/' ~ prefix ~ style ~ '.png') }}" alt="" width="{{ width }}" height="{{ height }}" style="max-width: {{ width }}px">
                             <span class="style-caption"><span class="style-name">{{ name }}</span> <span class="style-description">{{ description }}</span></span>
                         </label>
                     {% endfor %}
@@ -145,7 +145,11 @@
                     {{ style_picker("weather_design", "How your HD screen draws the weather, which spans its whole width.", weather_designs, config.weather_design, "weather", 468, 230, legend="Weather") }}
                 {% endif %}
                 {% if layouts %}
-                    {{ style_picker("layout", "How your HD screen arranges its panels, hung portrait.", layouts, layout, "layouts", 351, 468, legend="Layout") }}
+                    {% if landscape %}
+                        {{ style_picker("layout", "How your HD screen arranges its panels, hung landscape.", layouts, layout, "layouts", 468, 351, legend="Layout", prefix="landscape-") }}
+                    {% else %}
+                        {{ style_picker("layout", "How your HD screen arranges its panels, hung portrait.", layouts, layout, "layouts", 351, 468, legend="Layout") }}
+                    {% endif %}
                 {% endif %}
             </div>
 

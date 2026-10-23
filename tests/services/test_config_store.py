@@ -105,6 +105,20 @@ def test_the_stored_config_has_the_layout_picked(app, store, paired_client, conf
     assert _stored(store, device_id) == config_of(device_id)
 
 
+def test_the_stored_config_has_the_landscape_layout_picked(app, store, paired_client, config_of):
+    client, device_id, _secret = paired_client
+    with app.app_context():
+        config = db.session.get_one(DeviceConfig, device_id)
+        config.width, config.height, config.orientation = 1872, 1404, "horizontal"
+        db.session.commit()
+
+    client.post("/device", data={"layout": "newspaper"})
+
+    assert _stored(store, device_id)["screen"]["layout"] == "newspaper"
+    assert _stored(store, device_id)["screen"]["orientation"] == "horizontal"
+    assert _stored(store, device_id) == config_of(device_id)
+
+
 def test_the_stored_config_carries_no_secret(app, store, paired_client, monkeypatch):
     client, device_id, _ = paired_client
     app.config.update(TFL_APP_KEY="the-tfl-key")

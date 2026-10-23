@@ -923,6 +923,13 @@ def test_device_config_post_rejects_an_unknown_weather_design(app, paired_client
 
 
 LAYOUTS = ["classic", "masthead", "column", "lockscreen", "timeline", "board", "pages"]
+LANDSCAPE_LAYOUTS = ["sidebar", "board", "column", "focus", "newspaper", "pages"]
+
+
+def _hang_landscape(app, device_id):
+    with app.app_context():
+        db.session.get_one(DeviceConfig, device_id).orientation = "horizontal"
+        db.session.commit()
 
 
 def test_device_config_shows_no_layout_picker_for_a_small_screen(paired_client):
@@ -932,16 +939,51 @@ def test_device_config_shows_no_layout_picker_for_a_small_screen(paired_client):
     assert "/static/layouts/" not in html
 
 
-def test_device_config_shows_no_layout_picker_for_an_hd_screen_hung_landscape(app, paired_client):
-    """Hung landscape it has one layout (sidebar), so there's nothing to pick."""
+def test_device_config_shows_no_layout_picker_for_a_small_screen_hung_landscape(app, paired_client):
+    """The 7.5" screens have one layout either way round."""
     client, device_id, _ = paired_client
-    _make_hd_screen(app, device_id)
-    with app.app_context():
-        db.session.get_one(DeviceConfig, device_id).orientation = "horizontal"
-        db.session.commit()
+    _hang_landscape(app, device_id)
     html = client.get("/device").get_data(as_text=True)
-    assert 'name="weather_design"' in html
     assert 'name="layout"' not in html
+    assert "/static/layouts/" not in html
+
+
+@pytest.mark.parametrize(("width", "height"), [(1872, 1404), (1404, 1872)])
+def test_device_config_shows_the_layout_picker_for_an_hd_landscape_screen(app, paired_client, width, height):
+    """Whichever way round the screen reported its size: sidebar first and picked, with a landscape picture of each."""
+    client, device_id, _ = paired_client
+    _make_hd_screen(app, device_id, width, height)
+    _hang_landscape(app, device_id)
+    html = client.get("/device").get_data(as_text=True)
+    assert re.findall(r'name="layout" value="(\w+)"', html) == LANDSCAPE_LAYOUTS
+    assert re.findall(r'name="layout" value="(\w+)" checked', html) == ["sidebar"]  # the default, stored as null
+    assert "How your HD screen arranges its panels, hung landscape." in html
+    assert "hung portrait" not in html
+    for name in ("Sidebar", "Departure board", "Weather column", "Focus", "Newspaper", "Two pages"):
+        assert f'<span class="style-name">{name}</span>' in html
+    for name in ("Classic", "Route board", "Lock screen"):
+        assert f'<span class="style-name">{name}</span>' not in html
+    pictures = re.findall(r'<img src="(/static/layouts/[\w-]+\.png)" alt="" width="468" height="351"', html)
+    assert pictures == [f"/static/layouts/landscape-{layout}.png" for layout in LANDSCAPE_LAYOUTS]
+    for picture in pictures:
+        response = client.get(picture)
+        assert response.status_code == 200
+        assert response.mimetype == "image/png"
+
+
+@pytest.mark.parametrize(
+    ("prefix", "size", "layouts"),
+    [("", (351, 468), LAYOUTS), ("landscape-", (468, 351), LANDSCAPE_LAYOUTS)],
+)
+def test_the_layout_pictures_are_the_hd_screen_at_a_quarter_size(prefix, size, layouts):
+    """Each is the screen the way it hangs, a quarter of 1872x1404, in grey: what the picker's <img> says it is."""
+    folder = Path(__file__).parents[2] / "broker" / "static" / "layouts"
+    for layout in layouts:
+        header = (folder / f"{prefix}{layout}.png").read_bytes()[:26]
+        # The PNG signature, then IHDR: width, height, bit depth and colour type (0, greyscale).
+        assert header[:8] == b"\x89PNG\r\n\x1a\n"
+        width, height = int.from_bytes(header[16:20]), int.from_bytes(header[20:24])
+        assert ((width, height), header[25]) == (size, 0), layout
 
 
 @pytest.mark.parametrize(("width", "height"), [(1872, 1404), (1404, 1872)])
@@ -973,6 +1015,64 @@ def test_device_config_shows_the_stored_layout_selected(app, paired_client):
         db.session.commit()
     html = client.get("/device").get_data(as_text=True)
     assert re.findall(r'name="layout" value="(\w+)" checked', html) == ["board"]
+
+
+@pytest.mark.parametrize("layout", ["newspaper", "board"])
+def test_device_config_shows_the_stored_landscape_layout_selected(app, paired_client, layout):
+    client, device_id, _ = paired_client
+    _make_hd_screen(app, device_id)
+    _hang_landscape(app, device_id)
+    with app.app_context():
+        db.session.get_one(DeviceConfig, device_id).layout = layout
+        db.session.commit()
+    html = client.get("/device").get_data(as_text=True)
+    assert re.findall(r'name="layout" value="(\w+)" checked', html) == [layout]
+
+
+@pytest.mark.parametrize(
+    ("landscape", "stored", "shown"),
+    [
+        (True, "masthead", "sidebar"),
+        (True, "classic", "sidebar"),
+        (False, "focus", "classic"),
+        (False, "sidebar", "classic"),
+    ],
+)
+def test_device_config_shows_the_default_for_a_layout_the_way_it_hangs_lacks(
+    app, paired_client, landscape, stored, shown
+):
+    """A layout picked hung the other way round, which the screen draws as its default now, shows as that default."""
+    client, device_id, _ = paired_client
+    _make_hd_screen(app, device_id)
+    if landscape:
+        _hang_landscape(app, device_id)
+    with app.app_context():
+        db.session.get_one(DeviceConfig, device_id).layout = stored
+        db.session.commit()
+    html = client.get("/device").get_data(as_text=True)
+    assert re.findall(r'name="layout" value="(\w+)" checked', html) == [shown]
+
+
+@pytest.mark.parametrize("layout", LANDSCAPE_LAYOUTS)
+def test_device_config_post_persists_the_landscape_layout(app, paired_client, layout):
+    client, device_id, _ = paired_client
+    _make_hd_screen(app, device_id)
+    _hang_landscape(app, device_id)
+    response = client.post("/device", data={"interval": "15", "layout": layout})
+    assert response.status_code == 302
+    with app.app_context():
+        assert db.session.get_one(DeviceConfig, device_id).layout == layout
+
+
+def test_device_config_post_saves_a_layout_and_the_orientation_together(app, paired_client):
+    """Turning the screen and posting the other way's picker in one save: any contract layout is taken."""
+    client, device_id, _ = paired_client
+    _make_hd_screen(app, device_id)
+    response = client.post("/device", data={"interval": "15", "orientation": "horizontal", "layout": "timeline"})
+    assert response.status_code == 302
+    with app.app_context():
+        config = db.session.get_one(DeviceConfig, device_id)
+        assert (config.orientation, config.layout) == ("horizontal", "timeline")
 
 
 @pytest.mark.parametrize("layout", LAYOUTS)
@@ -1016,8 +1116,8 @@ def test_device_config_post_rejects_an_unknown_layout(app, paired_client, layout
     response = client.post("/device", data={"interval": "15", "layout": layout, "style": "card"})
     assert response.status_code == 400
     assert (
-        b"The layout must be one of classic, masthead, column, lockscreen, timeline, board, pages, sidebar."
-        in response.data
+        b"The layout must be one of classic, masthead, column, lockscreen, timeline, board, pages, sidebar, focus, "
+        b"newspaper." in response.data
     )
     assert b"Nothing was saved." in response.data
     with app.app_context():

@@ -20,7 +20,6 @@ from broker.clients import apple_music, weather
 from broker.db import db
 from broker.models import (
     CLOCK_FORMATS,
-    HD_PORTRAIT_LAYOUTS,
     LANGUAGES,
     LAYOUTS,
     ORIENTATIONS,
@@ -31,8 +30,8 @@ from broker.models import (
     GitHubToken,
     GlowmarktCredentials,
     SpotifyToken,
-    has_layout_picker,
     is_hd_screen,
+    layout_choices,
 )
 from broker.services import (
     assignments,
@@ -50,7 +49,11 @@ from broker.services import (
 from broker.services.postcodes import normalize_postcode
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
     from flask.typing import ResponseReturnValue
+
+    from broker.models import Layout
 
 bp = Blueprint("pages", __name__)
 
@@ -239,8 +242,9 @@ def _save_device_config(device_id: str) -> ResponseReturnValue:
 
     config = db.session.get_one(DeviceConfig, device_id)
     choices = {field: request.form.get(field, getattr(config, field)) for field in CHOICES}
-    # Only on an HD portrait screen's page (has_layout_picker), so another screen's save keeps what's stored. Empty is
-    # the screen's default (None).
+    # Only on an HD screen's page (layout_choices), so another screen's save keeps what's stored. Any of the contract's
+    # layouts is taken, whichever way the screen hangs: one its size doesn't have is drawn as its default. Empty is the
+    # screen's default (None).
     raw_layout = request.form.get("layout", config.layout or "")
     layout = next((known for known in LAYOUTS if known == raw_layout), None)
 
@@ -431,6 +435,16 @@ def screen_frame() -> ResponseReturnValue:
 PAGE_ORIENTATION = "vertical"
 
 
+def _shown_layout(config: DeviceConfig, layouts: Mapping[Layout, object] | None) -> Layout | None:
+    """Return the layout the picker shows picked: the stored one, or else the default (the first).
+
+    The default stands for none stored and for one the way the screen hangs doesn't have, as the screen draws it then.
+    """
+    if layouts is None:
+        return None
+    return config.layout if config.layout in layouts else next(iter(layouts))
+
+
 def _render_device_config(device_id: str, errors: list[str] | None = None) -> str:
     """Render a screen's settings page, with any errors from saving it."""
     config = db.session.get_one(DeviceConfig, device_id)
@@ -441,6 +455,7 @@ def _render_device_config(device_id: str, errors: list[str] | None = None) -> st
     }
 
     device = db.session.get_one(Device, device_id)
+    layouts = layout_choices(config)
     # The header shows the screen's latest frame, as the screen's own page does.
     frame_width, frame_height = _frame_size(config)
     # An empty weather location is prefilled with a guess from the visitor's IP, shown as one; it's
@@ -467,9 +482,10 @@ def _render_device_config(device_id: str, errors: list[str] | None = None) -> st
         # The weather design is only an HD screen's to pick: elsewhere the weather has one way to fit its panel.
         weather_designs=WEATHER_DESIGNS,
         hd_screen=is_hd_screen(config),
-        # The layout is only an HD portrait screen's to pick: every other screen has one. None shows as the default.
-        layouts=HD_PORTRAIT_LAYOUTS if has_layout_picker(config) else None,
-        layout=config.layout or next(iter(HD_PORTRAIT_LAYOUTS)),
+        # The layout is only an HD screen's to pick, from the ones of the way it hangs: every other screen has one.
+        layouts=layouts,
+        layout=_shown_layout(config, layouts),
+        landscape=config.orientation == "horizontal",
         page_orientation=PAGE_ORIENTATION,
         stops=stops.resolve(config.tfl_stop_ids),
         MODE_ICONS=stops.MODE_ICONS,
