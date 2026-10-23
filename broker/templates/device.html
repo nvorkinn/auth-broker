@@ -116,14 +116,18 @@
                         <p id="language_hint" class="form-hint">The language of your screen's text.</p>
                     </fieldset>
 
-                    <!-- A disabled fieldset isn't submitted, so the orientation goes in this hidden input instead. -->
-                    <input type="hidden" name="orientation" value="{{ page_orientation }}">
-                    <fieldset class="form-group" disabled>
+                    <!-- Only an HD screen picks its orientation; elsewhere the page locks it, and as a disabled
+                         fieldset isn't submitted, the orientation goes in this hidden input instead. -->
+                    {% set shown_orientation = config.orientation if hd_screen else page_orientation %}
+                    {% if not hd_screen %}
+                        <input type="hidden" name="orientation" value="{{ page_orientation }}">
+                    {% endif %}
+                    <fieldset class="form-group"{% if not hd_screen %} disabled{% endif %}>
                         <legend class="form-legend">Orientation</legend>
                         <div class="checkbox-group" style="gap: 20px;">
                             {% for orientation in orientations %}
                                 <span class="checkbox-group">
-                                    <input type="radio" id="orientation_{{ orientation }}" name="orientation" value="{{ orientation }}" {% if page_orientation == orientation %}checked{% endif %}>
+                                    <input type="radio" id="orientation_{{ orientation }}" name="orientation" value="{{ orientation }}" {% if shown_orientation == orientation %}checked{% endif %}>
                                     <label for="orientation_{{ orientation }}" style="margin: 0; font-size: 14px; font-weight: normal;">{{ orientation | capitalize }}</label>
                                 </span>
                             {% endfor %}

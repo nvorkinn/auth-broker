@@ -247,6 +247,31 @@ def test_device_config_shows_vertical_even_when_another_orientation_is_stored(ap
     assert '<input type="hidden" name="orientation" value="vertical">' in html
 
 
+@pytest.mark.parametrize("stored", ["horizontal", "vertical"])
+def test_device_config_lets_an_hd_screen_pick_its_orientation(app, paired_client, stored):
+    """An HD screen's page shows the stored orientation, editable, with no hidden input overriding it."""
+    client, device_id, _ = paired_client
+    _make_hd_screen(app, device_id)
+    with app.app_context():
+        db.session.get_one(DeviceConfig, device_id).orientation = stored
+        db.session.commit()
+    html = client.get("/device").get_data(as_text=True)
+    assert '<fieldset class="form-group" disabled>' not in html
+    assert re.findall(r'id="orientation_(\w+)"[^>]*checked', html) == [stored]
+    assert '<input type="hidden" name="orientation"' not in html
+
+
+def test_device_config_post_saves_an_hd_screens_orientation(app, paired_client):
+    client, device_id, _ = paired_client
+    _make_hd_screen(app, device_id, 1404, 1872)
+    response = client.post("/device", data={"interval": "15", "orientation": "horizontal"})
+    assert response.status_code == 302
+    with app.app_context():
+        assert db.session.get_one(DeviceConfig, device_id).orientation == "horizontal"
+    html = client.get("/device").get_data(as_text=True)
+    assert re.findall(r'id="orientation_(\w+)"[^>]*checked', html) == ["horizontal"]
+
+
 def test_device_config_post_persists_orientation(app, paired_client):
     client, device_id, _ = paired_client
     response = client.post("/device", data={"interval": "15", "orientation": "horizontal"})
