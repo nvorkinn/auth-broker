@@ -72,12 +72,20 @@ for encrypted in "$bundle"/secrets/*.env; do
   echo "Decrypted $name"
 done
 
+DB_BACKUPS_KEPT=5
 if [ "$service" = auth-broker ] && docker inspect -f '{{.State.Running}}' auth-broker 2>/dev/null | grep -q true; then
   # SQLite's backup API, so the copy is consistent even mid-write.
   docker exec auth-broker python -c "
 import sqlite3
 src = sqlite3.connect('/app/data/broker.db')
 src.backup(sqlite3.connect('/app/data/broker.db.bak-$tag'))
+# Keep the newest $DB_BACKUPS_KEPT copies; deleted in here as the container
+# owns them.
+from pathlib import Path
+backups = sorted(Path('/app/data').glob('broker.db.bak-*'), key=lambda p: p.stat().st_mtime)
+for old in backups[:-$DB_BACKUPS_KEPT]:
+    old.unlink()
+    print(f'Removed old backup data/{old.name}')
 "
   echo "Backed up the database to data/broker.db.bak-$tag"
 fi
