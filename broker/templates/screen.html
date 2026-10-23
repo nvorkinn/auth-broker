@@ -15,12 +15,9 @@
         max-width: calc({{ width }}px + 28px);
     }
 
-    .screen-picture {
-        display: block;
-        width: 100%;
-        height: auto;
-        background: #fff;
+    .screen-bezel .frame {
         border-radius: 2px;
+        overflow: hidden;
     }
 
     .screen-empty {
@@ -93,9 +90,11 @@
     </div>
 
     <div class="screen-bezel">
-        <img id="screenPicture" class="screen-picture" alt="What the screen shows"
-             width="{{ width }}" height="{{ height }}" style="max-width: {{ width }}px{% if not has_frame %}; display: none{% endif %}"
-             {% if has_frame %}src="{{ url_for('pages.screen_frame', device_id=device_id) }}"{% endif %}>
+        <span id="screenFrame" class="frame{% if turned %} frame-turned{% endif %}" style="--frame-w: {{ width }}; --frame-h: {{ height }}"{% if not has_frame %} hidden{% endif %}>
+            <img id="screenPicture" class="frame-picture" alt="What the screen shows"
+                 width="{{ height if turned else width }}" height="{{ width if turned else height }}"
+                 {% if has_frame %}src="{{ url_for('pages.screen_frame', device_id=device_id) }}"{% endif %}>
+        </span>
         <div id="screenEmpty" class="screen-empty"{% if has_frame %} hidden{% endif %}>
             Nothing drawn yet. The first picture is drawn within a minute of the screen being named.
         </div>
@@ -111,6 +110,7 @@
 (() => {
     const url = {{ url_for('pages.screen_frame', device_id=device_id) | tojson }};
     const intervalMs = {{ '%g' | format(interval) }} * 1000;
+    const frame = document.getElementById('screenFrame');
     const picture = document.getElementById('screenPicture');
     const empty = document.getElementById('screenEmpty');
     const status = document.getElementById('screenStatus');
@@ -147,7 +147,7 @@
                 if (objectUrl) URL.revokeObjectURL(objectUrl);
                 objectUrl = URL.createObjectURL(blob);
                 picture.src = objectUrl;
-                picture.style.display = '';
+                frame.hidden = false;
                 empty.hidden = true;
                 etag = tag;
             }

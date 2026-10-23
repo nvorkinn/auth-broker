@@ -26,7 +26,9 @@
     </div>
     <a class="bezel{% if frame_height > frame_width %} upright{% endif %}" href="{{ url_for('pages.screen_view', device_id=device_id) }}" aria-label="See what's on the screen">
         {% if has_frame %}
-            <img src="{{ url_for('pages.screen_frame', device_id=device_id) }}" alt="" width="{{ frame_width }}" height="{{ frame_height }}">
+            <span class="frame{% if frame_turned %} frame-turned{% endif %}" style="--frame-w: {{ frame_width }}; --frame-h: {{ frame_height }}">
+                <img class="frame-picture" src="{{ url_for('pages.screen_frame', device_id=device_id) }}" alt="" width="{{ frame_height if frame_turned else frame_width }}" height="{{ frame_width if frame_turned else frame_height }}">
+            </span>
         {% else %}
             <span class="bezel-empty" style="aspect-ratio: {{ frame_width }} / {{ frame_height }}">No picture yet</span>
         {% endif %}

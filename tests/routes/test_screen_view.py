@@ -55,6 +55,64 @@ def test_an_upright_frame_is_turned_back_to_portrait():
     assert black == [(portrait_x, portrait_y)]
 
 
+PNG_FRAME = b"\x89PNG\r\n\x1a\n" + bytes(range(256))
+
+
+def _make_png_screen(app, device_id, width, height, orientation="vertical"):
+    with app.app_context():
+        config = db.session.get_one(DeviceConfig, device_id)
+        config.width, config.height, config.format, config.orientation = width, height, "png", orientation
+        db.session.commit()
+
+
+def test_a_png_frame_is_served_as_it_is_whichever_way_its_hung():
+    # The page turns an upright one back (the frame-turned style); the broker never decodes it.
+    assert frame_image.preview(PNG_FRAME, "png", upright=True) == PNG_FRAME
+    assert frame_image.preview(PNG_FRAME, "png", upright=False) == PNG_FRAME
+
+
+def test_a_mono_frame_is_previewed_as_before():
+    frame = _frame_with_black_pixel(10, 3)
+
+    assert frame_image.preview(frame, "mono-1bpp-packed", upright=True) == frame_image.to_png(frame, upright=True)
+
+
+def test_an_upright_png_screen_turns_its_picture_on_the_page(app, paired_client, draw):
+    client, device_id, _secret = paired_client
+    _make_png_screen(app, device_id, 1872, 1404)
+    draw(device_id, PNG_FRAME)
+
+    screen = client.get(f"/device/{device_id}/screen").get_data(as_text=True)
+    settings = client.get(f"/device/{device_id}").get_data(as_text=True)
+    picture = client.get(f"/device/{device_id}/screen/frame.png")
+
+    for html in (screen, settings):
+        assert 'class="frame frame-turned" style="--frame-w: 1404; --frame-h: 1872"' in html
+        assert 'width="1872" height="1404"' in html  # the picture as it comes: landscape
+    assert picture.status_code == 200
+    assert picture.data == PNG_FRAME
+
+
+def test_a_landscape_png_screen_shows_its_picture_as_it_is(app, paired_client, draw):
+    client, device_id, _secret = paired_client
+    _make_png_screen(app, device_id, 1872, 1404, orientation="horizontal")
+    draw(device_id, PNG_FRAME)
+
+    html = client.get(f"/device/{device_id}/screen").get_data(as_text=True)
+
+    assert 'class="frame" style="--frame-w: 1872; --frame-h: 1404"' in html
+    assert 'class="frame frame-turned"' not in html
+
+
+def test_a_mono_screen_is_never_turned_on_the_page(paired_client, draw):
+    client, device_id, _secret = paired_client
+    draw(device_id, bytes(FRAME_BYTES))
+
+    html = client.get(f"/device/{device_id}/screen").get_data(as_text=True)
+
+    assert 'class="frame" style="--frame-w: 480; --frame-h: 800"' in html
+
+
 def test_screen_page_shows_the_picture_and_polls_at_the_screens_interval(app, paired_client, draw):
     client, device_id, _secret = paired_client
     draw(device_id, bytes(FRAME_BYTES))
@@ -106,7 +164,8 @@ def test_settings_page_header_shows_the_screens_picture(paired_client, draw):
 
     html = client.get(f"/device/{device_id}").get_data(as_text=True)
 
-    assert f'<img src="/device/{device_id}/screen/frame.png" alt="" width="480" height="800">' in html
+    picture = f'<img class="frame-picture" src="/device/{device_id}/screen/frame.png" alt="" width="480" height="800">'
+    assert picture in html
     assert "No picture yet" not in html
 
 
