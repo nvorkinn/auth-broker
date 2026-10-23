@@ -14,6 +14,7 @@ import fakeredis
 import pytest
 import redis
 from countdown_api import fixtures
+from countdown_api.models import ConfigResponse
 
 from broker.db import db
 from broker.models import Device, DeviceConfig
@@ -38,6 +39,14 @@ def _ask_for_code(app, device_id) -> str:
         code = pairing.issue_code(device_id)
         config_store.publish(device_id)
     return code
+
+
+def _as_read(value):
+    """Return a stored config as the renderer reads it: the contract's model, with what the example omits filled in.
+
+    The example omits the fields the contract defaults (weather.design), which the broker writes.
+    """
+    return ConfigResponse.model_validate(value).model_dump(mode="json")
 
 
 def _stored(store, device_id):
@@ -65,7 +74,7 @@ def test_the_stored_code_is_the_shape_the_renderer_reads(app, store):
             code = pairing.issue_code(device_id)
 
     assert code == FIXTURE["value"]["pairing_code"]
-    assert _stored(store, device_id) == FIXTURE["value"]
+    assert _stored(store, device_id) == _as_read(FIXTURE["value"])
     # It lapses when the code does.
     assert FIXTURE["ttl_s"] * 1000 - 5000 < store.pttl(FIXTURE["key"]) <= FIXTURE["ttl_s"] * 1000
     assert timedelta(seconds=FIXTURE["ttl_s"]) == pairing.CODE_TTL
