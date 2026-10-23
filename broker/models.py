@@ -66,7 +66,9 @@ type Language = Literal["en", "nb"]
 type Style = Literal["airy", "hero", "card"]
 type WeatherDesign = Literal["columns", "timeline", "overview", "poster"]
 type FrameFormat = Literal["mono-1bpp-packed", "png"]
-type Layout = Literal["classic", "masthead", "column", "lockscreen", "timeline", "board", "pages", "sidebar"]
+type Layout = Literal[
+    "classic", "masthead", "column", "lockscreen", "timeline", "board", "pages", "sidebar", "focus", "newspaper"
+]
 
 ORIENTATIONS = ("horizontal", "vertical")
 # What a screen may report at registration, not a setting the config page shows.
@@ -91,10 +93,20 @@ WEATHER_DESIGNS = {
 }
 # The store contract's layouts, which layout a screen is drawn in; each size of screen has its own, and draws one it
 # doesn't have as its default. None (the column's default) is the screen's default.
-LAYOUTS: tuple[Layout, ...] = ("classic", "masthead", "column", "lockscreen", "timeline", "board", "pages", "sidebar")
-# The layouts of an HD screen hung portrait, the one screen with more than one to pick (has_layout_picker), its default
-# first, with the name and description the config page shows beside each one's picture
-# (broker/static/layouts/<layout>.png). Hung landscape it has only sidebar, so the page offers no picker there.
+LAYOUTS: tuple[Layout, ...] = (
+    "classic",
+    "masthead",
+    "column",
+    "lockscreen",
+    "timeline",
+    "board",
+    "pages",
+    "sidebar",
+    "focus",
+    "newspaper",
+)
+# The layouts of an HD screen hung portrait, its default first, with the name and description the config page shows
+# beside each one's picture (broker/static/layouts/<layout>.png).
 HD_PORTRAIT_LAYOUTS: dict[Layout, tuple[str, str]] = {
     "classic": ("Classic", "The weather on top, then the stops, Spotify and the notices"),
     "masthead": ("Masthead", "The clock and the weather in a black band across the top"),
@@ -103,6 +115,21 @@ HD_PORTRAIT_LAYOUTS: dict[Layout, tuple[str, str]] = {
     "timeline": ("Timeline", "Each departure placed by its minute along a line"),
     "board": ("Route board", "Each route once, with its next three times"),
     "pages": ("Two pages", "The stops and the other panels take turns"),
+}
+# The layouts of an HD screen hung landscape, likewise, beside broker/static/layouts/landscape-<layout>.png (board,
+# column and pages are portrait's ids too, but drawn differently, so their pictures can't share a name).
+HD_LANDSCAPE_LAYOUTS: dict[Layout, tuple[str, str]] = {
+    "sidebar": ("Sidebar", "The clock and the weather in a black sidebar"),
+    "board": ("Departure board", "Both stops as big boards, the weather and energy under them"),
+    "column": ("Weather column", "The weather down the left, the stops, then the music on the right"),
+    "focus": ("Focus", "Each stop's next departure huge, the rest in a column beside them"),
+    "newspaper": ("Newspaper", "A front page in columns under a masthead"),
+    "pages": ("Two pages", "Going out and at home, taking turns each minute"),
+}
+# The HD screen's layouts each way it hangs, the one screen with more than one to pick (layout_choices).
+HD_LAYOUTS: dict[Orientation, dict[Layout, tuple[str, str]]] = {
+    "vertical": HD_PORTRAIT_LAYOUTS,
+    "horizontal": HD_LANDSCAPE_LAYOUTS,
 }
 # The HD screen's size in pixels, the one screen the weather design and the layout apply to (is_hd_screen).
 HD_SCREEN_SIZE = (1872, 1404)
@@ -163,9 +190,12 @@ def is_hd_screen(config: DeviceConfig) -> bool:
     return (max(config.width, config.height), min(config.width, config.height)) == HD_SCREEN_SIZE
 
 
-def has_layout_picker(config: DeviceConfig) -> bool:
-    """Whether the config page offers a layout: only an HD screen hung portrait has several (HD_PORTRAIT_LAYOUTS)."""
-    return is_hd_screen(config) and config.orientation == "vertical"
+def layout_choices(config: DeviceConfig) -> dict[Layout, tuple[str, str]] | None:
+    """Return the layouts the config page offers the config's screen, its default first.
+
+    The way an HD screen hangs has its own (HD_LAYOUTS); every other screen has one layout, so None (no picker).
+    """
+    return HD_LAYOUTS[config.orientation] if is_hd_screen(config) else None
 
 
 class SpotifyToken(Model):
