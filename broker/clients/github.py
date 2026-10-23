@@ -68,23 +68,29 @@ MAX_FILES = 300
 RECENT_RELEASES = 5
 
 
-def summary(token: str) -> dict:
+def summary(token: str, cache: Redis | None = None) -> dict:
     """Return the owner's GitHub at a glance, the developer panel's `github`.
 
-    Raises requests.HTTPError if GitHub refuses the token or fails.
+    Read through the dashboard's ETag `cache` when given, so the calls whose answer hasn't changed since the last poll
+    cost none of the token's rate limit. Raises requests.HTTPError if GitHub refuses the token or fails.
     """
-    session = _session(token)
-    login = _get(session, "/user")["login"]
-    repos = _owned_repos(session)
-    recent = _recently_pushed(repos)
-    return {
-        "login": login,
-        "repos": len(repos),
-        "open_prs": _count(session, f"is:pr is:open author:{login}"),
-        "review_requests": _count(session, f"is:pr is:open review-requested:{login}"),
-        "failing": [repo["name"] for repo in recent if _failing(session, repo)],
-        "releases": _releases(session, recent),
-    }
+    api = Dashboard(token, cache)
+    try:
+        login = api.get("/user")["login"]
+        repos = [
+            repo for repo in api.pages("/user/repos", affiliation="owner", sort="pushed") if not repo.get("archived")
+        ]
+        recent = _recently_pushed(repos)
+        return {
+            "login": login,
+            "repos": len(repos),
+            "open_prs": _count(api, f"is:pr is:open author:{login}"),
+            "review_requests": _count(api, f"is:pr is:open review-requested:{login}"),
+            "failing": [repo["name"] for repo in recent if _failing(api, repo)],
+            "releases": _releases(api, recent),
+        }
+    finally:
+        api.close()
 
 
 def copilot_premium_requests(token: str, login: str) -> int | None:
@@ -157,32 +163,8 @@ def _session(token: str) -> requests.Session:
     return session
 
 
-def _get(session: requests.Session, path: str, **params: str | int) -> dict:
-    response = session.get(f"{API_URL}{path}", params=params, timeout=TIMEOUT)
-    response.raise_for_status()
-    return response.json()
-
-
-def _owned_repos(session: requests.Session) -> list[dict]:
-    """Return every repo the owner owns, archived ones left out, most recently pushed first."""
-    repos: list[dict] = []
-    page = 1
-    while True:
-        response = session.get(
-            f"{API_URL}/user/repos",
-            params={"affiliation": "owner", "sort": "pushed", "per_page": PAGE_SIZE, "page": page},
-            timeout=TIMEOUT,
-        )
-        response.raise_for_status()
-        batch = response.json()
-        repos += [repo for repo in batch if not repo.get("archived")]
-        if len(batch) < PAGE_SIZE:
-            return repos
-        page += 1
-
-
-def _count(session: requests.Session, query: str) -> int:
-    return _get(session, "/search/issues", q=query, per_page=1)["total_count"]
+def _count(api: Dashboard, query: str) -> int:
+    return api.get("/search/issues", q=query, per_page=1)["total_count"]
 
 
 def _recently_pushed(repos: list[dict]) -> list[dict]:
@@ -191,10 +173,9 @@ def _recently_pushed(repos: list[dict]) -> list[dict]:
     return recent[:MOST_CHECKED]
 
 
-def _failing(session: requests.Session, repo: dict) -> bool:
+def _failing(api: Dashboard, repo: dict) -> bool:
     """Whether any workflow's latest finished run on the repo's default branch failed."""
-    runs = _get(
-        session,
+    runs = api.get(
         f"/repos/{repo['full_name']}/actions/runs",
         branch=repo["default_branch"],
         status="completed",
@@ -207,7 +188,7 @@ def _failing(session: requests.Session, repo: dict) -> bool:
     return any(conclusion in FAILED for conclusion in latest.values())
 
 
-def _releases(session: requests.Session, repos: list[dict]) -> list[dict]:
+def _releases(api: Dashboard, repos: list[dict]) -> list[dict]:
     """Return each repo's release that's running or finished in the last SHOWN_AFTER, the latest started first.
 
     A repo whose release can't be read is left out, so the rest of the panel still shows; but a rate limit is raised
@@ -217,7 +198,7 @@ def _releases(session: requests.Session, repos: list[dict]) -> list[dict]:
     found = []
     for repo in repos:
         try:
-            release = _release(session, repo, now)
+            release = _release(api, repo, now)
         except requests.RequestException as e:
             if rate_limit_wait(e) is not None:
                 raise
@@ -228,10 +209,9 @@ def _releases(session: requests.Session, repos: list[dict]) -> list[dict]:
     return sorted(found, key=lambda release: release["started"], reverse=True)
 
 
-def _release(session: requests.Session, repo: dict, now: datetime) -> dict | None:
+def _release(api: Dashboard, repo: dict, now: datetime) -> dict | None:
     """Return the repo's latest release run with its jobs as graph nodes; None if none, or it finished a while ago."""
-    runs = _get(
-        session,
+    runs = api.get(
         f"/repos/{repo['full_name']}/actions/runs",
         created=f">={now - RECENT_RUNS:%Y-%m-%dT%H:%M:%SZ}",
         per_page=30,
@@ -242,14 +222,14 @@ def _release(session: requests.Session, repo: dict, now: datetime) -> dict | Non
     finished = run["status"] == "completed"
     if finished and datetime.fromisoformat(run["updated_at"]) < now - SHOWN_AFTER:
         return None
-    jobs = _get(session, f"/repos/{repo['full_name']}/actions/runs/{run['id']}/jobs", per_page=100)["jobs"]
+    jobs = api.get(f"/repos/{repo['full_name']}/actions/runs/{run['id']}/jobs", per_page=100)["jobs"]
     return {
         "repo": repo["name"],
         "title": _title(run, repo),
         "state": workflow_graph.run_state(run),
         "started": run["run_started_at"],
         "finished": run["updated_at"] if finished else None,
-        "jobs": workflow_graph.nodes(_workflow_jobs(session, repo, run), jobs),
+        "jobs": workflow_graph.nodes(_workflow_jobs(api, repo, run), jobs),
     }
 
 
@@ -288,7 +268,7 @@ def _title(run: dict, repo: dict) -> str:
     return f"#{run['run_number']}"
 
 
-def _workflow_jobs(session: requests.Session, repo: dict, run: dict) -> list[workflow_graph.WorkflowJob]:
+def _workflow_jobs(api: Dashboard, repo: dict, run: dict) -> list[workflow_graph.WorkflowJob]:
     """Return the jobs of the run's workflow file, as at the run's commit; none if it can't be read.
 
     Without them the graph still shows the run's jobs, but not the lines between them. A rate limit is raised
@@ -296,14 +276,9 @@ def _workflow_jobs(session: requests.Session, repo: dict, run: dict) -> list[wor
     """
     path = run["path"].split("@")[0]
     try:
-        response = session.get(
-            f"{API_URL}/repos/{repo['full_name']}/contents/{path}",
-            params={"ref": run["head_sha"]},
-            headers={"Accept": "application/vnd.github.raw+json"},
-            timeout=TIMEOUT,
+        return workflow_graph.workflow_jobs(
+            api.read(f"/repos/{repo['full_name']}/contents/{path}", raw=True, ref=run["head_sha"])
         )
-        response.raise_for_status()
-        return workflow_graph.workflow_jobs(response.text)
     except (requests.RequestException, ValueError) as e:
         if rate_limit_wait(e) is not None:
             raise
