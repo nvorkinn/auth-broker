@@ -836,14 +836,15 @@ test("with the webhook, the page re-reads only what changed and reads everything
     assert.equal(feedCalls()[0].url, "/github/changes", "the first read only marks where to start");
     feed = { last: "2-0", reset: false, changes: [
         { repo: "alice/project", kind: "pull", id: "4" }, { repo: "alice/project", kind: "pull", id: "4" },
-        { repo: "alice/project", kind: "run", id: "9" }, { repo: "someone/else", kind: "repo" },
+        { repo: "alice/project", kind: "run", id: "9" }, { repo: "alice/project", kind: "commit", id: "a1" },
+        { repo: "someone/else", kind: "repo" },
     ] };
     app.advance(5000);
     const before = fullCalls(app).length;
     await app.tick();
     await new Promise(setImmediate);
     assert.equal(feedCalls().at(-1).url, "/github/changes?after=1-0");
-    assert.equal(quickCalls(app, "pulls/4").length, 1, "one read per changed item");
+    assert.equal(quickCalls(app, "pulls/4").length, 2, "one read per changed item, a commit reading the PR it heads");
     assert.equal(quickCalls(app, "runs/9").length, 1);
     assert.equal(fullCalls(app).length, before);
     feed = { last: "3-0", reset: false, changes: [{ repo: "alice/project", kind: "pull", id: "8" }] };
@@ -852,11 +853,20 @@ test("with the webhook, the page re-reads only what changed and reads everything
     await app.tick();
     assert.equal(fullCalls(app).at(-1).url, "/github/repositories/alice/project?section=pulls", "a new PR reads the PR list");
     app.advance(60000);
+    const known = fullCalls(app).length;
+    feed = { last: "4-0", reset: false, changes: [{ repo: "alice/project", kind: "commit", id: "b2" }] };
+    app.advance(5000);
+    await app.tick();
+    await app.tick();
+    assert.equal(fullCalls(app).length, known + 1);
+    assert.equal(fullCalls(app).at(-1).url, "/github/repositories/alice/project?section=pulls",
+        "an unknown commit reads the PR list");
+    app.advance(60000);
     const settled = fullCalls(app).length;
-    feed = { last: "3-0", reset: false, changes: [] };
+    feed = { last: "4-0", reset: false, changes: [] };
     await steps(app, 10);
     assert.equal(fullCalls(app).length, settled, "no full read until five minutes have passed");
-    assert.equal(quickCalls(app, "pulls/4").length, 1, "nothing is quick-polled");
+    assert.equal(quickCalls(app, "pulls/4").length, 2, "nothing is quick-polled");
     app.advance(300000);
     await app.tick();
     assert.equal(fullCalls(app).length, settled + 1);
@@ -872,6 +882,22 @@ test("a feed that lost changes reads everything again", async () => {
     await app.tick();
     await app.tick();
     assert.equal(fullCalls(app).length, before + 1);
+});
+
+test("repositories are discovered every minute, or every five with the webhook, whose installation events ask at once", async () => {
+    const discoveryTimer = app => app.intervals.find(timer => timer.callback === app.evaluate("discover"));
+    assert.equal(discoveryTimer(await harness(idle)).interval, 60000);
+    let feed = { last: "1-0", changes: [], reset: false };
+    const app = await harness(url => url.startsWith("/github/changes") ? feed : idle, [repo], null, { webhooks: true });
+    assert.equal(discoveryTimer(app).interval, 300000);
+    const discoveries = () => app.calls.filter(call => call.url === "/github/repositories").length;
+    await app.tick();
+    const before = discoveries();
+    feed = { last: "2-0", changes: [{ kind: "repositories" }], reset: false };
+    app.advance(5000);
+    await app.tick();
+    await new Promise(setImmediate);
+    assert.equal(discoveries(), before + 1);
 });
 
 test("an expired sign-in stops polling and reloads the page, once the tab is shown", async () => {

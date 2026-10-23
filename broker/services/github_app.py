@@ -153,8 +153,9 @@ def valid_signature(body: bytes, signature: str) -> bool:
 
 
 def changes_in(event: str, payload: dict) -> list[dict[str, str]]:
-    """List what a webhook delivery changed, as items the dashboard can re-read: a PR, a run, or a whole repository."""
-    if event.startswith("installation"):
+    """List what a webhook delivery changed, as items the dashboard can re-read: a PR, a run, or a PR's commit."""
+    # A repository created, renamed, archived, deleted or transferred changes the list as installations do.
+    if event.startswith("installation") or event == "repository":
         return [{"kind": "repositories"}]
     repo = (payload.get("repository") or {}).get("full_name")
     if not isinstance(repo, str):
@@ -162,15 +163,18 @@ def changes_in(event: str, payload: dict) -> list[dict[str, str]]:
     changed: list[tuple[str, object]] = []
     if event in {"pull_request", "pull_request_review"}:
         changed = [("pull", payload["pull_request"]["number"])]
+    # Checks with no PR ran on a branch the dashboard doesn't show; release runs arrive as workflow_run and
+    # workflow_job, which also cover a release's pending deployments, so deployment_status and push add nothing.
     elif event in {"check_run", "check_suite"}:
-        changed = [("pull", pr["number"]) for pr in payload[event].get("pull_requests") or []] or [("repo", None)]
+        changed = [("pull", pr["number"]) for pr in payload[event].get("pull_requests") or []]
     # Only release runs are on the dashboard; CI runs reach it through their PR's checks.
     elif event == "workflow_run" and github.is_release_name(payload["workflow_run"]["name"]):
         changed = [("run", payload["workflow_run"]["id"])]
     elif event == "workflow_job" and github.is_release_name(payload["workflow_job"].get("workflow_name")):
         changed = [("run", payload["workflow_job"]["run_id"])]
-    elif event in {"status", "deployment_status", "push"}:
-        changed = [("repo", None)]
+    # A commit status names no PR, so the page finds the PR by its head commit.
+    elif event == "status":
+        changed = [("commit", payload["sha"])]
     return [{"repo": repo, "kind": kind} | ({"id": str(item)} if item is not None else {}) for kind, item in changed]
 
 
