@@ -860,7 +860,8 @@ async function followChanges() {
     }
 }
 
-// Re-reads each changed PR or release run once, or the section when it's new to the page.
+// Re-reads each changed PR or release run once, or the section when it's new to the page. A commit is the
+// PR it heads; one the page doesn't know may head a PR pushed since the last read, so the PR list is read.
 function applyChanges(changes) {
     const unique = new Map();
     for (const change of changes) {
@@ -872,13 +873,14 @@ function applyChanges(changes) {
         if (project) unique.set(`${change.repo} ${change.kind} ${change.id || ""}`, { project, change });
     }
     for (const { project, change } of unique.values()) {
-        const id = Number(change.id);
-        if (change.kind === "pull" && project.data?.pulls?.some(pr => pr.number === id)) {
+        const id = change.kind === "commit"
+            ? project.data?.pulls?.find(pr => pr.sha === change.id)?.number : Number(change.id);
+        if ((change.kind === "pull" || change.kind === "commit") && project.data?.pulls?.some(pr => pr.number === id)) {
             pollItem(project, "pull", id).catch(() => {});
         } else if (change.kind === "run" && project.data?.workflows?.some(run => run.id === id)) {
             pollItem(project, "run", id).catch(() => {});
         } else {
-            refreshSoon(project, ({ pull: "pulls", run: "workflows" })[change.kind] || "all");
+            refreshSoon(project, ({ pull: "pulls", commit: "pulls", run: "workflows" })[change.kind] || "all");
         }
     }
 }

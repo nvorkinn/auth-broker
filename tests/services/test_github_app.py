@@ -146,7 +146,8 @@ REPO = {"repository": {"full_name": "alice/project"}}
             REPO | {"check_run": {"pull_requests": [{"number": 4}, {"number": 5}]}},
             [{"kind": "pull", "id": "4"}, {"kind": "pull", "id": "5"}],
         ),
-        ("check_suite", REPO | {"check_suite": {"pull_requests": []}}, [{"kind": "repo"}]),
+        ("check_suite", REPO | {"check_suite": {"pull_requests": []}}, []),
+        ("check_run", REPO | {"check_run": {"pull_requests": []}}, []),
         ("workflow_run", REPO | {"workflow_run": {"id": 9, "name": "Release"}}, [{"kind": "run", "id": "9"}]),
         ("workflow_run", REPO | {"workflow_run": {"id": 9, "name": "Tests"}}, []),
         (
@@ -155,8 +156,9 @@ REPO = {"repository": {"full_name": "alice/project"}}
             [{"kind": "run", "id": "9"}],
         ),
         ("workflow_job", REPO | {"workflow_job": {"run_id": 9, "workflow_name": "Tests"}}, []),
-        ("status", REPO, [{"kind": "repo"}]),
-        ("push", REPO, [{"kind": "repo"}]),
+        ("status", REPO | {"sha": "a1", "branches": [{"name": "main"}]}, [{"kind": "commit", "id": "a1"}]),
+        ("deployment_status", REPO | {"deployment_status": {"state": "waiting"}}, []),
+        ("push", REPO | {"ref": "refs/heads/main"}, []),
         ("star", REPO, []),
         ("ping", {"zen": "Keep it logically awesome."}, []),
     ],
@@ -167,6 +169,11 @@ def test_deliveries_name_what_to_re_read(event, payload, changes):
 
 def test_installation_changes_ask_for_the_repositories_again():
     assert github_app.changes_in("installation_repositories", {}) == [{"kind": "repositories"}]
+
+
+def test_repository_changes_ask_for_the_repositories_again():
+    payload = REPO | {"action": "renamed"}
+    assert github_app.changes_in("repository", payload) == [{"kind": "repositories"}]
 
 
 def test_the_feed_starts_at_its_newest_entry_and_returns_what_follows(ctx):
