@@ -93,13 +93,30 @@ function badge(text, state) {
     return element("span", text, `badge ${state || ""}`);
 }
 
+// Authentik's forward-auth session for this site runs out while the page polls, and its answer is then a redirect to
+// sso.nikolaivorkinn.com. A fetch can't follow it there (another origin, and these requests need a preflight, which
+// Authentik answers with another redirect), so the redirect is left unfollowed and the page reloads instead: a page
+// load goes through the sign-in, without a prompt while the SSO session lasts. A hidden tab waits until it is shown.
+let signedOut = false;
+
+function sessionExpired() {
+    signedOut = true;
+    errorBanner.textContent = "Your sign-in expired. Reloading the dashboard to sign in again.";
+    errorBanner.hidden = false;
+    if (!document.hidden) location.reload();
+    return new Error(errorBanner.textContent);
+}
+
 async function api(path, options = {}) {
+    if (signedOut) throw sessionExpired();
     if (Date.now() < pausedUntil) {
         throw new Error("GitHub rate limit reached. Waiting before the next request.");
     }
     const response = await fetch(path, {
-        ...options, credentials: "same-origin", headers: { "X-CSRF-Token": csrf, "Content-Type": "application/json" },
+        ...options, credentials: "same-origin", redirect: "manual",
+        headers: { "X-CSRF-Token": csrf, "Content-Type": "application/json" },
     });
+    if (response.type === "opaqueredirect") throw sessionExpired();
     if (!response.headers.get("content-type")?.includes("application/json")) {
         throw new Error("Your SSO session may have expired. Reload the dashboard to sign in.");
     }
