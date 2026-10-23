@@ -50,7 +50,7 @@ def test_repositories_and_project(client, dashboard):
     dashboard.project.return_value = {"pulls": [], "workflows": []}
     assert client.get("/github/repositories/alice/project").json == {"pulls": [], "workflows": []}
     dashboard.owned_repository.assert_called_once_with("alice", "project")
-    assert dashboard.project.call_args.args[1] == []
+    assert dashboard.project.call_args.args[1] == "all"
     dashboard.close.assert_called()
 
 
@@ -58,24 +58,11 @@ def test_repositories_and_project(client, dashboard):
 def test_project_can_read_one_section(client, dashboard, section):
     dashboard.project.return_value = {section: []}
     assert client.get("/github/repositories/alice/project", query_string={"section": section}).status_code == 200
-    assert dashboard.project.call_args.args[2] == section
+    assert dashboard.project.call_args.args[1] == section
 
 
 def test_project_rejects_unknown_sections(client, dashboard):
     assert client.get("/github/repositories/alice/project?section=jobs").status_code == 400
-    dashboard.project.assert_not_called()
-
-
-def test_project_passes_previously_shown_runs(client, dashboard):
-    dashboard.project.return_value = {"pulls": [], "workflows": []}
-    assert client.get("/github/repositories/alice/project?runs=7,12").status_code == 200
-    assert dashboard.project.call_args.args[1] == [7, 12]
-
-
-@pytest.mark.parametrize("runs", ["7,x", "0", "-1", "7,,8", "\u0661", ",".join(["1"] * 21)])
-def test_project_rejects_invalid_run_ids(client, dashboard, runs):
-    response = client.get("/github/repositories/alice/project", query_string={"runs": runs})
-    assert response.status_code == 400
     dashboard.project.assert_not_called()
 
 

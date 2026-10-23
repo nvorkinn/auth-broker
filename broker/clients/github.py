@@ -64,6 +64,8 @@ MAX_PARALLEL = 8
 POOL_SIZE = 16
 # A PR's changed files shown on the dashboard; the rest are left to GitHub's own Files tab.
 MAX_FILES = 300
+# Runs read per release workflow: enough for the latest one and any just before it that hasn't finished.
+RECENT_RELEASES = 5
 
 
 def summary(token: str) -> dict:
@@ -399,7 +401,7 @@ class Dashboard:
             raise DashboardError(msg)
         return repo
 
-    def project(self, repo: dict, known: Iterable[int] = (), section: str = "all") -> dict:
+    def project(self, repo: dict, section: str = "all") -> dict:
         """Return a project's open PRs and/or unfinished release workflows, without a recency cutoff.
 
         A section's key is only present when it was read.
@@ -407,7 +409,7 @@ class Dashboard:
         path = f"/repos/{repo['full_name']}"
         sections = {
             "pulls": lambda: self.pulls(path),
-            "workflows": lambda: self.release_workflows(repo, known),
+            "workflows": lambda: self.release_workflows(repo),
         }
         wanted = list(sections) if section == "all" else [section]
         return dict(zip(wanted, _parallel(sections[name] for name in wanted), strict=True))
@@ -419,38 +421,29 @@ class Dashboard:
         )
         return [pr for pr in pulls if pr is not None]
 
-    def release_workflows(self, repo: dict, known: Iterable[int] = ()) -> list[dict]:
-        """Return every unfinished release run drawn as a graph, then the latest finished one."""
-        path = f"/repos/{repo['full_name']}"
-        # Query each unfinished status: a first page of recent runs would hide old approval waits.
-        # One after another and in lifecycle order, so a run that moves on during the sweep (say, just approved) is
-        # found by a later query; queries made at once could each miss it.
-        runs = {}
-        for status in ("requested", "pending", "waiting", "queued", "in_progress"):
-            for run in self.pages(f"{path}/actions/runs", "workflow_runs", status=status):
-                runs[run["id"]] = run
-        # The status filters can briefly lag a state change, so look up runs the dashboard showed last time directly.
-        missed = [run_id for run_id in known if run_id not in runs]
-        for run in _parallel([lambda run_id=run_id: self.run(path, run_id) for run_id in missed]):
-            if run:
-                runs[run["id"]] = run
-        shown = [run for run in runs.values() if run["status"] != "completed" and _is_release(run)]
-        # The latest finished release stays too, so its outcome is still there after looking away. A run rechecked
-        # by ID may have finished more recently than the per-workflow lists say yet.
-        finished = [run for run in runs.values() if run["status"] == "completed" and _is_release(run)]
-        if latest := max([*finished, *self.finished_releases(path)], key=lambda run: run["id"], default=None):
+    def release_workflows(self, repo: dict) -> list[dict]:
+        """Draw each release workflow's unfinished recent runs, then the latest finished release."""
+        runs = self.recent_releases(f"/repos/{repo['full_name']}")
+        shown = [run for run in runs if run["status"] != "completed"]
+        # The latest finished release stays too, so its outcome is still there after looking away.
+        finished = [run for run in runs if run["status"] == "completed"]
+        if latest := max(finished, key=lambda run: run["id"], default=None):
             shown.append(latest)
         return _parallel([lambda run=run: self.workflow(repo, run) for run in shown])
 
-    def finished_releases(self, path: str) -> list[dict]:
-        """Return the latest finished run of each release workflow."""
+    def recent_releases(self, path: str) -> list[dict]:
+        """Return the latest RECENT_RELEASES runs of each release workflow, in any status.
+
+        Read per workflow, so CI runs can't push a release off the page; an older run still unfinished past those is
+        left out, as a newer release replaces it.
+        """
         workflows = [
             workflow for workflow in self.pages(f"{path}/actions/workflows", "workflows") if _is_release(workflow)
         ]
         latest = _parallel(
             [
                 lambda workflow=workflow: self.get(
-                    f"{path}/actions/workflows/{workflow['id']}/runs", status="completed", per_page=1
+                    f"{path}/actions/workflows/{workflow['id']}/runs", per_page=RECENT_RELEASES
                 )["workflow_runs"]
                 for workflow in workflows
             ]
