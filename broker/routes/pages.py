@@ -417,7 +417,7 @@ def screen_frame() -> ResponseReturnValue:
     return resp
 
 
-# The page always sets this orientation and doesn't let it be changed, whatever is stored.
+# The orientation the page sets for a screen that isn't HD, without letting it be changed, whatever is stored.
 PAGE_ORIENTATION = "vertical"
 
 
