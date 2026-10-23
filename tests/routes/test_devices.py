@@ -90,7 +90,7 @@ def test_the_config_returns_defaults(app, register_device):
         "timezone": "Europe/London",
         "style": "airy",
         "screen": {"orientation": "vertical", "width": 480, "height": 800, "format": "mono-1bpp-packed"},
-        "weather": {"location": "", "key": None},
+        "weather": {"location": "", "key": None, "design": "columns"},
         "notice_board": {"postcode": None, "country": None, "style": "airy"},
         "tfl": {"stop_ids": [], "style": "grouped"},
         "departures": {"stops": [], "style": "grouped"},
@@ -155,7 +155,7 @@ def test_the_config_sends_the_key_the_weather_is_subscribed_under(app, client, r
 
     body = _config(app, device_id).get_json()
 
-    assert body["weather"] == {"location": "London", "key": "london-gb-2643743"}
+    assert body["weather"] == {"location": "London", "key": "london-gb-2643743", "design": "columns"}
 
 
 def test_the_config_sends_the_slug_as_the_key_of_a_location_with_no_place_picked(app, client, register_device):
@@ -340,6 +340,15 @@ def test_the_config_returns_the_saved_postcode(app, client, register_device):
 
     response = _config(app, device_id)
     assert response.get_json()["notice_board"] == {"postcode": "SW1A 1AA", "country": "GB", "style": "airy"}
+
+
+@pytest.mark.parametrize("design", ["columns", "timeline", "overview", "poster"])
+def test_the_config_sends_the_weather_design(app, register_device, design):
+    """As stored, whatever the screen's size: only an HD screen's renderer draws it, and the others ignore it."""
+    device_id, _secret = register_device()
+    _set_config(app, device_id, weather_design=design)
+
+    assert _config(app, device_id).get_json()["weather"]["design"] == design
 
 
 def test_the_config_returns_the_saved_orientation(app, client, register_device):

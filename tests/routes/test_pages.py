@@ -814,6 +814,89 @@ def test_device_config_post_rejects_an_unknown_or_old_style(app, paired_client, 
         assert db.session.get_one(DeviceConfig, device_id).style == "airy"
 
 
+# --- the weather design, which only an HD screen has ------------------------------------------------------
+
+
+def _make_hd_screen(app, device_id, width=1872, height=1404):
+    """Give the device the HD screen's size, as registering one would."""
+    with app.app_context():
+        config = db.session.get_one(DeviceConfig, device_id)
+        config.width, config.height = width, height
+        db.session.commit()
+
+
+def test_device_config_shows_no_weather_design_picker_for_a_small_screen(paired_client):
+    client, _, _ = paired_client
+    html = client.get("/device").get_data(as_text=True)
+    assert 'name="weather_design"' not in html
+    assert "/static/weather/" not in html
+
+
+@pytest.mark.parametrize(("width", "height"), [(1872, 1404), (1404, 1872)])
+def test_device_config_shows_the_weather_design_picker_for_an_hd_screen(app, paired_client, width, height):
+    """Whichever way round the screen reported its size: the picker sits under the style's, with a picture of each."""
+    client, device_id, _ = paired_client
+    _make_hd_screen(app, device_id, width, height)
+    html = client.get("/device").get_data(as_text=True)
+    designs = ["columns", "timeline", "overview", "poster"]
+    assert re.findall(r'name="weather_design" value="(\w+)"', html) == designs
+    assert re.findall(r'name="weather_design" value="(\w+)" checked', html) == ["columns"]  # the default
+    assert "How your HD screen draws the weather, which spans its whole width." in html
+    style = re.split(r'<h2 class="card-title">', html)[2]
+    assert 'name="style"' in style
+    assert 'name="weather_design"' in style
+    pictures = re.findall(r'<img src="(/static/weather/\w+\.png)" alt="" width="468" height="230"', html)
+    assert pictures == [f"/static/weather/{design}.png" for design in designs]
+    for picture in pictures:
+        response = client.get(picture)
+        assert response.status_code == 200
+        assert response.mimetype == "image/png"
+
+
+def test_device_config_shows_the_stored_weather_design_selected(app, paired_client):
+    client, device_id, _ = paired_client
+    _make_hd_screen(app, device_id)
+    with app.app_context():
+        db.session.get_one(DeviceConfig, device_id).weather_design = "poster"
+        db.session.commit()
+    html = client.get("/device").get_data(as_text=True)
+    assert re.findall(r'name="weather_design" value="(\w+)" checked', html) == ["poster"]
+
+
+def test_device_config_post_persists_the_weather_design(app, paired_client):
+    client, device_id, _ = paired_client
+    _make_hd_screen(app, device_id)
+    response = client.post("/device", data={"interval": "15", "weather_design": "timeline"})
+    assert response.status_code == 302
+    with app.app_context():
+        assert db.session.get_one(DeviceConfig, device_id).weather_design == "timeline"
+
+
+def test_device_config_post_without_a_weather_design_keeps_the_stored_one(app, paired_client):
+    """A small screen's page has no picker, so its saves don't post one; what's stored stays."""
+    client, device_id, _ = paired_client
+    with app.app_context():
+        db.session.get_one(DeviceConfig, device_id).weather_design = "overview"
+        db.session.commit()
+    response = client.post("/device", data={"interval": "15", "style": "card"})
+    assert response.status_code == 302
+    with app.app_context():
+        assert db.session.get_one(DeviceConfig, device_id).weather_design == "overview"
+
+
+@pytest.mark.parametrize("design", ["fancy", "tabs", "Columns", ""])
+def test_device_config_post_rejects_an_unknown_weather_design(app, paired_client, design):
+    client, device_id, _ = paired_client
+    _make_hd_screen(app, device_id)
+    response = client.post("/device", data={"interval": "15", "weather_design": design, "style": "card"})
+    assert response.status_code == 400
+    assert b"The weather design must be one of columns, timeline, overview, poster." in response.data
+    assert b"Nothing was saved." in response.data
+    with app.app_context():
+        config = db.session.get_one(DeviceConfig, device_id)
+        assert (config.weather_design, config.style) == ("columns", "airy")
+
+
 # --- the public page about the display ------------------------------------------------------------------
 
 

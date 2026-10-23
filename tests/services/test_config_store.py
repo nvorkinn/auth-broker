@@ -11,6 +11,7 @@ import fakeredis
 import pytest
 import redis
 from countdown_api import fixtures
+from countdown_api.models import ConfigResponse
 
 from broker.db import db
 from broker.models import Device, DeviceConfig, GitHubToken, GlowmarktCredentials, SpotifyToken
@@ -57,6 +58,14 @@ def _add_fixture_device(app) -> str:
     return device_id
 
 
+def _as_read(value):
+    """Return a stored config as the renderer reads it: the contract's model, with what the example omits filled in.
+
+    The example omits the fields the contract defaults (weather.design), which the broker writes.
+    """
+    return ConfigResponse.model_validate(value).model_dump(mode="json")
+
+
 def _stored(store, device_id):
     value = store.get(config_store.key(device_id))
     return None if value is None else json.loads(value)
@@ -72,7 +81,7 @@ def test_the_stored_config_is_the_shape_the_renderer_reads(app, store):
         config_store.publish(device_id)
 
     assert config_store.key(device_id) == FIXTURE["key"]
-    assert _stored(store, device_id) == FIXTURE["value"]
+    assert _stored(store, device_id) == _as_read(FIXTURE["value"])
 
 
 def test_the_stored_config_is_the_renderers_config_with_no_code(app, store, paired_client, config_of):

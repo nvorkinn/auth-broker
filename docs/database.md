@@ -38,6 +38,7 @@ erDiagram
         string weather_country_code
         float weather_lat
         float weather_lon
+        string weather_design "columns, timeline, overview or poster"
         string postcode "UK or Norwegian"
         bool spotify_enabled
         bool apple_music_enabled

@@ -37,9 +37,9 @@
 {% endblock %}
 
 {% block content %}
-{% macro style_picker(field, hint, styles, chosen, folder, width, height) %}
+{% macro style_picker(field, hint, styles, chosen, folder, width, height, legend="Style") %}
         <fieldset class="form-group style-picker" aria-describedby="{{ field }}_hint">
-            <legend class="form-legend">Style</legend>
+            <legend class="form-legend">{{ legend }}</legend>
             <p id="{{ field }}_hint" class="form-hint">{{ hint }}</p>
             <div class="style-carousel">
                 <button type="button" class="style-step" data-step="-1" aria-label="Previous style">‹</button>
@@ -137,6 +137,9 @@
                     <h2 class="card-title">Style</h2>
                 </div>
                 {{ style_picker("style", "How your screen draws its departures, Spotify and notice board.", styles, config.style, "styles", 360, 396) }}
+                {% if hd_screen %}
+                    {{ style_picker("weather_design", "How your HD screen draws the weather, which spans its whole width.", weather_designs, config.weather_design, "weather", 468, 230, legend="Weather") }}
+                {% endif %}
             </div>
 
             <div class="card" data-tour="weather">

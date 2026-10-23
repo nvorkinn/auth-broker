@@ -23,11 +23,13 @@ from broker.models import (
     LANGUAGES,
     ORIENTATIONS,
     STYLES,
+    WEATHER_DESIGNS,
     Device,
     DeviceConfig,
     GitHubToken,
     GlowmarktCredentials,
     SpotifyToken,
+    is_hd_screen,
 )
 from broker.services import (
     assignments,
@@ -215,6 +217,8 @@ CHOICES = {
     "clock_format": (CLOCK_FORMATS, "The clock format"),
     "orientation": (ORIENTATIONS, "Orientation"),
     "style": (STYLES, "The style"),
+    # Only on an HD screen's page (is_hd_screen), so another screen's save keeps what's stored, like any field unposted.
+    "weather_design": (WEATHER_DESIGNS, "The weather design"),
 }
 
 
@@ -450,6 +454,9 @@ def _render_device_config(device_id: str, errors: list[str] | None = None) -> st
         languages=LANGUAGES,
         orientations=ORIENTATIONS,
         styles=STYLES,
+        # The weather design is only an HD screen's to pick: elsewhere the weather has one way to fit its panel.
+        weather_designs=WEATHER_DESIGNS,
+        hd_screen=is_hd_screen(config),
         page_orientation=PAGE_ORIENTATION,
         stops=stops.resolve(config.tfl_stop_ids),
         MODE_ICONS=stops.MODE_ICONS,
