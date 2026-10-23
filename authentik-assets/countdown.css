@@ -14,7 +14,7 @@
 
    The screen's pictures, the wallpaper and the fonts are in this folder (authentik-assets/, served at
    /static/dist/assets/countdown/). On a screen at least 900 x 640 the box is the whole 800 x 480 display, and on a
-   smaller one the display hung portrait; either way the screen's picture has its arrivals panel blank under its
+   smaller one the display in portrait; either way the screen's picture has its arrivals panel blank under its
    first two departures, and the form's rows carry on from there. Stages that don't fit there get the screen's grey
    paper and bezel around Authentik's usual box. */
 
@@ -101,7 +101,7 @@ ak-flow-executor ak-brand-links :is(a, li) { color: var(--cd-wall-ink) !importan
     width: calc(var(--cd-px) * 541); background: var(--cd-stage-paper);
   }
 }
-/* Phones and small windows: the display hung portrait, one stop across it, its type 1.3 times the usual so it
+/* Phones and small windows: the display in portrait, one stop across it, its type 1.3 times the usual so it
    reads at this size; the form's rows to the same scale. */
 @media not ((min-width: 900px) and (min-height: 640px)) {
   .pf-c-login__main { --cd-bezel-width: 12px; margin-inline: 12px !important; }

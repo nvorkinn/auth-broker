@@ -90,9 +90,9 @@
     </div>
 
     <div class="screen-bezel">
-        <span id="screenFrame" class="frame{% if turned %} frame-turned{% endif %}" style="--frame-w: {{ width }}; --frame-h: {{ height }}"{% if not has_frame %} hidden{% endif %}>
+        <span id="screenFrame" class="frame{% if frame_portrait %} frame-portrait{% endif %}" style="--frame-w: {{ width }}; --frame-h: {{ height }}"{% if not has_frame %} hidden{% endif %}>
             <img id="screenPicture" class="frame-picture" alt="What the screen shows"
-                 width="{{ height if turned else width }}" height="{{ width if turned else height }}"
+                 width="{{ height if frame_portrait else width }}" height="{{ width if frame_portrait else height }}"
                  {% if has_frame %}src="{{ url_for('pages.screen_frame', device_id=device_id) }}"{% endif %}>
         </span>
         <div id="screenEmpty" class="screen-empty"{% if has_frame %} hidden{% endif %}>

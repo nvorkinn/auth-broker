@@ -326,7 +326,7 @@ def test_the_preview_is_the_records_picture(app, paired_client, frames_redis):
     response = client.get(f"/device/{device_id}/screen/frame.png")
 
     assert response.status_code == 200
-    assert response.data == frame_image.to_png(_frame(0xFF), upright=True)
+    assert response.data == frame_image.to_png(_frame(0xFF), portrait=True)
     assert response.headers["X-Rendered-At"] == LATER.isoformat(timespec="seconds")
     assert response.headers["ETag"] == f'"{_etag(_frame(0xFF))}-v"'
     again = client.get(f"/device/{device_id}/screen/frame.png", headers={"If-None-Match": response.headers["ETag"]})
