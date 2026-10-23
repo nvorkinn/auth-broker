@@ -89,7 +89,13 @@ def test_the_config_returns_defaults(app, register_device):
         "language": "en",
         "timezone": "Europe/London",
         "style": "airy",
-        "screen": {"orientation": "vertical", "width": 480, "height": 800, "format": "mono-1bpp-packed"},
+        "screen": {
+            "orientation": "vertical",
+            "width": 480,
+            "height": 800,
+            "format": "mono-1bpp-packed",
+            "layout": None,
+        },
         "weather": {"location": "", "key": None, "design": "columns"},
         "notice_board": {"postcode": None, "country": None, "style": "airy"},
         "tfl": {"stop_ids": [], "style": "grouped"},
@@ -351,6 +357,22 @@ def test_the_config_sends_the_weather_design(app, register_device, design):
     assert _config(app, device_id).get_json()["weather"]["design"] == design
 
 
+def test_the_config_sends_no_layout_by_default(app, register_device):
+    """Null, the screen's default, for a screen whose owner never picked one."""
+    device_id, _secret = register_device()
+
+    assert _config(app, device_id).get_json()["screen"]["layout"] is None
+
+
+@pytest.mark.parametrize("layout", ["classic", "masthead", "column", "lockscreen", "timeline", "board", "pages"])
+def test_the_config_sends_the_layout(app, register_device, layout):
+    """As stored, whatever the screen's size: a renderer draws a layout its size doesn't have as its default."""
+    device_id, _secret = register_device()
+    _set_config(app, device_id, layout=layout)
+
+    assert _config(app, device_id).get_json()["screen"]["layout"] == layout
+
+
 def test_the_config_returns_the_saved_orientation(app, client, register_device):
     device_id, _secret = register_device()
     with app.app_context():
@@ -398,7 +420,7 @@ def test_the_config_sends_the_frame_format_the_screen_registered_with(app, clien
     )
     assert response.status_code == 201
     screen = _config(app, response.get_json()["device_id"]).get_json()["screen"]
-    assert screen == {"orientation": "vertical", "width": 800, "height": 480, "format": frame_format}
+    assert screen == {"orientation": "vertical", "width": 800, "height": 480, "format": frame_format, "layout": None}
 
 
 @pytest.mark.parametrize(

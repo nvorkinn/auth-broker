@@ -140,6 +140,9 @@
                 {% if hd_screen %}
                     {{ style_picker("weather_design", "How your HD screen draws the weather, which spans its whole width.", weather_designs, config.weather_design, "weather", 468, 230, legend="Weather") }}
                 {% endif %}
+                {% if layouts %}
+                    {{ style_picker("layout", "How your HD screen arranges its panels, hung portrait.", layouts, layout, "layouts", 351, 468, legend="Layout") }}
+                {% endif %}
             </div>
 
             <div class="card" data-tour="weather">
