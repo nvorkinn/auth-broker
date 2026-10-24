@@ -365,7 +365,8 @@ their paths change, so requiring them directly would block every PR that doesn't
   approve pull requests** enabled in the repository's settings, and can also be called from other repositories with
   `uses: nvorkinn/countdown-server/.github/workflows/auto_approve.yml@<sha>`.
 
-When you add a workflow that runs on pull requests, add its `name` to `workflows:` in `all-checks.yml` (a test fails
+Both call reusable workflows in [`nvorkinn/.github`](https://github.com/nvorkinn/.github), pinned to a commit; the
+triggers and the list of workflows stay here. When you add a workflow that runs on pull requests, add its `name` to `workflows:` in `all-checks.yml` (a test fails
 until you do), so its completion re-runs the gate. Fork and Dependabot PRs get a read-only token that can't create
 the check, so they don't get a Global PR Status.
 
