@@ -6,11 +6,6 @@ name: Terraform
 # Terraform) plans any ref, which shows drift; with "apply" ticked it also applies, on the latest release tag only,
 # which is how a failed apply is retried. See terraform/README.md.
 on:
-  pull_request:
-    branches: [main]
-    paths:
-      - terraform/**
-      - .github/workflows/terraform.yml
   workflow_dispatch:
     inputs:
       apply:

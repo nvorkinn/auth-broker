@@ -1,54 +1,31 @@
-name: Auto-approve PRs
+name: Auto Approve PR
 
 on:
   pull_request:
-    types: [ opened, synchronize, reopened, ready_for_review ]
-  workflow_call:
-
-permissions:
-  contents: read
-  pull-requests: write
-  checks: read
-  actions: read
 
 jobs:
-  auto-approve:
+  changes:
     runs-on: ubuntu-latest
-    if: >-
-      ${{
-        github.event_name == 'pull_request' &&
-        !github.event.pull_request.draft &&
-        github.event.pull_request.head.repo.full_name == github.repository &&
-        github.actor != 'dependabot[bot]' &&
-        github.event.pull_request.user.login != 'dependabot[bot]' &&
-        github.event.pull_request.user.login != 'github-actions[bot]'
-      }}
-    timeout-minutes: 30
+    outputs:
+      terraform: ${{ steps.filter.outputs.terraform }}
     steps:
-      - name: Wait for CI checks to complete
-        uses: lewagon/wait-on-check-action@369769072fe522a3a8a85c03c96af1e5242a1994 # v1.9.1
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
         with:
-          ref: ${{ github.event.pull_request.head.sha }}
-          repo-token: ${{ secrets.GITHUB_TOKEN }}
-          wait-interval: 30
-          allowed-conclusions: success,skipped,neutral
-          # Reusable jobs can have one or more "caller / " prefixes.
-          check-regexp: '^(?!(?:.* / )?auto-approve$)'
-          running-workflow-name: 'auto-approve'
-
-      - name: Approve PR
-        if: success()
-        shell: bash
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          REPO: ${{ github.repository }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-          SHA: ${{ github.event.pull_request.head.sha }}
-        run: |
-          current_sha=$(gh api "repos/$REPO/pulls/$PR_NUMBER" --jq '.head.sha')
-          if [ "$current_sha" != "$SHA" ]; then
-            echo "::error::The PR head changed while waiting for checks; refusing to approve."
-            exit 1
-          fi
-          gh api --method POST "repos/$REPO/pulls/$PR_NUMBER/reviews" \
-            -f event=APPROVE -f commit_id="$SHA" --jq '.state'
+          filters: |
+            terraform:
+              - 'terraform/**'
+              - .github/workflows/terraform.yml
+  terraform:
+    needs: changes
+    if: needs.changes.outputs.terraform == 'true'
+    uses: ./.github/workflows/terraform.yml
+    secrets: inherit
+  tests:
+    uses: ./.github/workflows/tests.yml
+  auto-approve:
+    needs: [terraform, tests]
+    uses: nvorkinn/.github/.github/workflows/auto-approve.yml@main
+    # Inherit secrets if you decide to use a custom PAT later,
+    # though GITHUB_TOKEN permissions from the template work perfectly here.
