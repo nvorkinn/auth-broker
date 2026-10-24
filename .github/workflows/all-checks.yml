@@ -9,13 +9,10 @@ on:
   workflow_run:
     workflows: [ Create Global PR Status, Tests, Terraform, CodeQL ]
     types: [ completed ]
-
 permissions:
   actions: read
   checks: write
 
 jobs:
   all-checks:
-    uses: nvorkinn/.github/.github/workflows/all-checks.yml@3d6b3965576e0a41776d8d9129da734ba6a1fc60 # main
-    with:
-      create-workflow-file: create_global_pr_status.yml
+    uses: nvorkinn/.github/.github/workflows/all-checks.yml@7880c2bc22ff029b53fc26f254425c32a78af39f # main
