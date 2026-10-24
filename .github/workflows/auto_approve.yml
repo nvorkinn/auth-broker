@@ -13,8 +13,8 @@ jobs:
     outputs:
       terraform: ${{ steps.filter.outputs.terraform }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: dorny/paths-filter@v3
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: dorny/paths-filter@0e4a8c6effa4802afeda77dc8d303f8176d7dfad # v3
         id: filter
         with:
           filters: |
@@ -25,11 +25,16 @@ jobs:
     needs: changes
     if: needs.changes.outputs.terraform == 'true'
     uses: ./.github/workflows/terraform.yml
+    with:
+      # Required input; empty on a PR, so the plan runs on the PR merge ref and can't apply.
+      tag: ''
     secrets: inherit
   tests:
     uses: ./.github/workflows/tests.yml
   auto-approve:
     needs: [terraform, tests]
-    uses: nvorkinn/.github/.github/workflows/auto-approve.yml@main
+    # terraform is skipped when terraform/ is untouched, which would otherwise skip this too.
+    if: ${{ !failure() && !cancelled() }}
+    uses: nvorkinn/.github/.github/workflows/auto-approve.yml@3d3c42e5aac5ba805825da76410c181273ba90b1 # main
     # Inherit secrets if you decide to use a custom PAT later,
     # though GITHUB_TOKEN permissions from the template work perfectly here.
