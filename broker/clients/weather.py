@@ -1,4 +1,4 @@
-"""Looks weather places up with Open-Meteo's geocoding: searching by name, and fetching one by its id.
+"""Looks weather places up with Open-Meteo's geocoding API, searching by name and fetching one by its id.
 
 A place is Open-Meteo's (GeoNames') town or city: {id, name, admin1, country, country_code, latitude, longitude,
 label}, label being what the settings page shows ("London, England, United Kingdom").
