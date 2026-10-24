@@ -133,7 +133,12 @@ fi
 ) 9>.env.lock
 echo "Installed $tag's docker-compose.yml${var:+ and pinned $var=$tag in .env}"
 
-docker compose pull "${services[@]}"
+# Another deploy job's cleanup (below) can delete layers this one is still pulling, so pulls hold image.lock shared
+# (they can run at once) and the cleanup holds it alone.
+(
+  flock -s 9
+  docker compose pull "${services[@]}"
+) 9>image.lock
 if [ "$service" = countdown-server ]; then
   # The broker's container from before the rename, which compose no longer knows: it holds 127.0.0.1:5000, so the
   # new one couldn't start beside it.
@@ -155,23 +160,26 @@ docker compose ps "${services[@]}"
 # newest other one (to roll back to), remove the rest. `docker image rm` refuses an image a container still uses,
 # and only these repositories are touched, so a deploy job running at once never loses an image it just pulled.
 IMAGES_KEPT=2
-for image in $(docker compose config --images "${services[@]}" | sort -u); do
-  repo="${image%:*}"
-  docker images "$repo" --format '{{.Repository}}:{{.Tag}}' | { grep -vxF "$image" || true; } | tail -n +"$IMAGES_KEPT" |
-    while read -r old; do
-      docker image rm "$old" >/dev/null 2>&1 && echo "Removed old image $old" || true
-    done
-  # And every tag of this repo's image from before the rename (ghcr.io/nvorkinn/auth-broker*), now that nothing
-  # runs it.
-  old_repo="${repo/\/countdown-server/\/auth-broker}"
-  if [ "$old_repo" != "$repo" ]; then
-    docker images "$old_repo" --format '{{.Repository}}:{{.Tag}}' | while read -r old; do
-      docker image rm "$old" >/dev/null 2>&1 && echo "Removed old image $old" || true
-    done
-  fi
-done
-# Layers left untagged by the above or by re-pulled tags.
-docker image prune -f >/dev/null
+(
+  flock 9
+  for image in $(docker compose config --images "${services[@]}" | sort -u); do
+    repo="${image%:*}"
+    docker images "$repo" --format '{{.Repository}}:{{.Tag}}' | { grep -vxF "$image" || true; } |
+      tail -n +"$IMAGES_KEPT" | while read -r old; do
+        docker image rm "$old" >/dev/null 2>&1 && echo "Removed old image $old" || true
+      done
+    # And every tag of this repo's image from before the rename (ghcr.io/nvorkinn/auth-broker*), now that nothing
+    # runs it.
+    old_repo="${repo/\/countdown-server/\/auth-broker}"
+    if [ "$old_repo" != "$repo" ]; then
+      docker images "$old_repo" --format '{{.Repository}}:{{.Tag}}' | while read -r old; do
+        docker image rm "$old" >/dev/null 2>&1 && echo "Removed old image $old" || true
+      done
+    fi
+  done
+  # Layers left untagged by the above or by re-pulled tags.
+  docker image prune -f >/dev/null
+) 9>image.lock
 
 if [ "$service" = countdown-server ]; then
   # A check that the database came through.
