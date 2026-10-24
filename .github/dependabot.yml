@@ -1,6 +1,6 @@
 version: 2
 updates:
-  # pyproject.toml and uv.lock. Ruff is also pinned in .pre-commit-config.yaml, which this doesn't update: keep it in step.
+  # pyproject.toml and uv.lock.
   - package-ecosystem: "uv"
     directory: "/"
     schedule:
@@ -24,11 +24,15 @@ updates:
     directory: "/"
     schedule:
       interval: "daily"
-  # Terraform providers and modules.
+  # .pre-commit-config.yaml's hook revs. Ruff and ty are pinned in both pyproject.toml and here, and Dependabot bumps
+  # each separately: merge the two PRs together to keep them in step.
+  - package-ecosystem: "pre-commit"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+  # Terraform providers (terraform/ has no local modules).
   - package-ecosystem: "terraform"
-    directories:
-      - "/terraform"
-      - "/terraform/modules/*"
+    directory: "/terraform"
     schedule:
       interval: "weekly"
   - package-ecosystem: "github-actions"
