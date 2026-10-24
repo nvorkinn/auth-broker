@@ -1,0 +1,41 @@
+name: Create Global PR Status
+
+# Opens the "Global PR Status" check on a pull request's head commit, in progress. All checks (all-checks.yml) completes
+# it once every other workflow and check on that commit has passed, so the one check branch protection requires is set
+# by events instead of by a job that waits. The check's ID goes in an artifact for it to find. Fork and Dependabot pull
+# requests get a read-only token, which can't create a check.
+on:
+  pull_request:
+    types: [ opened, synchronize, reopened ]
+
+permissions:
+  checks: write
+
+jobs:
+  create-global-pr-status:
+    runs-on: ubuntu-latest
+    if: >-
+      ${{
+        github.event.pull_request.head.repo.full_name == github.repository &&
+        github.actor != 'dependabot[bot]'
+      }}
+    timeout-minutes: 5
+    steps:
+      - name: Create the check run
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          mkdir global-pr-status
+          gh api --method POST "repos/$REPO/check-runs" \
+            -f name='Global PR Status' -f head_sha="$SHA" -f status=in_progress \
+            --jq .id > global-pr-status/check-run-id
+
+      - name: Save the check run's ID
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: global-pr-status
+          path: global-pr-status/check-run-id
+          if-no-files-found: error
