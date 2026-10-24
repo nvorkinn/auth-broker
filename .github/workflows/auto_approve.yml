@@ -1,54 +1,61 @@
 name: Auto-approve PRs
 
+# Runs whenever All checks finishes, which is every time one of the workflows it listens to finishes, so most runs find
+# nothing to do. The run belongs to the default branch and says nothing about which PR it is for, so this looks at every
+# open PR and approves each one whose Global PR Status check has succeeded on its head commit and that this hasn't
+# already approved there. It skips drafts, forks and bots (Dependabot, github-actions[bot]), and needs "Allow GitHub
+# Actions to create and approve pull requests" enabled in the repository's settings.
 on:
-  pull_request:
-    types: [ opened, synchronize, reopened, ready_for_review ]
+  workflow_run:
+    workflows: [ All checks ]
+    types: [ completed ]
   workflow_call:
 
 permissions:
   contents: read
   pull-requests: write
   checks: read
-  actions: read
+
+# Two sweeps at once could each approve the same PR; the next one waits and sees the first's approvals.
+concurrency:
+  group: auto-approve
+  cancel-in-progress: false
 
 jobs:
   auto-approve:
     runs-on: ubuntu-latest
-    if: >-
-      ${{
-        github.event_name == 'pull_request' &&
-        !github.event.pull_request.draft &&
-        github.event.pull_request.head.repo.full_name == github.repository &&
-        github.actor != 'dependabot[bot]' &&
-        github.event.pull_request.user.login != 'dependabot[bot]' &&
-        github.event.pull_request.user.login != 'github-actions[bot]'
-      }}
-    timeout-minutes: 30
+    if: github.event.workflow_run.conclusion == 'success'
+    timeout-minutes: 10
     steps:
-      - name: Wait for CI checks to complete
-        uses: lewagon/wait-on-check-action@369769072fe522a3a8a85c03c96af1e5242a1994 # v1.9.1
-        with:
-          ref: ${{ github.event.pull_request.head.sha }}
-          repo-token: ${{ secrets.GITHUB_TOKEN }}
-          wait-interval: 30
-          allowed-conclusions: success,skipped,neutral
-          # Reusable jobs can have one or more "caller / " prefixes.
-          check-regexp: '^(?!(?:.* / )?auto-approve$)'
-          running-workflow-name: 'auto-approve'
-
-      - name: Approve PR
-        if: success()
+      - name: Approve the open PRs that passed
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-          SHA: ${{ github.event.pull_request.head.sha }}
         run: |
-          current_sha=$(gh api "repos/$REPO/pulls/$PR_NUMBER" --jq '.head.sha')
-          if [ "$current_sha" != "$SHA" ]; then
-            echo "::error::The PR head changed while waiting for checks; refusing to approve."
-            exit 1
-          fi
-          gh api --method POST "repos/$REPO/pulls/$PR_NUMBER/reviews" \
-            -f event=APPROVE -f commit_id="$SHA" --jq '.state'
+          candidates=$(gh api --paginate "repos/$REPO/pulls?state=open&per_page=100" --jq '
+            .[] | select((.draft | not) and .head.repo.full_name == env.REPO and .user.type != "Bot")
+            | "\(.number) \(.head.sha)"')
+          while read -r number sha; do
+            [ -n "$number" ] || continue
+            passed=$(gh api "repos/$REPO/commits/$sha/check-runs?check_name=Global%20PR%20Status&filter=latest" --jq '
+              .check_runs | max_by(.id) | select(.status == "completed" and .conclusion == "success") | .id')
+            if [ -z "$passed" ]; then
+              echo "#$number: Global PR Status hasn't succeeded on $sha."
+              continue
+            fi
+            approved=$(gh api --paginate "repos/$REPO/pulls/$number/reviews" --jq '
+              .[] | select(.user.login == "github-actions[bot]" and .state == "APPROVED" and .commit_id == "'"$sha"'") | .id')
+            if [ -n "$approved" ]; then
+              echo "#$number: already approved at $sha."
+              continue
+            fi
+            current=$(gh api "repos/$REPO/pulls/$number" --jq .head.sha)
+            if [ "$current" != "$sha" ]; then
+              echo "::warning::#$number's head changed while checking; not approving $sha."
+              continue
+            fi
+            echo "#$number: approving $sha."
+            gh api --method POST "repos/$REPO/pulls/$number/reviews" \
+              -f event=APPROVE -f commit_id="$sha" --jq '"#'"$number"': " + .state'
+          done <<<"$candidates"

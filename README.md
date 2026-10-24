@@ -355,18 +355,20 @@ One check, **Global PR Status**, is the only one branch protection needs to requ
 their paths change, so requiring them directly would block every PR that doesn't touch them.
 
 - [`create_global_pr_status.yml`](.github/workflows/create_global_pr_status.yml) opens the check, in progress, on the
-  PR's head commit and saves its ID in an artifact.
+  PR's head commit.
 - [`all-checks.yml`](.github/workflows/all-checks.yml) runs whenever one of the workflows it lists finishes (a
-  `workflow_run` trigger, so nothing polls). It looks at every workflow run and check on the commit. While any is still
+  `workflow_run` trigger, so nothing polls). It finds the check by name and looks at every workflow run and check on the commit. While any is still
   running it does nothing, and the last one to finish runs it again. Once all have passed it completes the check as
   `success`; if any failed, as `failure`.
-- [`auto_approve.yml`](.github/workflows/auto_approve.yml) approves the PR once every check, this one included, has
-  passed. It skips drafts, forks, Dependabot and `github-actions[bot]`, needs **Allow GitHub Actions to create and
-  approve pull requests** enabled in the repository's settings, and can also be called from other repositories with
-  `uses: nvorkinn/countdown-server/.github/workflows/auto_approve.yml@<sha>`.
+- [`auto_approve.yml`](.github/workflows/auto_approve.yml) runs when All checks finishes. That run says nothing about
+  which PR it is for, so it looks at every open PR and approves each one whose Global PR Status check has succeeded on
+  its head commit and that it hasn't already approved there. It skips drafts, forks and bots (Dependabot,
+  `github-actions[bot]`), and needs **Allow GitHub Actions to create and approve pull requests** enabled in the
+  repository's settings.
 
-Both call reusable workflows in [`nvorkinn/.github`](https://github.com/nvorkinn/.github), pinned to a commit; the
-triggers and the list of workflows stay here. When you add a workflow that runs on pull requests, add its `name` to `workflows:` in `all-checks.yml` (a test fails
-until you do), so its completion re-runs the gate. Fork and Dependabot PRs get a read-only token that can't create
-the check, so they don't get a Global PR Status.
+The first two call reusable workflows in [`nvorkinn/.github`](https://github.com/nvorkinn/.github), pinned to a
+commit; the triggers and the list of workflows stay here. When you add a workflow that runs on pull requests, add its
+`name` to `workflows:` in `all-checks.yml` (a test fails until you do), so its completion re-runs the gate. Fork and
+Dependabot PRs get a read-only token that can't create the check, so they have no Global PR Status and aren't
+approved.
 
