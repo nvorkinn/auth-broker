@@ -1,4 +1,4 @@
-FROM victoriametrics/victoria-metrics:v1.154.0
+FROM victoriametrics/victoria-metrics:v1.154.1
 
 # The vmui dashboards (its Dashboards tab), read from here each time the page loads.
 COPY dashboards/ /vmui-dashboards/
