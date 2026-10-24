@@ -29,7 +29,7 @@ jobs:
 
       # uv installs the Python .python-version names itself. setup-uv caches uv's downloads, keyed on (among others)
       # uv.lock.
-      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+      - uses: astral-sh/setup-uv@18d369b23da25a81e9458561248e1aafff6a70fa # v10.3.1
 
       - name: Install redis-server
         # For the render queue's script's tests against a real Redis (tests/services/test_render_jobs.py starts its
@@ -70,7 +70,7 @@ jobs:
 
       # Restore only: this job installs just the dev group, so a cache it saved under the test jobs' key would be
       # missing most of what they need.
-      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+      - uses: astral-sh/setup-uv@18d369b23da25a81e9458561248e1aafff6a70fa # v10.3.1
         with:
           save-cache: false
 
@@ -89,7 +89,7 @@ jobs:
         with:
           submodules: true
 
-      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+      - uses: astral-sh/setup-uv@18d369b23da25a81e9458561248e1aafff6a70fa # v10.3.1
 
       - name: Type check
         run: uv run --locked ty check
