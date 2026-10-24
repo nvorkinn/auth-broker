@@ -138,24 +138,24 @@ jobs:
           submodules: true
 
       - name: Build image
-        run: docker build -t auth-broker-${{ matrix.image }} ${{ matrix.context || matrix.image }}
+        run: docker build -t countdown-server-${{ matrix.image }} ${{ matrix.context || matrix.image }}
 
       - name: Check config
-        run: docker run --rm auth-broker-${{ matrix.image }} ${{ matrix.check }}
+        run: docker run --rm countdown-server-${{ matrix.image }} ${{ matrix.check }}
 
       # The broker's image as docker-compose.yml runs it: the broker and each provider, with stand-in secrets and no
       # Redis, must start and then stop cleanly. Importing the code (above) isn't starting it: gunicorn checks
       # gunicorn.conf.py only as it starts.
       - name: Start its services
         if: matrix.image == 'broker'
-        run: python3 scripts/check_image_starts.py auth-broker-broker
+        run: python3 scripts/check_image_starts.py countdown-server-broker
 
       # With the image's own CMD (loopback, host networking as in compose): every dashboard is served and every
       # query in it parses.
       - name: Check the vmui dashboards
         if: matrix.image == 'victoria-metrics'
         run: |
-          docker run --detach --name check-victoria-metrics --network host auth-broker-victoria-metrics
+          docker run --detach --name check-victoria-metrics --network host countdown-server-victoria-metrics
           status=0
           python3 scripts/check_vmui_dashboards.py http://127.0.0.1:8428 || status=$?
           if [ "$status" -ne 0 ]; then docker logs check-victoria-metrics; fi

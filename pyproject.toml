@@ -1,5 +1,5 @@
 [project]
-name = "auth-broker"
+name = "countdown-server"
 # Releases are git tags (see .github/workflows/release.yml), not this; nothing builds a package from it.
 version = "0.0.0"
 requires-python = ">=3.14"

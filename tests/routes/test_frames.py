@@ -483,7 +483,7 @@ def test_post_overrides_what_a_screen_claims_about_where_a_log_came_from(client,
 
     _post(
         client,
-        {"logs": [{"_msg": "a", "device_id": "x", "host": "y", "service": "auth-broker", "_time": "2000-01-01"}]},
+        {"logs": [{"_msg": "a", "device_id": "x", "host": "y", "service": "countdown-server", "_time": "2000-01-01"}]},
     )
 
     [record] = _log_records(shipped)

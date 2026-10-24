@@ -1,4 +1,4 @@
-# Shared by the images this repo releases (ghcr.io/nvorkinn/auth-broker*),
+# Shared by the images this repo releases (ghcr.io/nvorkinn/countdown-server*),
 # each pinned to a release tag in .env by deploy.sh.
 x-release-image: &release-image
   pull_policy: always
@@ -47,10 +47,10 @@ x-authentik: &authentik
     - authentik_media:/media
 
 services:
-  auth-broker:
+  countdown-server:
     <<: *release-image
-    image: ghcr.io/nvorkinn/auth-broker:${AUTH_BROKER_VERSION:-latest}
-    container_name: auth-broker
+    image: ghcr.io/nvorkinn/countdown-server:${COUNTDOWN_SERVER_VERSION:-latest}
+    container_name: countdown-server
     logging: *logging
     # Host networking, to reach Redis, VictoriaLogs and VictoriaMetrics on loopback, as Caddy reaches
     # it. That would make the image's 0.0.0.0 bind public, so bind loopback.
@@ -72,7 +72,7 @@ services:
   # Redis. It starts the broker's app and writes refreshed Spotify tokens back, so ./data is writable here.
   spotify-provider:
     <<: *release-image
-    image: ghcr.io/nvorkinn/auth-broker:${AUTH_BROKER_VERSION:-latest}
+    image: ghcr.io/nvorkinn/countdown-server:${COUNTDOWN_SERVER_VERSION:-latest}
     container_name: spotify-provider
     logging: *logging
     # Host networking, to reach Redis on 127.0.0.1:6379.
@@ -92,7 +92,7 @@ services:
   # ./data is mounted :ro.
   developer-provider:
     <<: *release-image
-    image: ghcr.io/nvorkinn/auth-broker:${AUTH_BROKER_VERSION:-latest}
+    image: ghcr.io/nvorkinn/countdown-server:${COUNTDOWN_SERVER_VERSION:-latest}
     container_name: developer-provider
     logging: *logging
     # Host networking, to reach Redis on 127.0.0.1:6379.
@@ -108,7 +108,7 @@ services:
 
   caddy:
     <<: *release-image
-    image: ghcr.io/nvorkinn/auth-broker-caddy:${CADDY_VERSION:-latest}
+    image: ghcr.io/nvorkinn/countdown-server-caddy:${CADDY_VERSION:-latest}
     container_name: caddy
     logging: *logging
     env_file: caddy.env
@@ -128,7 +128,7 @@ services:
   # VictoriaMetrics.
   fluent-bit:
     <<: *release-image
-    image: ghcr.io/nvorkinn/auth-broker-fluent-bit:${FLUENT_BIT_VERSION:-latest}
+    image: ghcr.io/nvorkinn/countdown-server-fluent-bit:${FLUENT_BIT_VERSION:-latest}
     container_name: fluent-bit
     logging: *logging
     network_mode: host
@@ -140,7 +140,7 @@ services:
   # logs.nikolaivorkinn.com: ingest with the ingest token, the UI to admins.
   victoria-logs:
     <<: *release-image
-    image: ghcr.io/nvorkinn/auth-broker-victoria-logs:${VICTORIA_LOGS_VERSION:-latest}
+    image: ghcr.io/nvorkinn/countdown-server-victoria-logs:${VICTORIA_LOGS_VERSION:-latest}
     container_name: victoria-logs
     logging: *logging
     network_mode: host
@@ -153,7 +153,7 @@ services:
   # metrics.nikolaivorkinn.com: ingest with the ingest token, the UI to admins.
   victoria-metrics:
     <<: *release-image
-    image: ghcr.io/nvorkinn/auth-broker-victoria-metrics:${VICTORIA_METRICS_VERSION:-latest}
+    image: ghcr.io/nvorkinn/countdown-server-victoria-metrics:${VICTORIA_METRICS_VERSION:-latest}
     container_name: victoria-metrics
     logging: *logging
     network_mode: host
@@ -206,7 +206,7 @@ services:
   # read-only. Host networking for Redis on 127.0.0.1:6379.
   glow-provider:
     <<: *release-image
-    image: ghcr.io/nvorkinn/auth-broker:${AUTH_BROKER_VERSION:-latest}
+    image: ghcr.io/nvorkinn/countdown-server:${COUNTDOWN_SERVER_VERSION:-latest}
     container_name: glow-provider
     logging: *logging
     network_mode: host

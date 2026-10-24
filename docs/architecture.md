@@ -10,7 +10,7 @@ it; [the database](database.md) has the tables.
 | **Screen** | [countdown-esp32](https://github.com/nvorkinn/countdown-esp32) | An ESP32 driving a 7.5" 800x480 black-and-white e-paper panel. Registers with the broker, then polls it for finished frames. It draws nothing itself. |
 | **Render pool** | [pi-dashboard](https://github.com/nvorkinn/pi-dashboard), on the same host | Workers and a ticker. Draws every screen in `v1:render:screens` from its config and panel data in Redis, and writes the frame back to Redis. It never calls the broker. |
 | **pi-dashboard's providers** | pi-dashboard, on the same host | Fetch TfL, Entur, weather and notice data for the stops and places in the broker's subscriptions, into Redis. |
-| **auth-broker** | this repository | Device identities, pairing, settings, linked accounts, the configs and subscriptions in Redis, and serving frames. State is one SQLite file. |
+| **countdown-server** (the broker) | this repository | Device identities, pairing, settings, linked accounts, the configs and subscriptions in Redis, and serving frames. State is one SQLite file. |
 | **The broker's providers** | this repository, the broker's image | glow (energy), spotify (Spotify and Apple Music) and developer (GitHub). They need credentials only the broker holds, so they run here. |
 | **Caddy** | this repository | TLS, routing, and the authentik sign-in gate for browser pages. |
 | **authentik** | this repository (`terraform/`) | Sign-in, sign-up, passkeys and Google login. Its embedded outpost answers Caddy's forward auth. |
@@ -29,7 +29,7 @@ flowchart TB
     ESP["ESP32 screen"]
     CD["Caddy"]
     AK["authentik"]
-    subgraph broker["auth-broker"]
+    subgraph broker["countdown-server"]
         BR["Flask app"]
         DB[("SQLite")]
         BP["Providers: glow,<br/>spotify, developer"]
@@ -107,7 +107,7 @@ sequenceDiagram
     participant S as ESP32 screen
     participant P as Phone
     participant A as authentik
-    participant B as auth-broker
+    participant B as Broker
     participant R as Redis and render pool
 
     P->>S: joins its setup access point, enters the Wi-Fi details
@@ -138,7 +138,7 @@ sequenceDiagram
     autonumber
     participant S as ESP32 screen
     participant P as Phone
-    participant B as auth-broker
+    participant B as Broker
 
     P->>B: POST /pair/token
     B-->>P: 202 waiting
@@ -163,7 +163,7 @@ none is live, so it always has one to show.
 sequenceDiagram
     autonumber
     participant S as ESP32 screen
-    participant B as auth-broker
+    participant B as Broker
     participant R as Redis
     participant W as Render pool
     participant P as Phone
@@ -203,7 +203,7 @@ frames from the broker: the pairing screen is one of them.
 sequenceDiagram
     autonumber
     participant S as Screen
-    participant B as auth-broker
+    participant B as Broker
     participant D as Redis
     participant W as Render pool
 
@@ -232,7 +232,7 @@ sequenceDiagram
 sequenceDiagram
     autonumber
     participant P as Phone
-    participant B as auth-broker
+    participant B as Broker
     participant D as Redis
     participant W as Render pool
 

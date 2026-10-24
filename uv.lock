@@ -26,73 +26,6 @@ wheels = [
 ]
 
 [[package]]
-name = "auth-broker"
-version = "0.0.0"
-source = { virtual = "." }
-dependencies = [
-    { name = "alembic" },
-    { name = "click" },
-    { name = "countdown-api" },
-    { name = "cryptography" },
-    { name = "flask" },
-    { name = "flask-migrate" },
-    { name = "flask-sqlalchemy" },
-    { name = "gunicorn" },
-    { name = "maxminddb" },
-    { name = "pydantic" },
-    { name = "pyyaml" },
-    { name = "redis" },
-    { name = "requests" },
-    { name = "sqlalchemy" },
-    { name = "tzdata" },
-    { name = "werkzeug" },
-]
-
-[package.dev-dependencies]
-dev = [
-    { name = "fakeredis", extra = ["lua"] },
-    { name = "pytest" },
-    { name = "pytest-cov" },
-    { name = "pytest-shard" },
-    { name = "pytest-xdist" },
-    { name = "responses" },
-    { name = "ruff" },
-    { name = "ty" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "alembic" },
-    { name = "click" },
-    { name = "countdown-api", editable = "vendor/countdown-api" },
-    { name = "cryptography" },
-    { name = "flask" },
-    { name = "flask-migrate" },
-    { name = "flask-sqlalchemy" },
-    { name = "gunicorn" },
-    { name = "maxminddb" },
-    { name = "pydantic" },
-    { name = "pyyaml" },
-    { name = "redis" },
-    { name = "requests" },
-    { name = "sqlalchemy" },
-    { name = "tzdata" },
-    { name = "werkzeug" },
-]
-
-[package.metadata.requires-dev]
-dev = [
-    { name = "fakeredis", extras = ["lua"] },
-    { name = "pytest" },
-    { name = "pytest-cov" },
-    { name = "pytest-shard" },
-    { name = "pytest-xdist" },
-    { name = "responses" },
-    { name = "ruff", specifier = "==0.17.1" },
-    { name = "ty", specifier = "==0.0.91" },
-]
-
-[[package]]
 name = "blinker"
 version = "1.9.0"
 source = { registry = "https://pypi.org/simple" }
@@ -299,6 +232,73 @@ dev = [
     { name = "pre-commit" },
     { name = "pytest", specifier = ">=8.4" },
     { name = "ruff" },
+]
+
+[[package]]
+name = "countdown-server"
+version = "0.0.0"
+source = { virtual = "." }
+dependencies = [
+    { name = "alembic" },
+    { name = "click" },
+    { name = "countdown-api" },
+    { name = "cryptography" },
+    { name = "flask" },
+    { name = "flask-migrate" },
+    { name = "flask-sqlalchemy" },
+    { name = "gunicorn" },
+    { name = "maxminddb" },
+    { name = "pydantic" },
+    { name = "pyyaml" },
+    { name = "redis" },
+    { name = "requests" },
+    { name = "sqlalchemy" },
+    { name = "tzdata" },
+    { name = "werkzeug" },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "fakeredis", extra = ["lua"] },
+    { name = "pytest" },
+    { name = "pytest-cov" },
+    { name = "pytest-shard" },
+    { name = "pytest-xdist" },
+    { name = "responses" },
+    { name = "ruff" },
+    { name = "ty" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "alembic" },
+    { name = "click" },
+    { name = "countdown-api", editable = "vendor/countdown-api" },
+    { name = "cryptography" },
+    { name = "flask" },
+    { name = "flask-migrate" },
+    { name = "flask-sqlalchemy" },
+    { name = "gunicorn" },
+    { name = "maxminddb" },
+    { name = "pydantic" },
+    { name = "pyyaml" },
+    { name = "redis" },
+    { name = "requests" },
+    { name = "sqlalchemy" },
+    { name = "tzdata" },
+    { name = "werkzeug" },
+]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "fakeredis", extras = ["lua"] },
+    { name = "pytest" },
+    { name = "pytest-cov" },
+    { name = "pytest-shard" },
+    { name = "pytest-xdist" },
+    { name = "responses" },
+    { name = "ruff", specifier = "==0.17.1" },
+    { name = "ty", specifier = "==0.0.91" },
 ]
 
 [[package]]

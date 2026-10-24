@@ -25,14 +25,15 @@ def _on_broker_image() -> dict[str, dict]:
     return {
         name: service
         for name, service in COMPOSE["services"].items()
-        if service.get("image", "").startswith("ghcr.io/nvorkinn/auth-broker:")
+        if service.get("image", "").startswith("ghcr.io/nvorkinn/countdown-server:")
     }
 
 
 def test_it_knows_how_every_service_on_the_broker_image_shows_it_has_started():
     """Else the image job fails on the new service: each needs its line in STARTED."""
     assert set(check_image_starts.STARTED) == set(_on_broker_image())
-    assert next(iter(check_image_starts.STARTED)) == "auth-broker"  # first: it migrates the database the others read
+    # First: it migrates the database the others read.
+    assert next(iter(check_image_starts.STARTED)) == "countdown-server"
 
 
 def test_a_service_is_started_with_compose_s_command_network_environment_and_mounts(tmp_path):
@@ -49,10 +50,10 @@ def test_a_service_is_started_with_compose_s_command_network_environment_and_mou
 
 
 def test_the_broker_gets_its_compose_environment_too(tmp_path):
-    options = check_image_starts.run_options("auth-broker", _on_broker_image()["auth-broker"], tmp_path)
+    options = check_image_starts.run_options("countdown-server", _on_broker_image()["countdown-server"], tmp_path)
 
     assert "--env=SPOTIFY_REDIRECT_URI=https://auth.nikolaivorkinn.com/auth/spotify/callback" in options
-    assert check_image_starts.command(_on_broker_image()["auth-broker"])[0] == "gunicorn"
+    assert check_image_starts.command(_on_broker_image()["countdown-server"])[0] == "gunicorn"
 
 
 def test_the_stand_in_secrets_are_ones_the_real_env_files_have():

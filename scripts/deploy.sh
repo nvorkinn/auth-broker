@@ -4,7 +4,7 @@
 # /opt/auth-broker/releases/<tag>/ and runs it. It installs the bundled
 # docker-compose.yml, pins the service to the tag in .env, then pulls and
 # recreates just that service.
-# Usage: deploy.sh <auth-broker|caddy|fluent-bit|victoria-logs|victoria-metrics|redis|authentik> <tag>
+# Usage: deploy.sh <countdown-server|caddy|fluent-bit|victoria-logs|victoria-metrics|redis|authentik> <tag>
 #
 # Every secrets/<name>.env in the bundle is decrypted on every deploy, with the
 # host's age key, into <name>.env next to the compose file (compose won't load
@@ -35,11 +35,13 @@ var=
 case "$service" in
   # This repo's images, each pinned by <SERVICE>_VERSION in .env, e.g.
   # fluent-bit -> FLUENT_BIT_VERSION.
-  auth-broker | caddy | fluent-bit | victoria-logs | victoria-metrics)
+  countdown-server | caddy | fluent-bit | victoria-logs | victoria-metrics)
     var="${service^^}"
     var="${var//-/_}_VERSION"
-    # The providers run the broker's image (and so its AUTH_BROKER_VERSION), so they're recreated with it.
-    if [ "$service" = auth-broker ]; then services=(auth-broker glow-provider spotify-provider developer-provider); fi
+    # The providers run the broker's image (and so its COUNTDOWN_SERVER_VERSION), so they're recreated with it.
+    if [ "$service" = countdown-server ]; then
+      services=(countdown-server glow-provider spotify-provider developer-provider)
+    fi
     ;;
   authentik) services=(authentik-postgresql authentik-server authentik-worker) ;;
   redis) ;;
@@ -73,9 +75,17 @@ for encrypted in "$bundle"/secrets/*.env; do
 done
 
 DB_BACKUPS_KEPT=5
-if [ "$service" = auth-broker ] && docker inspect -f '{{.State.Running}}' auth-broker 2>/dev/null | grep -q true; then
+# The broker's running container: auth-broker is its name from before the repo was renamed, still running on the
+# first deploy under the new one.
+broker=
+if [ "$service" = countdown-server ]; then
+  for name in countdown-server auth-broker; do
+    if docker inspect -f '{{.State.Running}}' "$name" 2>/dev/null | grep -q true; then broker="$name"; break; fi
+  done
+fi
+if [ -n "$broker" ]; then
   # SQLite's backup API, so the copy is consistent even mid-write.
-  docker exec auth-broker python -c "
+  docker exec "$broker" python -c "
 import sqlite3
 src = sqlite3.connect('/app/data/broker.db')
 src.backup(sqlite3.connect('/app/data/broker.db.bak-$tag'))
@@ -110,7 +120,8 @@ fi
   fi
   # Keep only the version pins: secrets are in the *.env files and settings
   # in the compose file.
-  (umask 077 && grep -E '^[A-Z0-9_]+_VERSION=' .env > .env.tmp || true)
+  # AUTH_BROKER_VERSION is the broker's pin from before the rename (now COUNTDOWN_SERVER_VERSION).
+  (umask 077 && grep -E '^[A-Z0-9_]+_VERSION=' .env | grep -v '^AUTH_BROKER_VERSION=' > .env.tmp || true)
   mv .env.tmp .env
   if [ -n "$var" ]; then
     if grep -q "^$var=" .env; then
@@ -123,6 +134,11 @@ fi
 echo "Installed $tag's docker-compose.yml${var:+ and pinned $var=$tag in .env}"
 
 docker compose pull "${services[@]}"
+if [ "$service" = countdown-server ]; then
+  # The broker's container from before the rename, which compose no longer knows: it holds 127.0.0.1:5000, so the
+  # new one couldn't start beside it.
+  docker rm --force auth-broker >/dev/null 2>&1 && echo "Removed the old auth-broker container" || true
+fi
 if [ -n "$var" ]; then
   docker compose up -d --no-deps --force-recreate "${services[@]}"
 else
@@ -145,11 +161,19 @@ for image in $(docker compose config --images "${services[@]}" | sort -u); do
     while read -r old; do
       docker image rm "$old" >/dev/null 2>&1 && echo "Removed old image $old" || true
     done
+  # And every tag of this repo's image from before the rename (ghcr.io/nvorkinn/auth-broker*), now that nothing
+  # runs it.
+  old_repo="${repo/\/countdown-server/\/auth-broker}"
+  if [ "$old_repo" != "$repo" ]; then
+    docker images "$old_repo" --format '{{.Repository}}:{{.Tag}}' | while read -r old; do
+      docker image rm "$old" >/dev/null 2>&1 && echo "Removed old image $old" || true
+    done
+  fi
 done
 # Layers left untagged by the above or by re-pulled tags.
 docker image prune -f >/dev/null
 
-if [ "$service" = auth-broker ]; then
+if [ "$service" = countdown-server ]; then
   # A check that the database came through.
-  docker exec auth-broker flask --app wsgi devices list
+  docker exec countdown-server flask --app wsgi devices list
 fi

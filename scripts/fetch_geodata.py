@@ -33,7 +33,7 @@ SKIPPED_FEATURE_CODES = {"PPLX", "PPLH", "PPLQ", "PPLW", "PPLCH"}
 
 
 # DB-IP answers 403 to urllib's default "Python-urllib" agent.
-USER_AGENT = "auth-broker-build (+https://github.com/nvorkinn/auth-broker)"
+USER_AGENT = "countdown-server-build (+https://github.com/nvorkinn/countdown-server)"
 
 
 def _open(url: str) -> HTTPResponse:
