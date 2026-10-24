@@ -21,7 +21,7 @@ if TYPE_CHECKING:
     from gunicorn.http.wsgi import Response
 
 LEVELS = {"WARNING": "warn", "CRITICAL": "fatal"}
-SOURCE = "auth-broker"
+SOURCE = "countdown-server"
 
 
 class JsonFormatter(logging.Formatter):

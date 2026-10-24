@@ -2,15 +2,15 @@
 
 Run them inside the container:
 
-docker exec auth-broker flask --app wsgi devices list
-docker exec auth-broker flask --app wsgi devices code <device_id>
-docker exec auth-broker flask --app wsgi devices owner <device_id> <user id>
-docker exec auth-broker flask --app wsgi devices unpair <device_id> [--config]
-docker exec auth-broker flask --app wsgi devices forget <device_id>
-docker exec auth-broker flask --app wsgi weather backfill
-docker exec auth-broker flask --app wsgi config publish
-docker exec auth-broker flask --app wsgi redis subs [source]
-docker exec auth-broker flask --app wsgi redis keys [pattern] [--limit N]
+docker exec countdown-server flask --app wsgi devices list
+docker exec countdown-server flask --app wsgi devices code <device_id>
+docker exec countdown-server flask --app wsgi devices owner <device_id> <user id>
+docker exec countdown-server flask --app wsgi devices unpair <device_id> [--config]
+docker exec countdown-server flask --app wsgi devices forget <device_id>
+docker exec countdown-server flask --app wsgi weather backfill
+docker exec countdown-server flask --app wsgi config publish
+docker exec countdown-server flask --app wsgi redis subs [source]
+docker exec countdown-server flask --app wsgi redis keys [pattern] [--limit N]
 
 Like any `flask` command it loads the app, so it needs the app's env vars (the container has them).
 """

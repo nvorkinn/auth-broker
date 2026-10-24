@@ -26,13 +26,13 @@ from http import HTTPStatus
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-IMAGE_NAME = "ghcr.io/nvorkinn/auth-broker"
+IMAGE_NAME = "ghcr.io/nvorkinn/countdown-server"
 
 # How each service on the broker's image shows it has started: a URL that answers 200, or a line it logs once it's
 # running (and handles SIGTERM). In start order: the broker first, as it creates and migrates the database the
 # providers read. The check fails on a service compose has and this hasn't, so a new one gets a line here.
 STARTED = {
-    "auth-broker": "http://127.0.0.1:5000/about",
+    "countdown-server": "http://127.0.0.1:5000/about",
     "spotify-provider": "Starting the music provider",
     "developer-provider": "Starting the developer provider",
     "glow-provider": "Starting the glow provider",

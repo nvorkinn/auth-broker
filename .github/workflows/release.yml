@@ -69,15 +69,15 @@ jobs:
     strategy:
       matrix:
         include:
-          - image: auth-broker
+          - image: countdown-server
             context: .
-          - image: auth-broker-caddy
+          - image: countdown-server-caddy
             context: caddy
-          - image: auth-broker-fluent-bit
+          - image: countdown-server-fluent-bit
             context: fluent-bit
-          - image: auth-broker-victoria-logs
+          - image: countdown-server-victoria-logs
             context: victoria-logs
-          - image: auth-broker-victoria-metrics
+          - image: countdown-server-victoria-metrics
             context: victoria-metrics
     env:
       IMAGE: ghcr.io/${{ github.repository_owner }}/${{ matrix.image }}
@@ -166,7 +166,7 @@ jobs:
       matrix:
         include:
           - service: caddy
-          - service: auth-broker
+          - service: countdown-server
           - service: fluent-bit
           - service: victoria-logs
           - service: victoria-metrics

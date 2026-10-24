@@ -1,4 +1,4 @@
-# auth-broker
+# countdown-server
 
 The backend for **countdown**, the e-paper screens (an ESP32 driving a Waveshare panel) whose frames are drawn by
 [pi-dashboard](https://github.com/nvorkinn/pi-dashboard)'s render pool. It:
@@ -19,11 +19,11 @@ It also serves a personal [GitHub dashboard](#github-dashboard) at `/github`.
 
 ## Services
 
-Everything runs from `docker-compose.yml` on one host, in `/opt/auth-broker/`.
+Everything runs from `docker-compose.yml` on one host, in `/opt/auth-broker/` (the repo's name before it became countdown-server).
 
 | Service | What it does |
 |---|---|
-| `auth-broker` | The Flask app (gunicorn on `127.0.0.1:5000`). State is one SQLite file, `data/broker.db`. |
+| `countdown-server` | The Flask app (gunicorn on `127.0.0.1:5000`). State is one SQLite file, `data/broker.db`. |
 | `glow-provider` | Fetches each screen's electricity readings from Glowmarkt every 15 minutes into `v1:energy:<device id>`. |
 | `spotify-provider` | Fetches what each screen's Spotify and Apple Music are playing (every minute), their top lists (every 30 minutes) and the playing tracks' covers. |
 | `developer-provider` | Polls each screen's GitHub and AI plans for the developer panel (every 2 minutes, every 20 seconds while a release runs). |
@@ -184,7 +184,7 @@ rest:
 Python 3.14 and [uv](https://docs.astral.sh/uv/). Clone with the submodule:
 
 ```bash
-git clone --recurse-submodules https://github.com/nvorkinn/auth-broker.git   # or: git submodule update --init
+git clone --recurse-submodules https://github.com/nvorkinn/countdown-server.git   # or: git submodule update --init
 uv sync && source .venv/bin/activate
 cp secrets/broker.env.example .env   # fill in Spotify app credentials, FLASK_SECRET_KEY and CREDENTIAL_ENCRYPTION_KEY
 export SPOTIFY_REDIRECT_URI=https://auth.nikolaivorkinn.com/auth/spotify/callback
@@ -229,7 +229,7 @@ run on the loop in `broker/providers/loop.py`. `tests/` mirrors it.
 
 ## Admin commands
 
-Run on the host with `docker exec auth-broker flask --app wsgi <command>`:
+Run on the host with `docker exec countdown-server flask --app wsgi <command>`:
 
 | Command | Does |
 |---|---|
@@ -248,11 +248,11 @@ Each change to a device's pairing also updates its config in Redis and queues a 
 Run the **Release** workflow from the Actions tab on `main`, picking `patch`, `minor` or `major` (or push a `v*` tag).
 It builds five images for arm64 (the host is ARM) on an ARM runner, tagged with the release and `latest`:
 
-- `ghcr.io/nvorkinn/auth-broker` (the broker and the providers)
-- `ghcr.io/nvorkinn/auth-broker-caddy` (with `caddy/Caddyfile`)
-- `ghcr.io/nvorkinn/auth-broker-fluent-bit` (with `fluent-bit/`)
-- `ghcr.io/nvorkinn/auth-broker-victoria-logs`
-- `ghcr.io/nvorkinn/auth-broker-victoria-metrics` (with the vmui dashboards)
+- `ghcr.io/nvorkinn/countdown-server` (the broker and the providers)
+- `ghcr.io/nvorkinn/countdown-server-caddy` (with `caddy/Caddyfile`)
+- `ghcr.io/nvorkinn/countdown-server-fluent-bit` (with `fluent-bit/`)
+- `ghcr.io/nvorkinn/countdown-server-victoria-logs`
+- `ghcr.io/nvorkinn/countdown-server-victoria-metrics` (with the vmui dashboards)
 
 It also attaches a deploy bundle to the release (`docker-compose.yml`, `scripts/deploy.sh`, the encrypted secrets and
 authentik's brand assets), then waits for approval of two sets of deploy jobs:
@@ -312,7 +312,7 @@ the only state worth backing up. Caddy's certificates are in the `caddy_data` vo
 Fluent Bit tails every container's log and ships it to VictoriaLogs, which keeps a week. The broker posts the
 screens' logs there itself (`service=countdown-esp32`, `host=<device id>`). Our own services write JSON lines with
 `level` and `_msg`; every record gets `service` (for containers, the container name) and `host`. Browse at
-`https://logs.nikolaivorkinn.com/select/vmui` (authentik admins only), e.g. `{service="auth-broker"}`.
+`https://logs.nikolaivorkinn.com/select/vmui` (authentik admins only), e.g. `{service="countdown-server"}`.
 
 ### Metrics
 
@@ -362,7 +362,7 @@ on: pull_request
 permissions: {actions: read, checks: read}
 jobs:
   all-checks:
-    uses: nvorkinn/auth-broker/.github/workflows/all-checks.yml@main
+    uses: nvorkinn/countdown-server/.github/workflows/all-checks.yml@main
 ```
 
 ```yaml
@@ -374,7 +374,7 @@ on:
 permissions: {contents: read, pull-requests: write, checks: read, actions: read}
 jobs:
   auto-approve:
-    uses: nvorkinn/auth-broker/.github/workflows/auto_approve.yml@main
+    uses: nvorkinn/countdown-server/.github/workflows/auto_approve.yml@main
 ```
 
 Pin a commit SHA instead of `@main` for stability. Keep the approval workflow named `Auto-approve PRs` (or pass its name

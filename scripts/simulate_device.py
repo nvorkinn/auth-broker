@@ -49,5 +49,5 @@ if args.token:
     print("\nThe /pair page should now pair and move on.")
 else:
     device_id = register.json()["device_id"]
-    print(f"\nFor a pairing code: `docker exec auth-broker flask --app wsgi devices code {device_id}`")
+    print(f"\nFor a pairing code: `docker exec countdown-server flask --app wsgi devices code {device_id}`")
     print(f"(locally: `flask --app wsgi devices code {device_id}`), then enter it at {base_url}/pair")
