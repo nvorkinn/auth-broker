@@ -1,10 +1,10 @@
 name: All checks
 
-# Completes the "Global PR Status" check (opened by Create Global PR Status) on a pull request's head commit. It is
-# the one check branch protection requires: other workflows only run when their paths change, so requiring them
-# directly blocks every PR that doesn't touch them. Each workflow listed below ends by running this once, and it looks
-# at everything on the commit: if something is still running, the last workflow to finish runs it again; if everything
-# passed, the check succeeds; if anything failed, it fails. Add a workflow that runs on pull requests to the list.
+# The one check branch protection requires is "Global PR Status", opened by Create Global PR Status and completed by
+# this once every other workflow and check on the commit has passed. The logic is shared: see
+# nvorkinn/.github/.github/workflows/all-checks.yml. Each workflow listed here ends by running this once; add a workflow
+# that runs on pull requests to the list (a test fails until you do), except Auto-approve PRs, which waits for the
+# status check.
 on:
   workflow_run:
     workflows: [ Create Global PR Status, Tests, Terraform, CodeQL ]
@@ -16,64 +16,6 @@ permissions:
 
 jobs:
   all-checks:
-    name: all-checks
-    runs-on: ubuntu-latest
-    # CodeQL's default setup runs with the event "dynamic".
-    if: contains(fromJSON('["pull_request", "dynamic"]'), github.event.workflow_run.event)
-    timeout-minutes: 5
-    steps:
-      - name: Settle the Global PR Status check
-        shell: bash
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          REPO: ${{ github.repository }}
-          SHA: ${{ github.event.workflow_run.head_sha }}
-          WORKFLOW_NAME: ${{ github.workflow }}
-          # Auto-approve waits for the Global PR Status check, so waiting on it would deadlock.
-          AUTO_APPROVE_WORKFLOW: Auto-approve PRs
-          # The status check itself is in progress until this finishes. Reusable jobs can have "caller / " prefixes.
-          IGNORED_CHECKS: '["all-checks","auto-approve","Global PR Status"]'
-        run: |
-          # The check run's ID comes from the latest Create Global PR Status run for this commit.
-          status_run=$(gh api "repos/$REPO/actions/workflows/create_global_pr_status.yml/runs?head_sha=$SHA&per_page=1" \
-            --jq '.workflow_runs[0] | select(.status == "completed") | .id')
-          if [ -z "$status_run" ]; then
-            echo "::notice::Create Global PR Status hasn't finished for $SHA; its own completion runs this again."
-            exit 0
-          fi
-          gh run download "$status_run" --repo "$REPO" --name global-pr-status --dir global-pr-status
-          check_run=$(< global-pr-status/check-run-id)
-
-          ok='["success","skipped","neutral"]'
-          runs=$(gh api --paginate "repos/$REPO/actions/runs?head_sha=$SHA&per_page=100" |
-            jq -s --arg workflow "$WORKFLOW_NAME" --arg approval "$AUTO_APPROVE_WORKFLOW" '
-              [.[].workflow_runs[] | select(.name != $workflow and .name != $approval)]
-              | group_by([.workflow_id, .event]) | map(max_by(.id))
-              | map({name, status, conclusion, url: .html_url})')
-          checks=$(gh api --paginate "repos/$REPO/commits/$SHA/check-runs?filter=latest&per_page=100" |
-            jq -s --argjson ignored "$IGNORED_CHECKS" '
-              [.[].check_runs[] | select(.name | split(" / ")[-1] | IN($ignored[]) | not)]
-              | group_by(.name) | map(max_by(.id))
-              | map({name, status, conclusion, url: .html_url})')
-
-          failed=$(jq -n --argjson ok "$ok" --argjson runs "$runs" --argjson checks "$checks" \
-            '[$runs[], $checks[] | select(.status == "completed" and (.conclusion | IN($ok[]) | not))]')
-          if [ "$(jq length <<<"$failed")" -gt 0 ]; then
-            echo "::error::Some checks didn't pass:"
-            jq -r '.[] | "  \(.name): \(.conclusion) \(.url)"' <<<"$failed"
-            gh api --method PATCH "repos/$REPO/check-runs/$check_run" -f status=completed -f conclusion=failure \
-              -f 'output[title]=Some checks failed' \
-              -f "output[summary]=$(jq -r '.[] | "- \(.name): \(.conclusion) \(.url)"' <<<"$failed")" --jq .conclusion
-            exit 0
-          fi
-
-          pending=$(jq -n --argjson runs "$runs" --argjson checks "$checks" \
-            '[$runs[], $checks[] | select(.status != "completed") | .name]')
-          if [ "$(jq length <<<"$pending")" -gt 0 ]; then
-            echo "Still running: $(jq -r 'join(", ")' <<<"$pending"). The last of them to finish runs this again."
-            exit 0
-          fi
-
-          echo "All checks passed:"
-          jq -r '.[] | "  \(.name): \(.conclusion)"' <<<"$checks"
-          gh api --method PATCH "repos/$REPO/check-runs/$check_run" -f status=completed -f conclusion=success --jq .conclusion
+    uses: nvorkinn/.github/.github/workflows/all-checks.yml@3d6b3965576e0a41776d8d9129da734ba6a1fc60 # main
+    with:
+      create-workflow-file: create_global_pr_status.yml
