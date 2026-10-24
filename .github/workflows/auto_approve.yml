@@ -35,6 +35,6 @@ jobs:
     needs: [terraform, tests]
     # terraform is skipped when terraform/ is untouched, which would otherwise skip this too.
     if: ${{ !failure() && !cancelled() }}
-    uses: nvorkinn/.github/.github/workflows/auto-approve.yml@3d3c42e5aac5ba805825da76410c181273ba90b1 # main
+    uses: nvorkinn/.github/.github/workflows/auto-approve.yml@fa799897aacb4179606bcb9245183cb418a0f7e3 # main
     # Inherit secrets if you decide to use a custom PAT later,
     # though GITHUB_TOKEN permissions from the template work perfectly here.
